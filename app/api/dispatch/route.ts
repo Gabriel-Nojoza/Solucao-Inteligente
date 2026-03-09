@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
+import { getRequestContext } from "@/lib/tenant"
 
 export async function POST(request: NextRequest) {
+  const { companyId } = await getRequestContext()
   const supabase = createClient()
   const body = await request.json()
   const { schedule_id } = body
@@ -14,6 +16,7 @@ export async function POST(request: NextRequest) {
   const { data: schedule } = await supabase
     .from("schedules")
     .select("*")
+    .eq("company_id", companyId)
     .eq("id", schedule_id)
     .single()
 
@@ -24,6 +27,7 @@ export async function POST(request: NextRequest) {
   const { data: report } = await supabase
     .from("reports")
     .select("*, workspaces!inner(pbi_workspace_id)")
+    .eq("company_id", companyId)
     .eq("id", schedule.report_id)
     .single()
 
@@ -40,6 +44,7 @@ export async function POST(request: NextRequest) {
   const { data: contacts } = await supabase
     .from("contacts")
     .select("*")
+    .eq("company_id", companyId)
     .in("id", contactIds)
     .eq("is_active", true)
 
@@ -49,8 +54,9 @@ export async function POST(request: NextRequest) {
 
   // Get N8N webhook URL from settings
   const { data: n8nSettings } = await supabase
-    .from("settings")
+    .from("company_settings")
     .select("value")
+    .eq("company_id", companyId)
     .eq("key", "n8n")
     .single()
 
@@ -64,6 +70,7 @@ export async function POST(request: NextRequest) {
 
   // Create dispatch logs
   const logs = contacts.map((c) => ({
+    company_id: companyId,
     schedule_id: schedule.id,
     report_name: report.name,
     contact_name: c.name,
@@ -108,6 +115,7 @@ export async function POST(request: NextRequest) {
       await supabase
         .from("dispatch_logs")
         .update({ status: "sending" })
+        .eq("company_id", companyId)
         .eq("id", log.id)
     }
 
@@ -115,6 +123,7 @@ export async function POST(request: NextRequest) {
     await supabase
       .from("schedules")
       .update({ last_run_at: new Date().toISOString() })
+      .eq("company_id", companyId)
       .eq("id", schedule_id)
 
   } catch (error) {
@@ -127,6 +136,7 @@ export async function POST(request: NextRequest) {
           error_message: error instanceof Error ? error.message : "Erro no webhook",
           completed_at: new Date().toISOString(),
         })
+        .eq("company_id", companyId)
         .eq("id", log.id)
     }
   }

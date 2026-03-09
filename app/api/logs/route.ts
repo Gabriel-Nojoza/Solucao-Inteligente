@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
+import { getRequestContext } from "@/lib/tenant"
 
 export async function GET(request: NextRequest) {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
     const { searchParams } = new URL(request.url)
 
@@ -19,6 +21,7 @@ export async function GET(request: NextRequest) {
       let query = supabase
         .from("dispatch_logs")
         .select("*", { count: "exact" })
+        .eq("company_id", companyId)
         .order(orderColumn, { ascending: false })
         .range(offset, offset + limit - 1)
 

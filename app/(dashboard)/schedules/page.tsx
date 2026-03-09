@@ -63,6 +63,9 @@ export default function SchedulesPage() {
   >("/api/schedules", fetcher)
   const { data: reports } = useSWR<Report[]>("/api/reports", fetcher)
   const { data: contacts } = useSWR<Contact[]>("/api/contacts", fetcher)
+  const scheduleList = Array.isArray(schedules) ? schedules : []
+  const reportList = Array.isArray(reports) ? reports : []
+  const contactList = Array.isArray(contacts) ? contacts : []
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -213,7 +216,7 @@ export default function SchedulesPage() {
                   <Skeleton key={i} className="h-12 rounded" />
                 ))}
               </div>
-            ) : !schedules || schedules.length === 0 ? (
+            ) : scheduleList.length === 0 ? (
               <div className="flex flex-col items-center gap-4 py-12">
                 <Clock className="size-12 text-muted-foreground" />
                 <div className="text-center">
@@ -238,7 +241,7 @@ export default function SchedulesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {schedules.map((schedule) => (
+                  {scheduleList.map((schedule) => (
                     <TableRow key={schedule.id}>
                       <TableCell className="font-medium">{schedule.name}</TableCell>
                       <TableCell className="hidden text-muted-foreground sm:table-cell">
@@ -355,7 +358,7 @@ export default function SchedulesPage() {
                   <SelectValue placeholder="Selecionar relatorio" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(reports ?? []).map((r) => (
+                  {reportList.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}
                     </SelectItem>
@@ -399,13 +402,13 @@ export default function SchedulesPage() {
             <div className="flex flex-col gap-2">
               <Label>Contatos ({formContactIds.length} selecionado(s))</Label>
               <div className={`max-h-[160px] overflow-y-auto rounded-lg border p-3 ${formErrors.contacts ? "border-destructive" : ""}`}>
-                {(contacts ?? []).filter((c) => c.is_active).length === 0 ? (
+                {contactList.filter((c) => c.is_active).length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Nenhum contato ativo. Crie contatos primeiro.
                   </p>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {(contacts ?? [])
+                    {contactList
                       .filter((c) => c.is_active)
                       .map((c) => (
                         <label

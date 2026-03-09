@@ -96,7 +96,7 @@ export function TablesPanel({
           <Table2 className="size-4 text-primary" />
           <h3 className="text-sm font-semibold">TABELAS</h3>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-            {visibleTables.length}cols
+            {visibleTables.length}
           </span>
         </div>
         <TooltipProvider>

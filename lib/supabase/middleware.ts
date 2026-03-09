@@ -12,13 +12,13 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           )
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, options as Parameters<typeof supabaseResponse.cookies.set>[2])
           )
         },
       },
@@ -56,7 +56,7 @@ export async function updateSession(request: NextRequest) {
 
   // Protect admin routes - only allow admin users
   if (user && request.nextUrl.pathname.startsWith("/admin")) {
-    const role = user.user_metadata?.role
+    const role = user.app_metadata?.role || user.user_metadata?.role
     if (role !== "admin") {
       const url = request.nextUrl.clone()
       url.pathname = "/"

@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   Users,
-  Settings,
   Shield,
   Moon,
   Sun,
@@ -30,7 +29,6 @@ import {
 const adminNav = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { title: "Usuarios", href: "/admin/users", icon: Users },
-  { title: "Configuracoes", href: "/admin/settings", icon: Settings },
 ]
 
 export function AdminSidebar() {

@@ -4,10 +4,13 @@ import { Separator } from "@/components/ui/separator"
 interface PageHeaderProps {
   title: string
   description?: string
+  action?: React.ReactNode
   children?: React.ReactNode
 }
 
-export function PageHeader({ title, description, children }: PageHeaderProps) {
+export function PageHeader({ title, description, action, children }: PageHeaderProps) {
+  const content = action ?? children
+
   return (
     <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
       <SidebarTrigger className="-ml-2" />
@@ -23,8 +26,8 @@ export function PageHeader({ title, description, children }: PageHeaderProps) {
             </p>
           )}
         </div>
-        {children && (
-          <div className="flex items-center gap-2">{children}</div>
+        {content && (
+          <div className="flex items-center gap-2">{content}</div>
         )}
       </div>
     </header>

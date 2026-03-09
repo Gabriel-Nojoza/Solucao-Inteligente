@@ -1,13 +1,16 @@
 import { createClient } from "@/lib/supabase/server"
 import type { PowerBIConfig } from "@/lib/types"
+import { getRequestContext } from "@/lib/tenant"
 
 const PBI_API_BASE = "https://api.powerbi.com/v1.0/myorg"
 
 async function getConfig(): Promise<PowerBIConfig> {
-  const supabase = createClient()
+  const { companyId } = await getRequestContext()
+  const supabase = await createClient()
   const { data } = await supabase
-    .from("settings")
+    .from("company_settings")
     .select("value")
+    .eq("company_id", companyId)
     .eq("key", "powerbi")
     .single()
 
@@ -233,6 +236,58 @@ export async function getDatasetMetadata(token: string, datasetId: string) {
   }))
 
   return { tables, columns, measures }
+}
+
+type WorkspaceScanStatus = "NotStarted" | "Running" | "Succeeded" | "Failed"
+
+export async function requestWorkspaceScan(token: string, workspaceId: string) {
+  const res = await fetch(
+    `${PBI_API_BASE}/admin/workspaces/getInfo?datasetSchema=true&datasetExpressions=true`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        workspaces: [workspaceId],
+      }),
+    }
+  )
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Falha ao solicitar scan do workspace: ${err}`)
+  }
+
+  const json = await res.json()
+  return String(json.id ?? "")
+}
+
+export async function getWorkspaceScanStatus(token: string, scanId: string) {
+  const res = await fetch(`${PBI_API_BASE}/admin/workspaces/scanStatus/${scanId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Falha ao consultar status do scan: ${err}`)
+  }
+  const json = await res.json()
+  return {
+    id: String(json.id ?? scanId),
+    status: String(json.status ?? "Failed") as WorkspaceScanStatus,
+  }
+}
+
+export async function getWorkspaceScanResult(token: string, scanId: string) {
+  const res = await fetch(`${PBI_API_BASE}/admin/workspaces/scanResult/${scanId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Falha ao consultar resultado do scan: ${err}`)
+  }
+  return res.json() as Promise<Record<string, unknown>>
 }
 
 export function buildDAXQuery(

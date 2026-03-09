@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
+import { getRequestContext } from "@/lib/tenant"
 
 export async function GET() {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
 
     const todayStart = new Date()
@@ -13,27 +15,35 @@ export async function GET() {
 
     const [reportsRes, contactsRes, todayLogsRes, monthLogsRes, weekLogs, settingsRes] =
       await Promise.all([
-        supabase.from("reports").select("id", { count: "exact", head: true }),
+        supabase
+          .from("reports")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId),
         supabase
           .from("contacts")
           .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
           .eq("is_active", true),
         supabase
           .from("dispatch_logs")
           .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
           .gte("created_at", todayStart.toISOString()),
         supabase
           .from("dispatch_logs")
           .select("status")
+          .eq("company_id", companyId)
           .gte("created_at", thirtyDaysAgo.toISOString()),
         supabase
           .from("dispatch_logs")
           .select("status, created_at")
+          .eq("company_id", companyId)
           .gte("created_at", sevenDaysAgo.toISOString()),
         supabase
-          .from("settings")
+          .from("company_settings")
           .select("key, value")
-          .in("key", ["pbi_client_id", "n8n_webhook_url"]),
+          .eq("company_id", companyId)
+          .in("key", ["powerbi", "n8n"]),
       ])
 
     const totalReports = reportsRes.count ?? 0
@@ -53,14 +63,10 @@ export async function GET() {
     const settingsMap = new Map(
       (settingsRes.data ?? []).map((s) => [s.key, s.value])
     )
-    const pbiConfigured = !!(
-      settingsMap.get("pbi_client_id") ||
-      process.env.PBI_CLIENT_ID
-    )
-    const n8nConfigured = !!(
-      settingsMap.get("n8n_webhook_url") ||
-      process.env.N8N_WEBHOOK_URL
-    )
+    const powerbi = settingsMap.get("powerbi") as Record<string, unknown> | undefined
+    const n8n = settingsMap.get("n8n") as Record<string, unknown> | undefined
+    const pbiConfigured = !!(powerbi?.client_id || process.env.PBI_CLIENT_ID)
+    const n8nConfigured = !!(n8n?.webhook_url || process.env.N8N_WEBHOOK_URL)
 
     // Chart data: last 7 days
     const chartData = []

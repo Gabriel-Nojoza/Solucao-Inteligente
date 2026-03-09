@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getAccessToken, executeDAXQuery } from "@/lib/powerbi"
+import { getRequestContext } from "@/lib/tenant"
 
 export async function POST(request: Request) {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
     const body = await request.json()
     const { automation_id } = body
@@ -19,6 +21,7 @@ export async function POST(request: Request) {
     const { data: automation, error: autoErr } = await supabase
       .from("automations")
       .select("*")
+      .eq("company_id", companyId)
       .eq("id", automation_id)
       .single()
 
@@ -46,6 +49,7 @@ export async function POST(request: Request) {
     await supabase
       .from("automations")
       .update({ last_run_at: new Date().toISOString() })
+      .eq("company_id", companyId)
       .eq("id", automation_id)
 
     // Get contacts for the automation
@@ -54,13 +58,14 @@ export async function POST(request: Request) {
       .select("contact_id, contacts(*)")
       .eq("automation_id", automation_id)
 
-    const contacts = contactLinks?.map((cl: Record<string, unknown>) => cl.contacts) || []
+    const contacts = (contactLinks?.map((cl: Record<string, unknown>) => cl.contacts) || []) as Array<Record<string, unknown>>
 
     // If contacts exist and N8N is configured, send via webhook
     if (contacts.length > 0) {
       const { data: n8nSettings } = await supabase
-        .from("settings")
+        .from("company_settings")
         .select("value")
+        .eq("company_id", companyId)
         .eq("key", "n8n")
         .single()
 
@@ -68,14 +73,15 @@ export async function POST(request: Request) {
 
       if (webhookUrl) {
         // Convert result to CSV string for sending
-        const csvHeader = result.columns.map((c) => c.name).join(",")
-        const csvRows = result.rows.map((r) =>
-          result.columns.map((c) => String(r[c.name] ?? "")).join(",")
+        const csvHeader = result.columns.map((c: { name: string }) => c.name).join(",")
+        const csvRows = result.rows.map((r: Record<string, unknown>) =>
+          result.columns.map((c: { name: string }) => String(r[c.name] ?? "")).join(",")
         )
         const csvContent = [csvHeader, ...csvRows].join("\n")
 
         // Create dispatch logs
         const logEntries = contacts.map((contact: Record<string, unknown>) => ({
+          company_id: companyId,
           schedule_id: null,
           report_name: `Automacao: ${automation.name}`,
           contact_name: String(contact.name || ""),

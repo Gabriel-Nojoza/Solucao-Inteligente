@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getAccessToken, listWorkspaces, listReports } from "@/lib/powerbi"
+import { requireAdminContext } from "@/lib/tenant"
 
 export async function POST() {
   try {
+    const { companyId } = await requireAdminContext()
     const token = await getAccessToken()
     const supabase = createClient()
 
@@ -13,11 +15,12 @@ export async function POST() {
     for (const ws of pbiWorkspaces) {
       await supabase.from("workspaces").upsert(
         {
+          company_id: companyId,
           pbi_workspace_id: ws.id,
           name: ws.name,
           synced_at: new Date().toISOString(),
         },
-        { onConflict: "pbi_workspace_id" }
+        { onConflict: "company_id,pbi_workspace_id" }
       )
     }
 
@@ -25,6 +28,7 @@ export async function POST() {
     const { data: dbWorkspaces } = await supabase
       .from("workspaces")
       .select("id, pbi_workspace_id")
+      .eq("company_id", companyId)
       .eq("is_active", true)
 
     let totalReports = 0
@@ -34,6 +38,7 @@ export async function POST() {
         for (const report of pbiReports) {
           await supabase.from("reports").upsert(
             {
+              company_id: companyId,
               pbi_report_id: report.id,
               workspace_id: ws.id,
               name: report.name,
@@ -42,7 +47,7 @@ export async function POST() {
               dataset_id: report.datasetId,
               synced_at: new Date().toISOString(),
             },
-            { onConflict: "pbi_report_id" }
+            { onConflict: "company_id,pbi_report_id" }
           )
           totalReports++
         }

@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
+import { getRequestContext } from "@/lib/tenant"
 
 export async function GET() {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
     const { data, error } = await supabase
       .from("automations")
       .select("*")
+      .eq("company_id", companyId)
       .order("created_at", { ascending: false })
 
     if (error) throw error
@@ -37,6 +40,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
     const body = await request.json()
 
@@ -64,6 +68,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("automations")
       .insert({
+        company_id: companyId,
         name,
         dataset_id,
         workspace_id: workspace_id || null,
@@ -100,6 +105,7 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
     const body = await request.json()
     const { id, contact_ids, ...updates } = body
@@ -111,6 +117,7 @@ export async function PUT(request: Request) {
     const { data, error } = await supabase
       .from("automations")
       .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq("company_id", companyId)
       .eq("id", id)
       .select()
       .single()
@@ -144,6 +151,7 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const { companyId } = await getRequestContext()
     const supabase = createClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get("id")
@@ -152,7 +160,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "id obrigatorio" }, { status: 400 })
     }
 
-    const { error } = await supabase.from("automations").delete().eq("id", id)
+    const { error } = await supabase.from("automations").delete().eq("company_id", companyId).eq("id", id)
     if (error) throw error
 
     return NextResponse.json({ success: true })

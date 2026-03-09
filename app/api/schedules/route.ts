@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { z } from "zod"
+import { getRequestContext } from "@/lib/tenant"
 
 const scheduleSchema = z.object({
   name: z.string().min(1),
@@ -13,11 +14,13 @@ const scheduleSchema = z.object({
 })
 
 export async function GET() {
+  const { companyId } = await getRequestContext()
   const supabase = createClient()
 
   const { data: schedules, error } = await supabase
     .from("schedules")
     .select("*")
+    .eq("company_id", companyId)
     .order("created_at", { ascending: false })
 
   if (error) {
@@ -30,6 +33,7 @@ export async function GET() {
       const { data: report } = await supabase
         .from("reports")
         .select("name")
+        .eq("company_id", companyId)
         .eq("id", schedule.report_id)
         .single()
 
@@ -44,6 +48,7 @@ export async function GET() {
         const { data } = await supabase
           .from("contacts")
           .select("id, name")
+          .eq("company_id", companyId)
           .in("id", contactIds)
         contacts = data ?? []
       }
@@ -60,6 +65,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { companyId } = await getRequestContext()
   const supabase = createClient()
   const body = await request.json()
   const parsed = scheduleSchema.safeParse(body)
@@ -75,7 +81,7 @@ export async function POST(request: NextRequest) {
 
   const { data: schedule, error } = await supabase
     .from("schedules")
-    .insert(scheduleData)
+    .insert({ ...scheduleData, company_id: companyId })
     .select()
     .single()
 
@@ -96,6 +102,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  const { companyId } = await getRequestContext()
   const supabase = createClient()
   const body = await request.json()
   const { id, contact_ids, ...updates } = body
@@ -107,6 +114,7 @@ export async function PUT(request: NextRequest) {
   const { data, error } = await supabase
     .from("schedules")
     .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("company_id", companyId)
     .eq("id", id)
     .select()
     .single()
@@ -135,6 +143,7 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const { companyId } = await getRequestContext()
   const supabase = createClient()
   const { searchParams } = new URL(request.url)
   const id = searchParams.get("id")
@@ -143,7 +152,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "ID obrigatorio" }, { status: 400 })
   }
 
-  const { error } = await supabase.from("schedules").delete().eq("id", id)
+  const { error } = await supabase.from("schedules").delete().eq("company_id", companyId).eq("id", id)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

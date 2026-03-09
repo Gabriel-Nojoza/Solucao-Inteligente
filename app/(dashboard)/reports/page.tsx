@@ -6,7 +6,6 @@ import {
   FileBarChart2,
   ExternalLink,
   Search,
-  Download,
 } from "lucide-react"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { Badge } from "@/components/ui/badge"
@@ -39,10 +38,12 @@ export default function ReportsPage() {
     fetcher
   )
   const { data: workspaces } = useSWR<Workspace[]>("/api/workspaces", fetcher)
+  const reportList = Array.isArray(reports) ? reports : []
+  const workspaceList = Array.isArray(workspaces) ? workspaces : []
   const [search, setSearch] = useState("")
   const [wsFilter, setWsFilter] = useState("all")
 
-  const filtered = (reports ?? []).filter((r) => {
+  const filtered = reportList.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase())
     const matchWs = wsFilter === "all" || r.workspace_id === wsFilter
     return matchSearch && matchWs
@@ -72,7 +73,7 @@ export default function ReportsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os Workspaces</SelectItem>
-              {(workspaces ?? []).map((ws) => (
+              {workspaceList.map((ws) => (
                 <SelectItem key={ws.id} value={ws.id}>
                   {ws.name}
                 </SelectItem>
