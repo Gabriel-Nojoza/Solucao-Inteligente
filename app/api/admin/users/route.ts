@@ -2,6 +2,14 @@ import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminContext } from "@/lib/tenant"
 import { listReports, listWorkspaces } from "@/lib/powerbi"
+import {
+  getCompanyWorkspaceOptions,
+  getSelectedPbiWorkspaceIds,
+  getUserAssignedPbiWorkspaceIds,
+  isWorkspaceAccessConfigured,
+  normalizePbiWorkspaceIds,
+  syncUserWorkspaceAccess,
+} from "@/lib/workspace-access"
 
 function getAdminClient() {
   return createClient(
@@ -15,6 +23,56 @@ function getUserCompanyId(user: { app_metadata?: Record<string, unknown>; user_m
   const fromApp = user.app_metadata?.company_id
   const fromUser = user.user_metadata?.company_id
   return typeof fromApp === "string" ? fromApp : typeof fromUser === "string" ? fromUser : ""
+}
+
+function canManageUser(
+  context: Awaited<ReturnType<typeof requireAdminContext>>,
+  user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }
+) {
+  if (context.isPlatformAdmin) {
+    return true
+  }
+
+  return getUserCompanyId(user) === context.companyId
+}
+
+async function getUserSettingsSnapshot(
+  supabase: ReturnType<typeof getAdminClient>,
+  companyId: string
+) {
+  if (!companyId) {
+    return {
+      company_name: "",
+      powerbi: undefined,
+      n8n: undefined,
+    }
+  }
+
+  const [{ data: company, error: companyErr }, { data: settingsRows, error: settingsErr }] = await Promise.all([
+    supabase
+      .from("companies")
+      .select("name")
+      .eq("id", companyId)
+      .maybeSingle(),
+    supabase
+      .from("company_settings")
+      .select("key, value")
+      .eq("company_id", companyId)
+      .in("key", ["powerbi", "n8n"]),
+  ])
+
+  if (companyErr) throw companyErr
+  if (settingsErr) throw settingsErr
+
+  const settingsMap = new Map(
+    (settingsRows ?? []).map((row) => [row.key, row.value as Record<string, unknown>])
+  )
+
+  return {
+    company_name: company?.name ?? "",
+    powerbi: settingsMap.get("powerbi"),
+    n8n: settingsMap.get("n8n"),
+  }
 }
 
 function slugify(value: string) {
@@ -84,7 +142,7 @@ async function upsertReport(
     .upsert(payload, { onConflict: "pbi_report_id" })
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const context = await requireAdminContext()
     const supabase = getAdminClient()
@@ -93,6 +151,42 @@ export async function GET() {
     if (error) throw error
 
     const allUsers = data.users ?? []
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get("id")
+
+    if (id) {
+      const current = allUsers.find((user) => user.id === id)
+      if (!current || !canManageUser(context, current)) {
+        return NextResponse.json(
+          { error: "Voce nao tem permissao para visualizar este usuario" },
+          { status: 403 }
+        )
+      }
+
+      const companyId = getUserCompanyId(current)
+      const settings = await getUserSettingsSnapshot(supabase, companyId)
+      const availableWorkspaces = await getCompanyWorkspaceOptions(supabase, companyId)
+      const assignedPbiWorkspaceIds = await getUserAssignedPbiWorkspaceIds(
+        supabase,
+        current.id,
+        companyId,
+        current
+      )
+      const workspaceAccessConfigured = isWorkspaceAccessConfigured(current)
+
+      return NextResponse.json({
+        ...current,
+        company_id: companyId,
+        workspace_access_configured: workspaceAccessConfigured,
+        available_workspaces: availableWorkspaces,
+        selected_pbi_workspace_ids:
+          workspaceAccessConfigured && assignedPbiWorkspaceIds !== null
+            ? assignedPbiWorkspaceIds
+            : availableWorkspaces.map((workspace) => workspace.id),
+        ...settings,
+      })
+    }
+
     const users = context.isPlatformAdmin
       ? allUsers
       : allUsers.filter((user) => getUserCompanyId(user) === context.companyId)
@@ -116,6 +210,8 @@ export async function POST(request: Request) {
     const normalizedPassword = String(password ?? "").trim()
     const normalizedName = String(name ?? "").trim()
     const normalizedRole = role === "admin" ? "admin" : "client"
+    const hasWorkspaceSelectionPayload = Array.isArray(body?.selected_pbi_workspace_ids)
+    const normalizedSelectedPbiWorkspaceIds = normalizePbiWorkspaceIds(body?.selected_pbi_workspace_ids)
     let targetCompanyId = context.companyId
 
     if (!normalizedEmail || !normalizedPassword) {
@@ -238,8 +334,23 @@ export async function POST(request: Request) {
       email: normalizedEmail,
       password: normalizedPassword,
       email_confirm: true,
-      app_metadata: { role: normalizedRole, company_id: targetCompanyId },
-      user_metadata: { name: normalizedName, role: normalizedRole, company_id: targetCompanyId },
+      app_metadata: {
+        role: normalizedRole,
+        company_id: targetCompanyId,
+        workspace_access_configured:
+          normalizedRole === "client" ? hasWorkspaceSelectionPayload : false,
+        selected_pbi_workspace_ids:
+          normalizedRole === "client" ? normalizedSelectedPbiWorkspaceIds : [],
+      },
+      user_metadata: {
+        name: normalizedName,
+        role: normalizedRole,
+        company_id: targetCompanyId,
+        workspace_access_configured:
+          normalizedRole === "client" ? hasWorkspaceSelectionPayload : false,
+        selected_pbi_workspace_ids:
+          normalizedRole === "client" ? normalizedSelectedPbiWorkspaceIds : [],
+      },
     })
 
     if (error) {
@@ -250,6 +361,14 @@ export async function POST(request: Request) {
         )
       }
       throw error
+    }
+
+    if (data.user && normalizedRole === "client" && hasWorkspaceSelectionPayload) {
+      await syncUserWorkspaceAccess(supabase, {
+        userId: data.user.id,
+        companyId: targetCompanyId,
+        selectedPbiWorkspaceIds: normalizedSelectedPbiWorkspaceIds,
+      })
     }
 
     return NextResponse.json(data.user)
@@ -267,10 +386,12 @@ export async function PUT(request: Request) {
     const context = await requireAdminContext()
     const supabase = getAdminClient()
     const body = await request.json()
-    const { id, password, name, role } = body
+    const { id, password, name, role, company_name, powerbi, n8n, selected_pbi_workspace_ids } = body
     const normalizedPassword = String(password ?? "").trim()
     const normalizedName = String(name ?? "").trim()
     const normalizedRole = role === "admin" ? "admin" : "client"
+    const hasWorkspaceSelectionPayload = Array.isArray(selected_pbi_workspace_ids)
+    const normalizedSelectedPbiWorkspaceIds = normalizePbiWorkspaceIds(selected_pbi_workspace_ids)
 
     if (!id) {
       return NextResponse.json({ error: "ID obrigatorio" }, { status: 400 })
@@ -279,17 +400,104 @@ export async function PUT(request: Request) {
     const { data: usersData, error: listErr } = await supabase.auth.admin.listUsers()
     if (listErr) throw listErr
     const current = usersData.users.find((u) => u.id === id)
-    if (!current || getUserCompanyId(current) !== context.companyId) {
-      return NextResponse.json({ error: "Usuario nao pertence a sua empresa" }, { status: 403 })
+    if (!current || !canManageUser(context, current)) {
+      return NextResponse.json({ error: "Voce nao tem permissao para editar este usuario" }, { status: 403 })
+    }
+
+    const targetCompanyId = context.isPlatformAdmin
+      ? getUserCompanyId(current)
+      : context.companyId
+    const nextWorkspaceAccessConfigured =
+      normalizedRole === "client"
+        ? hasWorkspaceSelectionPayload || isWorkspaceAccessConfigured(current)
+        : false
+    const nextSelectedPbiWorkspaceIds =
+      normalizedRole === "client"
+        ? (
+            hasWorkspaceSelectionPayload
+              ? normalizedSelectedPbiWorkspaceIds
+              : getSelectedPbiWorkspaceIds(current)
+          )
+        : []
+
+    if (normalizedRole === "client") {
+      const companyName = String(company_name ?? "").trim()
+      const pbiTenantId = String(powerbi?.tenant_id ?? "").trim()
+      const pbiClientId = String(powerbi?.client_id ?? "").trim()
+      const pbiClientSecret = String(powerbi?.client_secret ?? "").trim()
+      const n8nWebhookUrl = String(n8n?.webhook_url ?? "").trim()
+      const n8nCallbackSecret = String(n8n?.callback_secret ?? "").trim()
+
+      if (!companyName || !pbiTenantId || !pbiClientId || !pbiClientSecret) {
+        return NextResponse.json(
+          { error: "Para Cliente: empresa e credenciais Power BI sao obrigatorios" },
+          { status: 400 }
+        )
+      }
+
+      const { error: companyErr } = await supabase
+        .from("companies")
+        .update({
+          name: companyName,
+          slug: slugify(companyName),
+        })
+        .eq("id", targetCompanyId)
+
+      if (companyErr) {
+        const message = companyErr.message?.includes("duplicate")
+          ? "Nome da empresa ja cadastrado"
+          : companyErr.message || "Erro ao atualizar empresa"
+        return NextResponse.json({ error: message }, { status: 400 })
+      }
+
+      const { error: settingsErr } = await supabase
+        .from("company_settings")
+        .upsert(
+          [
+            {
+              company_id: targetCompanyId,
+              key: "powerbi",
+              value: {
+                tenant_id: pbiTenantId,
+                client_id: pbiClientId,
+                client_secret: pbiClientSecret,
+              },
+              updated_at: new Date().toISOString(),
+            },
+            {
+              company_id: targetCompanyId,
+              key: "n8n",
+              value: {
+                webhook_url: n8nWebhookUrl,
+                callback_secret: n8nCallbackSecret,
+              },
+              updated_at: new Date().toISOString(),
+            },
+          ],
+          { onConflict: "company_id,key" }
+        )
+
+      if (settingsErr) throw settingsErr
     }
 
     const updateData: {
       password?: string
-      app_metadata?: Record<string, string>
-      user_metadata?: Record<string, string>
+      app_metadata?: Record<string, string | boolean | string[]>
+      user_metadata?: Record<string, string | boolean | string[]>
     } = {
-      app_metadata: { role: normalizedRole, company_id: context.companyId },
-      user_metadata: { name: normalizedName, role: normalizedRole, company_id: context.companyId },
+      app_metadata: {
+        role: normalizedRole,
+        company_id: targetCompanyId,
+        workspace_access_configured: nextWorkspaceAccessConfigured,
+        selected_pbi_workspace_ids: nextSelectedPbiWorkspaceIds,
+      },
+      user_metadata: {
+        name: normalizedName,
+        role: normalizedRole,
+        company_id: targetCompanyId,
+        workspace_access_configured: nextWorkspaceAccessConfigured,
+        selected_pbi_workspace_ids: nextSelectedPbiWorkspaceIds,
+      },
     }
 
     if (normalizedPassword) {
@@ -299,6 +507,20 @@ export async function PUT(request: Request) {
     const { data, error } = await supabase.auth.admin.updateUserById(id, updateData)
 
     if (error) throw error
+
+    if (normalizedRole !== "client" || !nextWorkspaceAccessConfigured) {
+      await syncUserWorkspaceAccess(supabase, {
+        userId: id,
+        companyId: targetCompanyId,
+        selectedPbiWorkspaceIds: [],
+      })
+    } else if (hasWorkspaceSelectionPayload) {
+      await syncUserWorkspaceAccess(supabase, {
+        userId: id,
+        companyId: targetCompanyId,
+        selectedPbiWorkspaceIds: normalizedSelectedPbiWorkspaceIds,
+      })
+    }
 
     return NextResponse.json(data.user)
   } catch (error) {
@@ -324,8 +546,15 @@ export async function DELETE(request: Request) {
     const { data: usersData, error: listErr } = await supabase.auth.admin.listUsers()
     if (listErr) throw listErr
     const current = usersData.users.find((u) => u.id === id)
-    if (!current || getUserCompanyId(current) !== context.companyId) {
-      return NextResponse.json({ error: "Usuario nao pertence a sua empresa" }, { status: 403 })
+    if (!current || !canManageUser(context, current)) {
+      return NextResponse.json({ error: "Voce nao tem permissao para remover este usuario" }, { status: 403 })
+    }
+
+    if (current.id === context.userId) {
+      return NextResponse.json(
+        { error: "Voce nao pode remover a propria conta logada" },
+        { status: 400 }
+      )
     }
 
     const { error } = await supabase.auth.admin.deleteUser(id)

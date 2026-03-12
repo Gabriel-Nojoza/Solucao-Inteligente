@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
+import { BRAND_NAME } from "@/lib/branding"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -31,7 +32,7 @@ export default function SettingsPage() {
   const [n8nTestResult, setN8nTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
   // General
-  const [appName, setAppName] = useState("DashPro")
+  const [appName, setAppName] = useState(BRAND_NAME)
   const [timezone, setTimezone] = useState("America/Sao_Paulo")
 
   const [saving, setSaving] = useState("")
@@ -48,7 +49,7 @@ export default function SettingsPage() {
         setCallbackSecret(settings.n8n.callback_secret ?? "")
       }
       if (settings.general) {
-        setAppName(settings.general.app_name ?? "DashPro")
+        setAppName(settings.general.app_name ?? BRAND_NAME)
         setTimezone(settings.general.timezone ?? "America/Sao_Paulo")
       }
     }
@@ -96,7 +97,7 @@ export default function SettingsPage() {
       const res = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ test: true, source: "DashPro" }),
+        body: JSON.stringify({ test: true, source: BRAND_NAME }),
       })
       setN8nTestResult({
         success: res.ok,

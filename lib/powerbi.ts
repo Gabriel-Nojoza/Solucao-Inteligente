@@ -185,12 +185,21 @@ export async function executeDAXQuery(
     return { columns: [], rows: [] }
   }
   const table = result.tables[0]
+  const rows = (table.rows || []) as Array<Record<string, unknown>>
+  const fallbackColumns =
+    rows.length > 0
+      ? Object.keys(rows[0]).map((name) => ({
+          name,
+          dataType: typeof rows[0][name] === "number" ? "Int64" : "String",
+        }))
+      : []
+
   return {
     columns: table.columns?.map((c: { name: string; dataType: string }) => ({
       name: c.name,
       dataType: c.dataType || "string",
-    })) || [],
-    rows: table.rows || [],
+    })) || fallbackColumns,
+    rows,
   }
 }
 

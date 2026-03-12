@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { z } from "zod"
 import { getRequestContext } from "@/lib/tenant"
+import {
+  isMissingAutomationRelationError,
+  loadStoredAutomations,
+} from "@/lib/automation-storage"
 
 const scheduleSchema = z.object({
   name: z.string().min(1),
   report_id: z.string().uuid(),
   cron_expression: z.string().min(1),
-  export_format: z.enum(["PDF", "PNG", "PPTX"]).default("PDF"),
+  export_format: z.enum(["PDF", "PNG", "PPTX", "table", "csv", "pdf"]).default("PDF"),
   message_template: z.string().nullable().optional(),
   is_active: z.boolean().default(true),
   contact_ids: z.array(z.string().uuid()).optional(),
@@ -27,16 +31,50 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  const reportIds = Array.from(
+    new Set((schedules ?? []).map((schedule) => schedule.report_id).filter(Boolean))
+  )
+
+  let reportMap = new Map<string, string>()
+  if (reportIds.length > 0) {
+    const { data: reports } = await supabase
+      .from("reports")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .in("id", reportIds)
+
+    reportMap = new Map((reports ?? []).map((report) => [report.id, report.name]))
+  }
+
+  let automationMap = new Map<string, string>()
+  if (reportIds.length > 0) {
+    const { data: automations, error: automationsError } = await supabase
+      .from("automations")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .in("id", reportIds)
+
+    if (automationsError) {
+      if (!isMissingAutomationRelationError(automationsError)) {
+        return NextResponse.json({ error: automationsError.message }, { status: 500 })
+      }
+
+      const storedAutomations = await loadStoredAutomations(supabase, companyId)
+      automationMap = new Map(
+        storedAutomations
+          .filter((automation) => reportIds.includes(automation.id))
+          .map((automation) => [automation.id, automation.name])
+      )
+    } else {
+      automationMap = new Map(
+        (automations ?? []).map((automation) => [automation.id, automation.name])
+      )
+    }
+  }
+
   // Enrich with report names and contacts
   const enriched = await Promise.all(
     (schedules ?? []).map(async (schedule) => {
-      const { data: report } = await supabase
-        .from("reports")
-        .select("name")
-        .eq("company_id", companyId)
-        .eq("id", schedule.report_id)
-        .single()
-
       const { data: scContacts } = await supabase
         .from("schedule_contacts")
         .select("contact_id")
@@ -55,7 +93,15 @@ export async function GET() {
 
       return {
         ...schedule,
-        report_name: report?.name ?? "Desconhecido",
+        report_name:
+          reportMap.get(schedule.report_id) ??
+          automationMap.get(schedule.report_id) ??
+          "Desconhecido",
+        report_source: reportMap.has(schedule.report_id)
+          ? "powerbi"
+          : automationMap.has(schedule.report_id)
+            ? "created"
+            : "unknown",
         contacts,
       }
     })

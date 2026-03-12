@@ -1,6 +1,6 @@
-"use client"
+﻿"use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Table2,
   Columns3,
@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   Filter,
+  Link2,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -25,14 +26,18 @@ import type {
   DatasetTable,
   DatasetColumn,
   SelectedColumn,
+  QueryFilter,
 } from "@/lib/types"
 
 interface TablesPanelProps {
   tables: DatasetTable[]
   columns: DatasetColumn[]
   selectedColumns: SelectedColumn[]
+  filters: QueryFilter[]
+  activeTableName?: string | null
   onToggleColumn: (tableName: string, columnName: string) => void
   onAddFilter: (tableName: string, columnName: string, dataType: string) => void
+  onActivateTable: (tableName: string) => void
   showHidden: boolean
   onToggleHidden: () => void
 }
@@ -41,50 +46,68 @@ export function TablesPanel({
   tables,
   columns,
   selectedColumns,
+  filters,
+  activeTableName,
   onToggleColumn,
   onAddFilter,
+  onActivateTable,
   showHidden,
   onToggleHidden,
 }: TablesPanelProps) {
   const [search, setSearch] = useState("")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  const visibleTables = tables.filter((t) => {
-    if (!showHidden && t.isHidden) return false
+  useEffect(() => {
+    if (!activeTableName) return
+
+    setExpanded((prev) => {
+      if (prev.has(activeTableName)) return prev
+      const next = new Set(prev)
+      next.add(activeTableName)
+      return next
+    })
+  }, [activeTableName])
+
+  const visibleTables = tables.filter((table) => {
+    if (!showHidden && table.isHidden) return false
     if (search) {
-      const searchLower = search.toLowerCase()
-      const hasMatchingCol = columns.some(
-        (c) =>
-          c.tableName === t.name &&
-          c.columnName.toLowerCase().includes(searchLower)
+      const normalizedSearch = search.toLowerCase()
+      const hasMatchingColumn = columns.some(
+        (column) =>
+          column.tableName === table.name &&
+          column.columnName.toLowerCase().includes(normalizedSearch)
       )
-      return (
-        t.name.toLowerCase().includes(searchLower) || hasMatchingCol
-      )
+      return table.name.toLowerCase().includes(normalizedSearch) || hasMatchingColumn
     }
     return true
   })
 
-  const toggleExpand = (name: string) => {
+  const toggleExpand = (tableName: string) => {
+    onActivateTable(tableName)
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(name)) next.delete(name)
-      else next.add(name)
+      if (next.has(tableName)) next.delete(tableName)
+      else next.add(tableName)
       return next
     })
   }
 
   const isColumnSelected = (tableName: string, columnName: string) =>
     selectedColumns.some(
-      (c) => c.tableName === tableName && c.columnName === columnName
+      (column) => column.tableName === tableName && column.columnName === columnName
+    )
+
+  const hasFilter = (tableName: string, columnName: string) =>
+    filters.some(
+      (filter) => filter.tableName === tableName && filter.columnName === columnName
     )
 
   const getTableColumns = (tableName: string) =>
-    columns.filter((c) => {
-      if (c.tableName !== tableName) return false
-      if (!showHidden && c.isHidden) return false
+    columns.filter((column) => {
+      if (column.tableName !== tableName) return false
+      if (!showHidden && column.isHidden) return false
       if (search) {
-        return c.columnName.toLowerCase().includes(search.toLowerCase())
+        return column.columnName.toLowerCase().includes(search.toLowerCase())
       }
       return true
     })
@@ -108,11 +131,7 @@ export function TablesPanel({
                 className="size-7"
                 onClick={onToggleHidden}
               >
-                {showHidden ? (
-                  <Eye className="size-3.5" />
-                ) : (
-                  <EyeOff className="size-3.5" />
-                )}
+                {showHidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -137,21 +156,24 @@ export function TablesPanel({
       <ScrollArea className="flex-1 overflow-auto">
         <div className="space-y-0.5 px-1 pb-2">
           {visibleTables.map((table) => {
-            const tableCols = getTableColumns(table.name)
+            const tableColumns = getTableColumns(table.name)
             const isExpanded = expanded.has(table.name)
+            const isActive = activeTableName === table.name
 
             return (
               <div key={table.name}>
                 <button
                   onClick={() => toggleExpand(table.name)}
-                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent transition-colors"
+                  className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
+                    isActive ? "bg-primary/10 text-primary" : "hover:bg-accent"
+                  }`}
                 >
                   {isExpanded ? (
                     <ChevronDown className="size-3.5 text-muted-foreground" />
                   ) : (
                     <ChevronRight className="size-3.5 text-muted-foreground" />
                   )}
-                  <Table2 className="size-3.5 text-primary/70" />
+                  <Table2 className={`size-3.5 ${isActive ? "text-primary" : "text-primary/70"}`} />
                   <span
                     className={`truncate text-xs font-medium ${
                       table.isHidden ? "text-muted-foreground line-through" : ""
@@ -159,47 +181,53 @@ export function TablesPanel({
                   >
                     {table.name}
                   </span>
+                  {isActive && <Link2 className="size-3 text-primary" />}
                   <span className="ml-auto text-[10px] text-muted-foreground">
-                    {tableCols.length}
+                    {tableColumns.length}
                   </span>
                 </button>
 
                 {isExpanded && (
                   <div className="ml-4 space-y-0.5 border-l border-border pl-2">
-                    {tableCols.map((col) => (
+                    {tableColumns.map((column) => (
                       <div
-                        key={`${col.tableName}.${col.columnName}`}
-                        className="group flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-accent transition-colors"
+                        key={`${column.tableName}.${column.columnName}`}
+                        className={`group flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors ${
+                          isActive ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-accent"
+                        }`}
                       >
                         <Checkbox
-                          checked={isColumnSelected(col.tableName, col.columnName)}
-                          onCheckedChange={() =>
-                            onToggleColumn(col.tableName, col.columnName)
-                          }
+                          checked={isColumnSelected(column.tableName, column.columnName)}
+                          onCheckedChange={() => {
+                            onActivateTable(column.tableName)
+                            onToggleColumn(column.tableName, column.columnName)
+                          }}
                           className="size-3.5"
                         />
                         <Columns3 className="size-3 text-muted-foreground" />
                         <span
                           className={`flex-1 truncate text-xs ${
-                            col.isHidden
-                              ? "text-muted-foreground italic"
-                              : ""
+                            column.isHidden ? "text-muted-foreground italic" : ""
                           }`}
                         >
-                          {col.columnName}
+                          {column.columnName}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {col.dataType}
-                        </span>
+                        <span className="text-[10px] text-muted-foreground">{column.dataType}</span>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-5 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() =>
-                            onAddFilter(col.tableName, col.columnName, col.dataType)
-                          }
+                          className={`size-6 shrink-0 rounded-sm border border-transparent transition-colors hover:border-border ${
+                            hasFilter(column.tableName, column.columnName)
+                              ? "border-primary/40 bg-primary/10 text-primary"
+                              : "text-muted-foreground/80"
+                          }`}
+                          onClick={() => {
+                            onActivateTable(column.tableName)
+                            onAddFilter(column.tableName, column.columnName, column.dataType)
+                          }}
+                          title="Adicionar filtro"
                         >
-                          <Filter className="size-3" />
+                          <Filter className="size-3.5" />
                         </Button>
                       </div>
                     ))}

@@ -1,6 +1,158 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext } from "@/lib/tenant"
+import {
+  createStoredAutomation,
+  deleteStoredAutomation,
+  isMissingAutomationRelationError,
+  listStoredAutomationsWithContacts,
+  updateStoredAutomation,
+} from "@/lib/automation-storage"
+
+type AutomationRow = Record<string, unknown>
+type NormalizedAutomationRow = AutomationRow & {
+  selected_columns: unknown[]
+  selected_measures: unknown[]
+  filters: unknown[]
+  dax_query: string | null
+  cron_expression: string | null
+  export_format: string
+  message_template: string | null
+  is_active: boolean
+}
+
+const OPTIONAL_AUTOMATION_COLUMNS = new Set([
+  "workspace_id",
+  "selected_columns",
+  "selected_measures",
+  "filters",
+  "dax_query",
+  "cron_expression",
+  "export_format",
+  "message_template",
+])
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>
+    if (typeof record.message === "string" && record.message) {
+      return record.message
+    }
+    if (typeof record.error === "string" && record.error) {
+      return record.error
+    }
+    if (typeof record.details === "string" && record.details) {
+      return record.details
+    }
+  }
+
+  return "Erro desconhecido"
+}
+
+function extractMissingColumnName(message: string) {
+  const schemaCacheMatch = message.match(/Could not find the '([^']+)' column/i)
+  if (schemaCacheMatch?.[1]) return schemaCacheMatch[1]
+
+  const relationMatch = message.match(/column "([^"]+)" of relation/i)
+  if (relationMatch?.[1]) return relationMatch[1]
+
+  return null
+}
+
+function isInvalidExportFormatError(message: string) {
+  const normalized = message.toLowerCase()
+  return normalized.includes("export_format") && normalized.includes("invalid input value")
+}
+
+function getExportFormatCandidates(value: string) {
+  const candidates = [value]
+  if (value.toLowerCase() !== value) candidates.push(value.toLowerCase())
+  if (value.toUpperCase() !== value) candidates.push(value.toUpperCase())
+  return [...new Set(candidates.filter(Boolean))]
+}
+
+function normalizeAutomationRecord(automation: AutomationRow): NormalizedAutomationRow {
+  return {
+    ...automation,
+    selected_columns: Array.isArray(automation.selected_columns) ? automation.selected_columns : [],
+    selected_measures: Array.isArray(automation.selected_measures) ? automation.selected_measures : [],
+    filters: Array.isArray(automation.filters) ? automation.filters : [],
+    dax_query: typeof automation.dax_query === "string" ? automation.dax_query : null,
+    cron_expression:
+      typeof automation.cron_expression === "string" && automation.cron_expression.trim()
+        ? automation.cron_expression
+        : null,
+    export_format:
+      typeof automation.export_format === "string" && automation.export_format.trim()
+        ? automation.export_format.toLowerCase()
+        : "csv",
+    message_template:
+      typeof automation.message_template === "string" ? automation.message_template : null,
+    is_active: typeof automation.is_active === "boolean" ? automation.is_active : true,
+  }
+}
+
+async function insertAutomationWithFallback(
+  supabase: ReturnType<typeof createClient>,
+  payload: Record<string, unknown>
+): Promise<NormalizedAutomationRow> {
+  let currentPayload = { ...payload }
+  let exportFormatVariants = (() => {
+    const current = typeof payload.export_format === "string" ? payload.export_format : ""
+    return getExportFormatCandidates(current)
+  })()
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await supabase
+      .from("automations")
+      .insert(currentPayload)
+      .select()
+      .single()
+
+    if (!error && data) {
+      return normalizeAutomationRecord(data as AutomationRow)
+    }
+
+    const message = getErrorMessage(error)
+    const missingColumn = extractMissingColumnName(message)
+
+    if (
+      missingColumn &&
+      OPTIONAL_AUTOMATION_COLUMNS.has(missingColumn) &&
+      Object.prototype.hasOwnProperty.call(currentPayload, missingColumn)
+    ) {
+      const nextPayload = { ...currentPayload }
+      delete nextPayload[missingColumn]
+      currentPayload = nextPayload
+      continue
+    }
+
+    if (isInvalidExportFormatError(message) && Object.prototype.hasOwnProperty.call(currentPayload, "export_format")) {
+      const currentValue =
+        typeof currentPayload.export_format === "string" ? currentPayload.export_format : ""
+      const nextVariant = exportFormatVariants.find((variant) => variant !== currentValue)
+
+      if (nextVariant) {
+        currentPayload = { ...currentPayload, export_format: nextVariant }
+        exportFormatVariants = exportFormatVariants.filter((variant) => variant !== nextVariant)
+        continue
+      }
+
+      const nextPayload = { ...currentPayload }
+      delete nextPayload.export_format
+      currentPayload = nextPayload
+      continue
+    }
+
+    throw new Error(message)
+  }
+
+  throw new Error("Nao foi possivel salvar a automacao com o schema atual do banco")
+}
 
 export async function GET() {
   try {
@@ -12,19 +164,33 @@ export async function GET() {
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
 
-    if (error) throw error
+    if (error) {
+      if (isMissingAutomationRelationError(error)) {
+        const storedAutomations = await listStoredAutomationsWithContacts(supabase, companyId)
+        return NextResponse.json(storedAutomations)
+      }
+
+      throw error
+    }
 
     // Fetch contacts for each automation
     const automationsWithContacts = await Promise.all(
       (data || []).map(async (automation) => {
-        const { data: contactData } = await supabase
+        const { data: contactData, error: contactsError } = await supabase
           .from("automation_contacts")
           .select("contact_id, contacts(*)")
           .eq("automation_id", automation.id)
 
+        if (contactsError && !isMissingAutomationRelationError(contactsError)) {
+          throw contactsError
+        }
+
         return {
-          ...automation,
-          contacts: contactData?.map((ac: Record<string, unknown>) => ac.contacts) || [],
+          ...normalizeAutomationRecord(automation as AutomationRow),
+          contacts:
+            contactsError && isMissingAutomationRelationError(contactsError)
+              ? []
+              : contactData?.map((ac: Record<string, unknown>) => ac.contacts) || [],
         }
       })
     )
@@ -65,9 +231,10 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data, error } = await supabase
-      .from("automations")
-      .insert({
+    let data: NormalizedAutomationRow | Awaited<ReturnType<typeof createStoredAutomation>>
+
+    try {
+      data = await insertAutomationWithFallback(supabase, {
         company_id: companyId,
         name,
         dataset_id,
@@ -77,13 +244,28 @@ export async function POST(request: Request) {
         filters: filters || [],
         dax_query: dax_query || null,
         cron_expression: cron_expression || null,
-        export_format: export_format || "table",
+        export_format: export_format || "csv",
         message_template: message_template || null,
       })
-      .select()
-      .single()
+    } catch (error) {
+      if (!isMissingAutomationRelationError(error)) {
+        throw error
+      }
 
-    if (error) throw error
+      data = await createStoredAutomation(supabase, companyId, {
+        name,
+        dataset_id,
+        workspace_id: workspace_id || null,
+        selected_columns: selected_columns || [],
+        selected_measures: selected_measures || [],
+        filters: filters || [],
+        dax_query: dax_query || null,
+        cron_expression: cron_expression || null,
+        export_format: export_format || "csv",
+        message_template: message_template || null,
+        contact_ids: Array.isArray(contact_ids) ? contact_ids : [],
+      })
+    }
 
     // Link contacts
     if (contact_ids && contact_ids.length > 0 && data) {
@@ -91,13 +273,17 @@ export async function POST(request: Request) {
         automation_id: data.id,
         contact_id: cid,
       }))
-      await supabase.from("automation_contacts").insert(links)
+      const { error: contactsError } = await supabase.from("automation_contacts").insert(links)
+      if (contactsError && !isMissingAutomationRelationError(contactsError)) {
+        throw contactsError
+      }
     }
 
     return NextResponse.json(data, { status: 201 })
   } catch (error) {
+    console.error("Error creating automation:", error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro desconhecido" },
+      { error: getErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -114,7 +300,10 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "id obrigatorio" }, { status: 400 })
     }
 
-    const { data, error } = await supabase
+    let data: Record<string, unknown> | null = null
+    let usingStoredAutomation = false
+
+    const { data: dbData, error } = await supabase
       .from("automations")
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq("company_id", companyId)
@@ -122,28 +311,52 @@ export async function PUT(request: Request) {
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      if (!isMissingAutomationRelationError(error)) {
+        throw error
+      }
+
+      usingStoredAutomation = true
+      data = (await updateStoredAutomation(supabase, companyId, id, {
+        ...updates,
+        ...(contact_ids !== undefined ? { contact_ids } : {}),
+      })) as Record<string, unknown> | null
+
+      if (!data) {
+        return NextResponse.json({ error: "Automacao nao encontrada" }, { status: 404 })
+      }
+    } else {
+      data = dbData as Record<string, unknown>
+    }
 
     // Update contacts if provided
-    if (contact_ids !== undefined && data) {
-      await supabase
+    if (!usingStoredAutomation && contact_ids !== undefined && data) {
+      const { error: deleteContactsError } = await supabase
         .from("automation_contacts")
         .delete()
         .eq("automation_id", id)
+
+      if (deleteContactsError && !isMissingAutomationRelationError(deleteContactsError)) {
+        throw deleteContactsError
+      }
 
       if (contact_ids.length > 0) {
         const links = contact_ids.map((cid: string) => ({
           automation_id: id,
           contact_id: cid,
         }))
-        await supabase.from("automation_contacts").insert(links)
+        const { error: insertContactsError } = await supabase.from("automation_contacts").insert(links)
+        if (insertContactsError && !isMissingAutomationRelationError(insertContactsError)) {
+          throw insertContactsError
+        }
       }
     }
 
-    return NextResponse.json(data)
+    return NextResponse.json(normalizeAutomationRecord(data as AutomationRow))
   } catch (error) {
+    console.error("Error updating automation:", error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro desconhecido" },
+      { error: getErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -161,12 +374,22 @@ export async function DELETE(request: Request) {
     }
 
     const { error } = await supabase.from("automations").delete().eq("company_id", companyId).eq("id", id)
-    if (error) throw error
+    if (error) {
+      if (!isMissingAutomationRelationError(error)) {
+        throw error
+      }
+
+      const deleted = await deleteStoredAutomation(supabase, companyId, id)
+      if (!deleted) {
+        return NextResponse.json({ error: "Automacao nao encontrada" }, { status: 404 })
+      }
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {
+    console.error("Error deleting automation:", error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro desconhecido" },
+      { error: getErrorMessage(error) },
       { status: 500 }
     )
   }

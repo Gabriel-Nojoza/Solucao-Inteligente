@@ -6,12 +6,14 @@ import {
   FileBarChart2,
   ExternalLink,
   Search,
+  Workflow,
 } from "lucide-react"
 import { PageHeader } from "@/components/dashboard/page-header"
+import { DuplicateReportDialog } from "@/components/reports/duplicate-report-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
@@ -28,7 +30,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { Report, Workspace } from "@/lib/types"
+import { SavedReportSendDialog } from "@/components/reports/saved-report-send-dialog"
+import type { Automation, Contact, Report, Workspace } from "@/lib/types"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -38,8 +41,15 @@ export default function ReportsPage() {
     fetcher
   )
   const { data: workspaces } = useSWR<Workspace[]>("/api/workspaces", fetcher)
+  const { data: automations, isLoading: loadingAutomations } = useSWR<Automation[]>(
+    "/api/automations",
+    fetcher
+  )
+  const { data: contacts } = useSWR<Contact[]>("/api/contacts", fetcher)
   const reportList = Array.isArray(reports) ? reports : []
   const workspaceList = Array.isArray(workspaces) ? workspaces : []
+  const createdReports = Array.isArray(automations) ? automations : []
+  const contactList = Array.isArray(contacts) ? contacts : []
   const [search, setSearch] = useState("")
   const [wsFilter, setWsFilter] = useState("all")
 
@@ -48,12 +58,15 @@ export default function ReportsPage() {
     const matchWs = wsFilter === "all" || r.workspace_id === wsFilter
     return matchSearch && matchWs
   })
+  const filteredCreatedReports = createdReports.filter((report) =>
+    report.name.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
         title="Relatorios"
-        description="Relatorios sincronizados do Power BI"
+        description="Relatorios sincronizados do Power BI e relatorios criados no sistema"
       />
 
       <div className="flex flex-1 flex-col gap-4 p-6">
@@ -81,6 +94,62 @@ export default function ReportsPage() {
             </SelectContent>
           </Select>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Workflow className="size-4 text-primary" />
+              Relatorios Criados
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loadingAutomations ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-16 rounded" />
+                ))}
+              </div>
+            ) : filteredCreatedReports.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-8 text-center">
+                <Workflow className="size-10 text-muted-foreground/40" />
+                <div>
+                  <p className="font-medium">Nenhum relatorio criado</p>
+                  <p className="text-sm text-muted-foreground">
+                    Salve uma automacao no construtor para ela aparecer aqui.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredCreatedReports.map((report) => (
+                  <div
+                    key={report.id}
+                    className="flex flex-col gap-3 rounded-lg border border-border/60 p-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{report.name}</span>
+                        <Badge variant={report.is_active ? "default" : "secondary"}>
+                          {report.is_active ? "Ativo" : "Inativo"}
+                        </Badge>
+                        <Badge variant="outline">{report.export_format.toUpperCase()}</Badge>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>{Array.isArray(report.filters) ? report.filters.length : 0} filtro(s)</span>
+                        <span>Criado em {new Date(report.created_at).toLocaleDateString("pt-BR")}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <DuplicateReportDialog report={report} contacts={contactList} />
+                      <SavedReportSendDialog report={report} contacts={contactList} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardContent className="p-0">

@@ -5,6 +5,7 @@ import {
   Settings2,
   Copy,
   Play,
+  FileDown,
   ChevronDown,
   ChevronRight,
   TableIcon,
@@ -35,8 +36,10 @@ interface ResultsPanelProps {
   selectedMeasures: SelectedMeasure[]
   daxQuery: string
   result: DAXQueryResult | null
+  reportHtml: string | null
   isExecuting: boolean
   onExecute: () => void
+  onGeneratePdf: () => void
   onRemoveColumn: (tableName: string, columnName: string) => void
   onRemoveMeasure: (tableName: string, measureName: string) => void
 }
@@ -46,8 +49,10 @@ export function ResultsPanel({
   selectedMeasures,
   daxQuery,
   result,
+  reportHtml,
   isExecuting,
   onExecute,
+  onGeneratePdf,
   onRemoveColumn,
   onRemoveMeasure,
 }: ResultsPanelProps) {
@@ -112,8 +117,16 @@ export function ResultsPanel({
 
       {/* DAX Query */}
       <div className="border-b border-border">
-        <button
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setShowDax(!showDax)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              setShowDax((prev) => !prev)
+            }
+          }}
           className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent transition-colors"
         >
           {showDax ? (
@@ -139,7 +152,7 @@ export function ResultsPanel({
               COPY
             </Button>
           </div>
-        </button>
+        </div>
         {showDax && (
           <div className="px-3 pb-2">
             <pre className="rounded-lg bg-muted/50 p-3 text-xs font-mono leading-relaxed text-primary overflow-x-auto whitespace-pre-wrap">
@@ -163,6 +176,16 @@ export function ResultsPanel({
             <Play className="size-3" />
           )}
           {isExecuting ? "Executando..." : "Executar Query"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onGeneratePdf}
+          disabled={!reportHtml || !result || result.rows.length === 0}
+          className="h-7 gap-1.5 text-xs"
+        >
+          <FileDown className="size-3" />
+          Gerar PDF
         </Button>
         {result && (
           <span className="text-xs text-muted-foreground">

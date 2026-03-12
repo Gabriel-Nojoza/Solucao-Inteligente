@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   Users,
-  Shield,
   Moon,
   Sun,
   LogOut,
@@ -13,6 +12,8 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
+import { BrandMark } from "@/components/branding/brand-mark"
+import { BRAND_ADMIN_SUBTITLE } from "@/lib/branding"
 import {
   Sidebar,
   SidebarContent,
@@ -50,15 +51,7 @@ export function AdminSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/admin" className="flex items-center gap-3">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-destructive text-destructive-foreground">
-                  <Shield className="size-4" />
-                </div>
-                <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold tracking-tight">DashPro Admin</span>
-                  <span className="text-xs text-muted-foreground">
-                    Painel Administrativo
-                  </span>
-                </div>
+                <BrandMark imageSize={36} subtitle={BRAND_ADMIN_SUBTITLE} />
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

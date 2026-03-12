@@ -7,7 +7,9 @@ import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Zap, Loader2, Eye, EyeOff, User, Shield } from "lucide-react"
+import { Loader2, Eye, EyeOff, User, Shield } from "lucide-react"
+import { BrandMark } from "@/components/branding/brand-mark"
+import { BRAND_NAME, BRAND_SUBTITLE } from "@/lib/branding"
 import { cn } from "@/lib/utils"
 
 type LoginType = "client" | "admin"
@@ -84,16 +86,12 @@ export default function LoginPage() {
 
       <div className="relative z-10 flex w-full items-center justify-center px-4 sm:justify-start sm:px-8 md:px-16 lg:px-24">
         <div className="w-full max-w-md">
-          <div className="mb-10 flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
-              <Zap className="size-5" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">
-                DashPro
-              </h1>
-              <p className="text-xs text-muted-foreground">Power BI Automation</p>
-            </div>
+          <div className="mb-10">
+            <BrandMark
+              imageSize={44}
+              textClassName="text-2xl text-foreground"
+              subtitleClassName="text-xs text-muted-foreground"
+            />
           </div>
 
           <div className="rounded-2xl border border-border/50 bg-card/80 p-8 shadow-2xl backdrop-blur-xl">
@@ -208,7 +206,7 @@ export default function LoginPage() {
           </div>
 
           <p className="mt-6 text-center text-xs text-muted-foreground/60">
-            DashPro - Automacao de Relatorios Power BI
+            {BRAND_NAME} - {BRAND_SUBTITLE}
           </p>
         </div>
       </div>

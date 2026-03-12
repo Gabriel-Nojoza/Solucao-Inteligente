@@ -1,17 +1,29 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext, requireAdminContext } from "@/lib/tenant"
+import { getWorkspaceAccessScope } from "@/lib/workspace-access"
 
 export async function GET() {
   try {
-    const { companyId } = await getRequestContext()
+    const context = await getRequestContext()
     const supabase = createClient()
+    const scope = await getWorkspaceAccessScope(supabase, context)
 
-    const { data: workspaces, error } = await supabase
+    if (scope.restricted && scope.workspaceIds.length === 0) {
+      return NextResponse.json([])
+    }
+
+    let query = supabase
       .from("workspaces")
       .select("*")
-      .eq("company_id", companyId)
+      .eq("company_id", context.companyId)
       .order("name")
+
+    if (scope.restricted) {
+      query = query.in("id", scope.workspaceIds)
+    }
+
+    const { data: workspaces, error } = await query
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -23,7 +35,7 @@ export async function GET() {
         const { count } = await supabase
           .from("reports")
           .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId)
+          .eq("company_id", context.companyId)
           .eq("workspace_id", ws.id)
 
         return { ...ws, report_count: count ?? 0 }

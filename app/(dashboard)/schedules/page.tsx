@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import useSWR, { mutate } from "swr"
 import {
   Plus,
@@ -9,6 +9,7 @@ import {
   Pencil,
   Play,
   Loader2,
+  RefreshCw,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -39,7 +40,10 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -53,30 +57,88 @@ import {
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { CronBuilder } from "@/components/schedules/cron-builder"
-import type { Schedule, Report, Contact } from "@/lib/types"
+import type { Schedule, Report, Contact, ScheduleExportFormat } from "@/lib/types"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
+type CreatedReport = {
+  id: string
+  name: string
+  export_format?: string | null
+}
+
+type ScheduleReportOption = {
+  id: string
+  name: string
+  source: "powerbi" | "created"
+  defaultFormat: ScheduleExportFormat
+}
+
+const POWERBI_FORMATS: ScheduleExportFormat[] = ["PDF", "PNG", "PPTX"]
+const CREATED_REPORT_FORMATS: ScheduleExportFormat[] = ["table", "csv", "pdf"]
+
+function normalizeCreatedReportFormat(value: string | null | undefined): ScheduleExportFormat {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
+  if (normalized === "table" || normalized === "csv" || normalized === "pdf") {
+    return normalized
+  }
+  return "pdf"
+}
+
+function isFormatCompatible(
+  format: ScheduleExportFormat,
+  source: ScheduleReportOption["source"]
+) {
+  return source === "created"
+    ? CREATED_REPORT_FORMATS.includes(format)
+    : POWERBI_FORMATS.includes(format)
+}
+
+function formatLabel(format: ScheduleExportFormat) {
+  if (format === "table") return "Tabela (texto)"
+  return format.toUpperCase()
+}
 
 export default function SchedulesPage() {
   const { data: schedules, isLoading } = useSWR<
     (Schedule & { report_name: string; contacts: { id: string; name: string }[] })[]
   >("/api/schedules", fetcher)
   const { data: reports } = useSWR<Report[]>("/api/reports", fetcher)
+  const { data: createdReports } = useSWR<CreatedReport[]>("/api/automations", fetcher)
   const { data: contacts } = useSWR<Contact[]>("/api/contacts", fetcher)
   const scheduleList = Array.isArray(schedules) ? schedules : []
   const reportList = Array.isArray(reports) ? reports : []
+  const createdReportList = Array.isArray(createdReports) ? createdReports : []
   const contactList = Array.isArray(contacts) ? contacts : []
+  const reportOptions = useMemo<ScheduleReportOption[]>(
+    () => [
+      ...createdReportList.map((report) => ({
+        id: report.id,
+        name: report.name,
+        source: "created" as const,
+        defaultFormat: normalizeCreatedReportFormat(report.export_format),
+      })),
+      ...reportList.map((report) => ({
+        id: report.id,
+        name: report.name,
+        source: "powerbi" as const,
+        defaultFormat: "PDF" as const,
+      })),
+    ],
+    [createdReportList, reportList]
+  )
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editSchedule, setEditSchedule] = useState<Schedule | null>(null)
   const [dispatching, setDispatching] = useState<string | null>(null)
+  const [syncingBotContacts, setSyncingBotContacts] = useState(false)
 
   // Form
   const [formName, setFormName] = useState("")
   const [formReportId, setFormReportId] = useState("")
   const [formCron, setFormCron] = useState("0 8 * * 1-5")
-  const [formFormat, setFormFormat] = useState<"PDF" | "PNG" | "PPTX">("PDF")
+  const [formFormat, setFormFormat] = useState<ScheduleExportFormat>("PDF")
   const [formMessage, setFormMessage] = useState(
     "Segue o relatorio {report_name} em anexo."
   )
@@ -84,6 +146,11 @@ export default function SchedulesPage() {
   const [formActive, setFormActive] = useState(true)
   const [saving, setSaving] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const selectedReportOption = reportOptions.find((option) => option.id === formReportId)
+  const formatOptions =
+    selectedReportOption?.source === "created"
+      ? CREATED_REPORT_FORMATS
+      : POWERBI_FORMATS
 
   function openCreate() {
     setEditSchedule(null)
@@ -96,6 +163,7 @@ export default function SchedulesPage() {
     setFormActive(true)
     setFormErrors({})
     setDialogOpen(true)
+    void syncContactsFromBot(true)
   }
 
   function openEdit(schedule: Schedule & { contacts: { id: string; name: string }[] }) {
@@ -109,6 +177,7 @@ export default function SchedulesPage() {
     setFormActive(schedule.is_active)
     setFormErrors({})
     setDialogOpen(true)
+    void syncContactsFromBot(true)
   }
 
   function validateScheduleForm(): boolean {
@@ -195,6 +264,41 @@ export default function SchedulesPage() {
     setFormErrors((prev) => ({ ...prev, contacts: "" }))
   }
 
+  async function syncContactsFromBot(silent = false) {
+    setSyncingBotContacts(true)
+    try {
+      const res = await fetch("/api/contacts/sync-bot", {
+        method: "POST",
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao sincronizar contatos do bot")
+      }
+
+      await mutate("/api/contacts")
+
+      if (!silent) {
+        if ((data.inserted ?? 0) === 0 && (data.updated ?? 0) === 0) {
+          toast.success("Contatos do bot ja estao atualizados.")
+        } else {
+          toast.success(
+            `${data.inserted ?? 0} contato(s) novo(s) e ${data.updated ?? 0} atualizado(s).`
+          )
+        }
+      }
+    } catch (error) {
+      if (!silent) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Erro ao sincronizar contatos do bot"
+        )
+      }
+    } finally {
+      setSyncingBotContacts(false)
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
@@ -248,7 +352,7 @@ export default function SchedulesPage() {
                         {schedule.report_name}
                       </TableCell>
                       <TableCell className="hidden lg:table-cell">
-                        <Badge variant="outline">{schedule.export_format}</Badge>
+                        <Badge variant="outline">{formatLabel(schedule.export_format)}</Badge>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
@@ -351,6 +455,10 @@ export default function SchedulesPage() {
                 value={formReportId}
                 onValueChange={(v) => {
                   setFormReportId(v)
+                  const option = reportOptions.find((item) => item.id === v)
+                  if (option && !isFormatCompatible(formFormat, option.source)) {
+                    setFormFormat(option.defaultFormat)
+                  }
                   setFormErrors((prev) => ({ ...prev, report: "" }))
                 }}
               >
@@ -358,11 +466,29 @@ export default function SchedulesPage() {
                   <SelectValue placeholder="Selecionar relatorio" />
                 </SelectTrigger>
                 <SelectContent>
-                  {reportList.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
-                  ))}
+                  {createdReportList.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>Relatorios Criados</SelectLabel>
+                      {createdReportList.map((report) => (
+                        <SelectItem key={report.id} value={report.id}>
+                          {report.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                  {createdReportList.length > 0 && reportList.length > 0 ? (
+                    <SelectSeparator />
+                  ) : null}
+                  {reportList.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>Relatorios Power BI</SelectLabel>
+                      {reportList.map((report) => (
+                        <SelectItem key={report.id} value={report.id}>
+                          {report.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
                 </SelectContent>
               </Select>
               {formErrors.report && (
@@ -374,15 +500,17 @@ export default function SchedulesPage() {
               <Label>Formato de Exportacao</Label>
               <Select
                 value={formFormat}
-                onValueChange={(v) => setFormFormat(v as "PDF" | "PNG" | "PPTX")}
+                onValueChange={(v) => setFormFormat(v as ScheduleExportFormat)}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="PDF">PDF</SelectItem>
-                  <SelectItem value="PNG">PNG</SelectItem>
-                  <SelectItem value="PPTX">PPTX</SelectItem>
+                  {formatOptions.map((format) => (
+                    <SelectItem key={format} value={format}>
+                      {formatLabel(format)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -400,11 +528,32 @@ export default function SchedulesPage() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label>Contatos ({formContactIds.length} selecionado(s))</Label>
+              <div className="flex items-center justify-between gap-3">
+                <Label>Contatos ({formContactIds.length} selecionado(s))</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={() => void syncContactsFromBot(false)}
+                  disabled={syncingBotContacts}
+                >
+                  {syncingBotContacts ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="size-3.5" />
+                  )}
+                  Sincronizar do bot
+                </Button>
+              </div>
               <div className={`max-h-[160px] overflow-y-auto rounded-lg border p-3 ${formErrors.contacts ? "border-destructive" : ""}`}>
-                {contactList.filter((c) => c.is_active).length === 0 ? (
+                {syncingBotContacts && contactList.filter((c) => c.is_active).length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Nenhum contato ativo. Crie contatos primeiro.
+                    Buscando contatos e grupos conectados no bot...
+                  </p>
+                ) : contactList.filter((c) => c.is_active).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum contato ativo encontrado. Sincronize do bot ou cadastre manualmente.
                   </p>
                 ) : (
                   <div className="flex flex-col gap-2">

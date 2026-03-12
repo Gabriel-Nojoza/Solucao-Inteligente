@@ -3,15 +3,16 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
+import { BRAND_NAME, BRAND_SUBTITLE } from "@/lib/branding"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "DashPro - Automacao de Relatorios Power BI",
+  title: `${BRAND_NAME} - ${BRAND_SUBTITLE}`,
   description:
-    "Sistema de automacao de envio de relatorios Power BI via N8N e WhatsApp",
+    `Sistema de automação de envio de relatórios Power BI via N8N e WhatsApp da ${BRAND_NAME}`,
 }
 
 export const viewport: Viewport = {

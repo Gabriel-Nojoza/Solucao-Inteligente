@@ -10,6 +10,9 @@ export type CatalogEntry = {
   workspace_id: string | null
   updated_at: string
   catalog: CatalogPayload
+  execution_dataset_id?: string | null
+  execution_workspace_id?: string | null
+  execution_dataset_name?: string | null
 }
 
 export type CatalogMap = Record<string, CatalogEntry>
@@ -46,11 +49,35 @@ export async function getCatalogMap(companyId: string) {
 export async function saveCatalogEntry(
   companyId: string,
   datasetId: string,
-  entry: CatalogEntry
+  entry: Partial<CatalogEntry> & { updated_at: string }
 ) {
   const supabase = createClient()
   const catalogs = await getCatalogMap(companyId)
-  catalogs[datasetId] = entry
+  const current = catalogs[datasetId]
+
+  const nextEntry: CatalogEntry = {
+    workspace_id: entry.workspace_id ?? current?.workspace_id ?? null,
+    updated_at: entry.updated_at,
+    catalog: entry.catalog ?? current?.catalog ?? { tables: [], columns: [], measures: [] },
+    execution_dataset_id:
+      entry.execution_dataset_id !== undefined
+        ? entry.execution_dataset_id
+        : current?.execution_dataset_id ?? null,
+    execution_workspace_id:
+      entry.execution_workspace_id !== undefined
+        ? entry.execution_workspace_id
+        : current?.execution_workspace_id ?? null,
+    execution_dataset_name:
+      entry.execution_dataset_name !== undefined
+        ? entry.execution_dataset_name
+        : current?.execution_dataset_name ?? null,
+  }
+
+  if (!isValidCatalog(nextEntry.catalog)) {
+    throw new Error("Catalogo invalido")
+  }
+
+  catalogs[datasetId] = nextEntry
 
   const { error } = await supabase
     .from("company_settings")
@@ -67,4 +94,15 @@ export async function saveCatalogEntry(
   if (error) throw new Error(error.message)
 
   return catalogs
+}
+
+export function getExecutionTarget(
+  entry: CatalogEntry | undefined,
+  sourceDatasetId: string
+) {
+  return {
+    datasetId: entry?.execution_dataset_id || sourceDatasetId,
+    workspaceId: entry?.execution_workspace_id || entry?.workspace_id || null,
+    datasetName: entry?.execution_dataset_name || null,
+  }
 }

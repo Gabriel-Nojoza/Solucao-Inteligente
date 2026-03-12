@@ -9,7 +9,6 @@ import {
   Users,
   Clock,
   ScrollText,
-  Zap,
   Workflow,
   Moon,
   Sun,
@@ -18,6 +17,7 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
+import { BrandMark } from "@/components/branding/brand-mark"
 import {
   Sidebar,
   SidebarContent,
@@ -66,15 +66,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/" className="flex items-center gap-3">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <Zap className="size-4" />
-                </div>
-                <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold tracking-tight">DashPro</span>
-                  <span className="text-xs text-muted-foreground">
-                    Power BI Automation
-                  </span>
-                </div>
+                <BrandMark imageSize={36} />
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

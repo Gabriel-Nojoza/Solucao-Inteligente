@@ -1,7 +1,51 @@
 import { NextResponse } from "next/server"
-import { getAccessToken, executeDAXQuery } from "@/lib/powerbi"
+import { getAccessToken, executeDAXQuery, listDatasets } from "@/lib/powerbi"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
+import { getCatalogMap, getExecutionTarget } from "@/lib/automation-catalog"
+import { buildCsvContent, buildHtmlReport, buildTextReport } from "@/lib/report-export"
+import { BRAND_LOGO_PATH } from "@/lib/branding"
+import { normalizeFilters } from "@/lib/query-filters"
 import { getRequestContext } from "@/lib/tenant"
+
+function mapExecuteError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Erro desconhecido"
+
+  if (message.includes("exceeds the limit of 2048 MB")) {
+    return {
+      status: 413,
+      code: "DATASET_TOO_LARGE",
+      error:
+        "Dataset acima de 2GB para executeQueries. Use Premium/Fabric ou um dataset auxiliar para automacoes.",
+    }
+  }
+
+  if (
+    message.includes("cannot be determined") ||
+    message.includes("single value for column") ||
+    message.includes("A single value for column")
+  ) {
+    return {
+      status: 422,
+      code: "INVALID_MEASURE_CONTEXT",
+      error:
+        "A medida selecionada nao suporta esse agrupamento. Ajuste a medida no Power BI ou escolha outra combinacao de coluna e medida.",
+    }
+  }
+
+  if (message.includes("Dataset nao pertence a empresa do usuario")) {
+    return {
+      status: 403,
+      code: "DATASET_NOT_ALLOWED",
+      error: "Dataset nao pertence a empresa do usuario.",
+    }
+  }
+
+  return {
+    status: 500,
+    code: "EXECUTE_QUERY_ERROR",
+    error: message,
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -9,6 +53,9 @@ export async function POST(request: Request) {
     const supabase = createClient()
     const body = await request.json()
     const { datasetId, query } = body
+    const filters = normalizeFilters(body?.filters)
+    const requestedExecutionDatasetId = String(body?.executionDatasetId ?? "").trim()
+    const requestedExecutionWorkspaceId = String(body?.executionWorkspaceId ?? "").trim()
 
     if (!datasetId || !query) {
       return NextResponse.json(
@@ -25,7 +72,10 @@ export async function POST(request: Request) {
       .limit(1)
       .maybeSingle()
 
-    if (!report) {
+    const catalogs = await getCatalogMap(companyId)
+    const catalogEntry = catalogs[String(datasetId)]
+
+    if (!report && !catalogEntry) {
       return NextResponse.json(
         { error: "Dataset nao pertence a empresa do usuario" },
         { status: 403 }
@@ -33,13 +83,82 @@ export async function POST(request: Request) {
     }
 
     const token = await getAccessToken()
-    const result = await executeDAXQuery(token, datasetId, query)
+    const savedExecutionTarget = getExecutionTarget(catalogEntry, String(datasetId))
+    const effectiveExecutionDatasetId =
+      requestedExecutionDatasetId || savedExecutionTarget.datasetId
+    const effectiveExecutionWorkspaceId =
+      requestedExecutionWorkspaceId || savedExecutionTarget.workspaceId || null
 
-    return NextResponse.json(result)
+    if (effectiveExecutionDatasetId !== datasetId) {
+      const { data: executionReport } = await supabase
+        .from("reports")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("dataset_id", effectiveExecutionDatasetId)
+        .limit(1)
+        .maybeSingle()
+
+      const executionCatalogEntry = catalogs[effectiveExecutionDatasetId]
+
+      let executionAllowed: boolean = Boolean(executionReport || executionCatalogEntry)
+
+      if (!executionAllowed && effectiveExecutionWorkspaceId) {
+        const { data: workspace } = await supabase
+          .from("workspaces")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("pbi_workspace_id", effectiveExecutionWorkspaceId)
+          .single()
+
+        if (workspace) {
+          const datasets = await listDatasets(token, effectiveExecutionWorkspaceId)
+          executionAllowed = datasets.some((dataset) => dataset.id === effectiveExecutionDatasetId)
+        }
+      }
+
+      if (!executionAllowed) {
+        return NextResponse.json(
+          { error: "Dataset auxiliar de execucao nao pertence a empresa do usuario." },
+          { status: 403 }
+        )
+      }
+    }
+
+    const result = await executeDAXQuery(token, effectiveExecutionDatasetId, query)
+    const generatedAt = new Date()
+    const reportTitle = String(body?.reportTitle ?? "Resultado da Query")
+    const selectedItems = Array.isArray(body?.selectedItems)
+      ? body.selectedItems.filter((item: unknown): item is string => typeof item === "string")
+      : []
+    const reportHtml = buildHtmlReport({
+      title: reportTitle,
+      subtitle:
+        effectiveExecutionDatasetId === datasetId
+          ? `Dataset ${datasetId}`
+          : `Dataset origem ${datasetId} | Execucao ${effectiveExecutionDatasetId}`,
+      generatedAt,
+      selectedItems,
+      filters,
+      brandLogoUrl: new URL(BRAND_LOGO_PATH, request.url).toString(),
+      result,
+    })
+
+    return NextResponse.json({
+      ...result,
+      report: {
+        title: reportTitle,
+        generated_at: generatedAt.toISOString(),
+        executed_dataset_id: effectiveExecutionDatasetId,
+        html: reportHtml,
+        csv: buildCsvContent(result),
+        text: buildTextReport(result),
+      },
+    })
   } catch (error) {
+    const mapped = mapExecuteError(error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Erro desconhecido" },
-      { status: 500 }
+      { error: mapped.error, code: mapped.code },
+      { status: mapped.status }
     )
   }
 }

@@ -67,6 +67,11 @@ function describeCron(cron: string): string {
   return desc
 }
 
+function describeExportFormat(format: string): string {
+  if (format === "table") return "Tabela"
+  return format.toUpperCase()
+}
+
 export function SavedAutomationsList() {
   const { data: automations, isLoading } = useSWR<Automation[]>(
     "/api/automations",
@@ -190,6 +195,9 @@ export function SavedAutomationsList() {
                     </Badge>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="text-[10px]">
+                      {describeExportFormat(auto.export_format)}
+                    </Badge>
                     <Badge variant="outline" className="gap-1 text-[10px]">
                       <Database className="size-2.5" />
                       {auto.selected_columns?.length ?? 0} colunas,{" "}
@@ -199,6 +207,11 @@ export function SavedAutomationsList() {
                       <Badge variant="outline" className="gap-1 text-[10px]">
                         <Clock className="size-2.5" />
                         {describeCron(auto.cron_expression)}
+                      </Badge>
+                    )}
+                    {!auto.cron_expression && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Sob demanda
                       </Badge>
                     )}
                     {auto.contacts?.length > 0 && (

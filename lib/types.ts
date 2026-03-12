@@ -33,12 +33,14 @@ export interface Contact {
   updated_at: string
 }
 
+export type ScheduleExportFormat = "PDF" | "PNG" | "PPTX" | "table" | "csv" | "pdf"
+
 export interface Schedule {
   id: string
   name: string
   report_id: string
   cron_expression: string
-  export_format: "PDF" | "PNG" | "PPTX"
+  export_format: ScheduleExportFormat
   message_template: string | null
   is_active: boolean
   last_run_at: string | null
@@ -46,6 +48,7 @@ export interface Schedule {
   created_at: string
   updated_at: string
   report_name?: string
+  report_source?: "powerbi" | "created" | "unknown"
   contacts?: Contact[]
 }
 
@@ -116,6 +119,7 @@ export interface QueryFilter {
   columnName: string
   operator: "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "contains" | "startswith"
   value: string
+  valueTo?: string
   dataType: string
 }
 

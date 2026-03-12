@@ -29,6 +29,7 @@ interface DispatchDialogProps {
   contacts: Contact[]
   daxQuery: string
   datasetId: string
+  executionDatasetId?: string
   disabled?: boolean
 }
 
@@ -36,6 +37,7 @@ export function DispatchDialog({
   contacts,
   daxQuery,
   datasetId,
+  executionDatasetId,
   disabled,
 }: DispatchDialogProps) {
   const [open, setOpen] = useState(false)
@@ -64,6 +66,7 @@ export function DispatchDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataset_id: datasetId,
+          execution_dataset_id: executionDatasetId || datasetId,
           dax_query: daxQuery,
           export_format: exportFormat,
           message,

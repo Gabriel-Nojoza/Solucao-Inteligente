@@ -1,8 +1,19 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import useSWR, { mutate } from "swr"
-import { Plus, Search, Trash2, Pencil, Phone, UsersRound } from "lucide-react"
+import {
+  Plus,
+  Search,
+  Trash2,
+  Pencil,
+  Phone,
+  UsersRound,
+  Bot,
+  QrCode,
+  RotateCcw,
+  PlugZap,
+} from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { Button } from "@/components/ui/button"
@@ -41,19 +52,49 @@ import {
 } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Card, CardContent } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 import type { Contact } from "@/lib/types"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+type BotQrConfig = {
+  qr_code_url: string
+  updated_at: string | null
+  manual_qr_code_url: string
+  runtime_qr_code_url: string
+  manual_updated_at: string | null
+  connected_at: string | null
+  status: "starting" | "awaiting_qr" | "connected" | "reconnecting" | "offline" | "error"
+  last_error: string | null
+  phone_number: string | null
+  display_name: string | null
+  jid: string | null
+  source: "runtime" | "manual" | "none"
+}
+
 export default function ContactsPage() {
   const { data: contacts, isLoading } = useSWR<Contact[]>("/api/contacts", fetcher)
+  const { data: botQrConfig, isLoading: isLoadingBotQr } = useSWR<BotQrConfig>(
+    "/api/bot/qr",
+    fetcher,
+    { refreshInterval: 5000 }
+  )
   const [search, setSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState("all")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editContact, setEditContact] = useState<Contact | null>(null)
+  const [manualBotQrUrl, setManualBotQrUrl] = useState("")
+  const [savingBotQr, setSavingBotQr] = useState(false)
+  const [botActionLoading, setBotActionLoading] = useState<"disconnect" | "restart" | null>(null)
 
   // Form state
   const [formName, setFormName] = useState("")
@@ -64,6 +105,10 @@ export default function ContactsPage() {
   const [saving, setSaving] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
+  useEffect(() => {
+    setManualBotQrUrl(botQrConfig?.manual_qr_code_url ?? "")
+  }, [botQrConfig?.manual_qr_code_url])
+
   const filtered = (contacts ?? []).filter((c) => {
     const matchesSearch =
       c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -71,6 +116,48 @@ export default function ContactsPage() {
     const matchesType = typeFilter === "all" || c.type === typeFilter
     return matchesSearch && matchesType
   })
+  const shouldShowContacts = botQrConfig?.status === "connected"
+  const visibleContacts = shouldShowContacts ? filtered : []
+
+  const savedManualBotQrUrl = (botQrConfig?.manual_qr_code_url ?? "").trim()
+  const currentManualBotQrUrl = manualBotQrUrl.trim()
+  const botQrChanged = currentManualBotQrUrl !== savedManualBotQrUrl
+  const previewBotQrUrl =
+    (botQrConfig?.runtime_qr_code_url ?? "").trim() || currentManualBotQrUrl
+  const botQrUpdatedAt = botQrConfig?.updated_at
+    ? new Date(botQrConfig.updated_at).toLocaleString("pt-BR")
+    : null
+  const botConnectedAt = botQrConfig?.connected_at
+    ? new Date(botQrConfig.connected_at).toLocaleString("pt-BR")
+    : null
+  const botStatusLabel =
+    botQrConfig?.status === "connected"
+      ? "Conectado"
+      : botQrConfig?.status === "awaiting_qr"
+        ? "Aguardando leitura"
+        : botQrConfig?.status === "reconnecting"
+          ? "Reconectando"
+          : botQrConfig?.status === "starting"
+            ? "Iniciando"
+            : botQrConfig?.status === "error"
+              ? "Erro"
+              : "Offline"
+  const botStatusVariant =
+    botQrConfig?.status === "connected"
+      ? "default"
+      : botQrConfig?.status === "error"
+        ? "destructive"
+        : "secondary"
+  const botStatusMessage =
+    botQrConfig?.status === "connected"
+      ? "Bot conectado ao WhatsApp."
+      : botQrConfig?.status === "awaiting_qr"
+        ? "Leia o QR Code ao lado em Dispositivos conectados no WhatsApp."
+        : botQrConfig?.status === "starting"
+          ? "Gerando um novo QR Code para conexao."
+        : botQrConfig?.status === "reconnecting"
+            ? "Reconectando o bot ao WhatsApp."
+            : "Bot desconectado. Clique em Gerar QR para conectar novamente."
 
   function openCreate() {
     setEditContact(null)
@@ -157,6 +244,79 @@ export default function ContactsPage() {
     }
   }
 
+  async function handleSaveBotQr() {
+    setSavingBotQr(true)
+    try {
+      const res = await fetch("/api/bot/qr", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          qr_code_url: currentManualBotQrUrl,
+        }),
+      })
+
+      const data = (await res.json().catch(() => null)) as
+        | {
+            error?: string
+            qr_code_url?: string
+            manual_qr_code_url?: string
+            runtime_qr_code_url?: string
+            updated_at?: string | null
+            manual_updated_at?: string | null
+            connected_at?: string | null
+            status?:
+              | "starting"
+              | "awaiting_qr"
+              | "connected"
+              | "reconnecting"
+              | "offline"
+              | "error"
+            last_error?: string | null
+            source?: "runtime" | "manual" | "none"
+          }
+        | null
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao salvar QR Code")
+      }
+
+      await mutate("/api/bot/qr", data, false)
+      toast.success("QR Code do bot atualizado!")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar QR Code")
+    } finally {
+      setSavingBotQr(false)
+    }
+  }
+
+  async function handleBotControl(action: "disconnect" | "restart") {
+    setBotActionLoading(action)
+    try {
+      const res = await fetch("/api/bot/qr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      })
+
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao controlar bot")
+      }
+
+      await mutate("/api/bot/qr")
+      toast.success(
+        action === "restart"
+          ? "Novo QR solicitado. Aguarde ele aparecer."
+          : "Bot desconectado. Clique em Gerar QR para conectar novamente."
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao controlar bot")
+    } finally {
+      setBotActionLoading(null)
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader title="Contatos" description="Gerencie contatos e grupos WhatsApp">
@@ -190,6 +350,143 @@ export default function ContactsPage() {
         </div>
 
         <Card>
+          <CardHeader className="gap-3">
+            <div className="flex items-start gap-3">
+              <div className="rounded-lg border border-primary/20 bg-primary/10 p-2 text-primary">
+                <Bot className="size-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle>QR Code do Bot WhatsApp</CardTitle>
+                  <Badge variant={botStatusVariant}>{botStatusLabel}</Badge>
+                  {botQrConfig?.source === "runtime" ? (
+                    <Badge variant="outline">Automatico</Badge>
+                  ) : null}
+                </div>
+                <CardDescription>
+                  O bot agora publica o QR automaticamente neste painel quando precisar
+                  reconectar. O campo abaixo fica como fallback manual.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-muted/10 p-4 text-sm">
+                <p className="font-medium">
+                  {botStatusMessage}
+                </p>
+                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {botQrUpdatedAt ? <p>Ultima atualizacao: {botQrUpdatedAt}</p> : null}
+                  {botConnectedAt ? <p>Conectado em: {botConnectedAt}</p> : null}
+                  {botQrConfig?.last_error ? <p>Erro: {botQrConfig.last_error}</p> : null}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">Nome da conta</p>
+                  <p className="mt-1 text-sm font-medium">
+                    {botQrConfig?.display_name || "-"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">Numero conectado</p>
+                  <p className="mt-1 text-sm font-medium">
+                    {botQrConfig?.phone_number || "-"}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-muted/10 p-4">
+                  <p className="text-xs text-muted-foreground">JID</p>
+                  <p className="mt-1 break-all text-sm font-medium">
+                    {botQrConfig?.jid || "-"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  variant="outline"
+                  onClick={() => handleBotControl("disconnect")}
+                  disabled={botActionLoading !== null || botQrConfig?.status === "offline"}
+                >
+                  <PlugZap className="mr-2 size-4" />
+                  {botActionLoading === "disconnect" ? "Desconectando..." : "Desconectar"}
+                </Button>
+                <Button
+                  onClick={() => handleBotControl("restart")}
+                  disabled={botActionLoading !== null}
+                >
+                  <RotateCcw className="mr-2 size-4" />
+                  {botActionLoading === "restart" ? "Gerando QR..." : "Gerar QR"}
+                </Button>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="bot-qr-url">QR Code do bot</Label>
+                <Textarea
+                  id="bot-qr-url"
+                  value={manualBotQrUrl}
+                  onChange={(e) => setManualBotQrUrl(e.target.value)}
+                  placeholder="Opcional: cole aqui uma URL publica do QR Code ou uma data URL para fallback manual"
+                  className="min-h-28 resize-y"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Se o bot estiver rodando, o preview acima usa o QR automatico. Esse campo
+                  so entra como reserva manual.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Button
+                  onClick={handleSaveBotQr}
+                  disabled={savingBotQr || !botQrChanged}
+                >
+                  {savingBotQr ? "Salvando..." : "Salvar QR Manual"}
+                </Button>
+                {botQrConfig?.manual_updated_at ? (
+                  <span className="text-xs text-muted-foreground">
+                    Fallback manual atualizado em{" "}
+                    {new Date(botQrConfig.manual_updated_at).toLocaleString("pt-BR")}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label>Preview</Label>
+              <div className="flex min-h-[260px] items-center justify-center rounded-xl border border-dashed bg-muted/10 p-4">
+                {isLoadingBotQr ? (
+                  <Skeleton className="size-[220px] rounded-xl" />
+                ) : previewBotQrUrl ? (
+                  <img
+                    src={previewBotQrUrl}
+                    alt="QR Code do bot WhatsApp"
+                    className="max-h-[220px] w-full max-w-[220px] rounded-lg border bg-white object-contain p-2"
+                  />
+                ) : botQrConfig?.status === "connected" ? (
+                  <div className="flex flex-col items-center gap-3 text-center text-sm text-muted-foreground">
+                    <div className="rounded-full border border-dashed p-3">
+                      <Bot className="size-6" />
+                    </div>
+                    <p>
+                      Bot conectado. O QR so aparece novamente quando o WhatsApp pedir uma
+                      nova leitura.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-center text-sm text-muted-foreground">
+                    <div className="rounded-full border border-dashed p-3">
+                      <QrCode className="size-6" />
+                    </div>
+                    <p>
+                      Nenhum QR disponivel no momento. Inicie o bot ou salve um fallback
+                      manual para exibir aqui.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardContent className="p-0">
             {isLoading ? (
               <div className="space-y-3 p-6">
@@ -197,11 +494,13 @@ export default function ContactsPage() {
                   <Skeleton key={i} className="h-12 rounded" />
                 ))}
               </div>
-            ) : filtered.length === 0 ? (
+            ) : visibleContacts.length === 0 ? (
               <p className="py-12 text-center text-sm text-muted-foreground">
-                {contacts?.length === 0
-                  ? "Nenhum contato cadastrado. Clique em 'Novo Contato' para adicionar."
-                  : "Nenhum resultado encontrado."}
+                {!shouldShowContacts
+                  ? "Bot desconectado. Conecte o WhatsApp para exibir novamente os contatos sincronizados."
+                  : contacts?.length === 0
+                    ? "Nenhum contato cadastrado. Clique em 'Novo Contato' para adicionar."
+                    : "Nenhum resultado encontrado."}
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -216,7 +515,7 @@ export default function ContactsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((contact) => (
+                  {visibleContacts.map((contact) => (
                     <TableRow key={contact.id}>
                       <TableCell className="font-medium">{contact.name}</TableCell>
                       <TableCell className="hidden text-muted-foreground sm:table-cell">

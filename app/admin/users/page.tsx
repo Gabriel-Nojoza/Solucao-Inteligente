@@ -6,8 +6,10 @@ import { Plus, Pencil, Trash2, Shield, User, Loader2, Eye, EyeOff, Database, Ale
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -49,6 +51,20 @@ interface UserData {
   email: string
   created_at: string
   last_sign_in_at: string | null
+  company_id?: string
+  company_name?: string
+  powerbi?: {
+    tenant_id?: string
+    client_id?: string
+    client_secret?: string
+  }
+  n8n?: {
+    webhook_url?: string
+    callback_secret?: string
+  }
+  workspace_access_configured?: boolean
+  available_workspaces?: WorkspaceOption[]
+  selected_pbi_workspace_ids?: string[]
   app_metadata?: {
     role?: string
     company_id?: string
@@ -68,6 +84,12 @@ interface PowerBIPreview {
     name: string
     dataset_count: number
   }>
+}
+
+interface WorkspaceOption {
+  id: string
+  name: string
+  dataset_count?: number
 }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -93,9 +115,24 @@ export default function UsersPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [loadingEditDetails, setLoadingEditDetails] = useState(false)
   const [testingPowerBI, setTestingPowerBI] = useState(false)
   const [powerbiPreview, setPowerbiPreview] = useState<PowerBIPreview | null>(null)
   const [powerbiPreviewError, setPowerbiPreviewError] = useState<string | null>(null)
+  const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[]>([])
+  const [selectedPbiWorkspaceIds, setSelectedPbiWorkspaceIds] = useState<string[]>([])
+
+  function notifySuccess(message: string) {
+    window.setTimeout(() => {
+      toast.success(message)
+    }, 0)
+  }
+
+  function notifyError(message: string) {
+    window.setTimeout(() => {
+      toast.error(message)
+    }, 0)
+  }
 
   function openCreate() {
     setEditUser(null)
@@ -109,24 +146,69 @@ export default function UsersPage() {
     setFormPbiClientSecret("")
     setFormN8nWebhookUrl("")
     setFormN8nCallbackSecret("")
+    setLoadingEditDetails(false)
     setPowerbiPreview(null)
     setPowerbiPreviewError(null)
+    setWorkspaceOptions([])
+    setSelectedPbiWorkspaceIds([])
     setDialogOpen(true)
   }
 
-  function openEdit(user: UserData) {
+  async function openEdit(user: UserData) {
     setEditUser(user)
     setFormEmail(user.email)
     setFormPassword("")
     setFormName(user.user_metadata?.name || "")
     const role = user.app_metadata?.role || user.user_metadata?.role
     setFormRole((role as "client" | "admin") || "client")
+    setFormCompanyName("")
+    setFormPbiTenantId("")
+    setFormPbiClientId("")
+    setFormPbiClientSecret("")
+    setFormN8nWebhookUrl("")
+    setFormN8nCallbackSecret("")
+    setPowerbiPreview(null)
+    setPowerbiPreviewError(null)
+    setWorkspaceOptions([])
+    setSelectedPbiWorkspaceIds([])
+    setLoadingEditDetails(true)
     setDialogOpen(true)
+
+    try {
+      const res = await fetch(`/api/admin/users?id=${user.id}`)
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Erro ao carregar dados do usuario")
+      }
+
+      const details = data as UserData
+      setFormCompanyName(details.company_name || "")
+      setFormPbiTenantId(details.powerbi?.tenant_id || "")
+      setFormPbiClientId(details.powerbi?.client_id || "")
+      setFormPbiClientSecret(details.powerbi?.client_secret || "")
+      setFormN8nWebhookUrl(details.n8n?.webhook_url || "")
+      setFormN8nCallbackSecret(details.n8n?.callback_secret || "")
+      setWorkspaceOptions(details.available_workspaces || [])
+      setSelectedPbiWorkspaceIds(details.selected_pbi_workspace_ids || [])
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : "Erro ao carregar dados do usuario")
+    } finally {
+      setLoadingEditDetails(false)
+    }
+  }
+
+  function toggleWorkspace(workspaceId: string, checked: boolean) {
+    setSelectedPbiWorkspaceIds((current) =>
+      checked
+        ? Array.from(new Set([...current, workspaceId]))
+        : current.filter((id) => id !== workspaceId)
+    )
   }
 
   async function handleTestPowerBI() {
     if (!formPbiTenantId || !formPbiClientId || !formPbiClientSecret) {
-      toast.error("Preencha Tenant ID, Client ID e Client Secret")
+      notifyError("Preencha Tenant ID, Client ID e Client Secret")
       return
     }
 
@@ -148,12 +230,28 @@ export default function UsersPage() {
       if (!res.ok) {
         throw new Error(data.error || "Falha ao validar credenciais")
       }
-      setPowerbiPreview(data as PowerBIPreview)
-      toast.success("Credenciais validadas e dados carregados")
+      const preview = data as PowerBIPreview
+      const nextWorkspaceOptions = preview.workspaces.map((workspace) => ({
+        id: workspace.id,
+        name: workspace.name,
+        dataset_count: workspace.dataset_count,
+      }))
+
+      setPowerbiPreview(preview)
+      setWorkspaceOptions(nextWorkspaceOptions)
+      setSelectedPbiWorkspaceIds((current) => {
+        if (workspaceOptions.length === 0 && current.length === 0) {
+          return nextWorkspaceOptions.map((workspace) => workspace.id)
+        }
+
+        const nextIds = new Set(nextWorkspaceOptions.map((workspace) => workspace.id))
+        return current.filter((id) => nextIds.has(id))
+      })
+      notifySuccess("Credenciais validadas e dados carregados")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erro ao validar credenciais"
       setPowerbiPreviewError(message)
-      toast.error(message)
+      notifyError(message)
     } finally {
       setTestingPowerBI(false)
     }
@@ -161,15 +259,14 @@ export default function UsersPage() {
 
   async function handleSave() {
     if (!formEmail || (!editUser && !formPassword)) {
-      toast.error("Preencha todos os campos obrigatorios")
+      notifyError("Preencha todos os campos obrigatorios")
       return
     }
     if (
-      !editUser &&
       formRole === "client" &&
       (!formCompanyName || !formPbiTenantId || !formPbiClientId || !formPbiClientSecret)
     ) {
-      toast.error("Para cliente, preencha empresa e credenciais Power BI")
+      notifyError("Para cliente, preencha empresa e credenciais Power BI")
       return
     }
 
@@ -181,9 +278,9 @@ export default function UsersPage() {
         password: formPassword || undefined,
         name: formName,
         role: formRole,
-        company_name: !editUser && formRole === "client" ? formCompanyName : undefined,
+        company_name: formRole === "client" ? formCompanyName : undefined,
         powerbi:
-          !editUser && formRole === "client"
+          formRole === "client"
             ? {
                 tenant_id: formPbiTenantId,
                 client_id: formPbiClientId,
@@ -191,11 +288,15 @@ export default function UsersPage() {
               }
             : undefined,
         n8n:
-          !editUser && formRole === "client"
+          formRole === "client"
             ? {
                 webhook_url: formN8nWebhookUrl,
                 callback_secret: formN8nCallbackSecret,
               }
+            : undefined,
+        selected_pbi_workspace_ids:
+          formRole === "client" && workspaceOptions.length > 0
+            ? selectedPbiWorkspaceIds
             : undefined,
       }
 
@@ -210,12 +311,12 @@ export default function UsersPage() {
         throw new Error(data.error || "Erro ao salvar")
       }
 
-      toast.success(editUser ? "Usuario atualizado!" : "Usuario criado!")
       setDialogOpen(false)
-      mutate("/api/admin/users")
-      mutate("/api/admin/stats")
+      void mutate("/api/admin/users")
+      void mutate("/api/admin/stats")
+      notifySuccess(editUser ? "Usuario atualizado!" : "Usuario criado!")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar")
+      notifyError(err instanceof Error ? err.message : "Erro ao salvar")
     } finally {
       setSaving(false)
     }
@@ -228,14 +329,17 @@ export default function UsersPage() {
       const res = await fetch(`/api/admin/users?id=${deleteUser.id}`, {
         method: "DELETE",
       })
-      if (!res.ok) throw new Error()
-      toast.success("Usuario removido!")
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Erro ao remover usuario")
+      }
       setDeleteDialogOpen(false)
       setDeleteUser(null)
-      mutate("/api/admin/users")
-      mutate("/api/admin/stats")
-    } catch {
-      toast.error("Erro ao remover usuario")
+      void mutate("/api/admin/users")
+      void mutate("/api/admin/stats")
+      notifySuccess("Usuario removido!")
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : "Erro ao remover usuario")
     } finally {
       setDeleting(false)
     }
@@ -424,7 +528,16 @@ export default function UsersPage() {
                 </Select>
               </div>
 
-              {!editUser && formRole === "client" && (
+              {formRole === "client" && loadingEditDetails ? (
+                <div className="flex min-h-40 items-center justify-center rounded-lg border border-border/60 md:col-span-2">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    Carregando configuracoes do cliente...
+                  </div>
+                </div>
+              ) : null}
+
+              {formRole === "client" && !loadingEditDetails && (
                 <>
                   <div className="rounded-lg border border-border/60 p-3 md:col-span-2">
                     <p className="mb-3 text-sm font-medium">Empresa do Cliente</p>
@@ -513,6 +626,77 @@ export default function UsersPage() {
                           </div>
                         </div>
                       )}
+
+                      <div className="rounded-md border border-border/60 bg-muted/10 p-3">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">Workspaces liberados</p>
+                            <p className="text-xs text-muted-foreground">
+                              Selecione quais workspaces este usuario podera acessar.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedPbiWorkspaceIds(workspaceOptions.map((workspace) => workspace.id))}
+                              disabled={workspaceOptions.length === 0}
+                            >
+                              Marcar todos
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedPbiWorkspaceIds([])}
+                              disabled={workspaceOptions.length === 0}
+                            >
+                              Limpar
+                            </Button>
+                          </div>
+                        </div>
+
+                        {workspaceOptions.length === 0 ? (
+                          <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-xs text-muted-foreground">
+                            Valide as credenciais do Power BI para carregar os workspaces disponiveis.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="mb-2 text-xs text-muted-foreground">
+                              {selectedPbiWorkspaceIds.length} de {workspaceOptions.length} workspaces selecionados
+                            </div>
+                            <ScrollArea className="h-40 rounded-md border border-border/60">
+                              <div className="space-y-2 p-3">
+                                {workspaceOptions.map((workspace) => {
+                                  const checked = selectedPbiWorkspaceIds.includes(workspace.id)
+
+                                  return (
+                                    <label
+                                      key={workspace.id}
+                                      className="flex cursor-pointer items-start gap-3 rounded-md border border-border/50 px-3 py-2 text-sm hover:bg-muted/20"
+                                    >
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={(value) => toggleWorkspace(workspace.id, value === true)}
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="truncate font-medium text-foreground">{workspace.name}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                          ID: {workspace.id}
+                                          {typeof workspace.dataset_count === "number"
+                                            ? ` • ${workspace.dataset_count} datasets`
+                                            : ""}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  )
+                                })}
+                              </div>
+                            </ScrollArea>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -546,7 +730,7 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving || loadingEditDetails}>
               {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
               {editUser ? "Salvar" : "Criar"}
             </Button>

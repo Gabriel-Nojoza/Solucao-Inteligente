@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Save, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -24,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CronBuilder } from "@/components/schedules/cron-builder"
+import { toast } from "sonner"
 import type { Contact } from "@/lib/types"
 
 interface SaveAutomationDialogProps {
@@ -43,16 +45,27 @@ export function SaveAutomationDialog({
   onSave,
   disabled,
 }: SaveAutomationDialogProps) {
+  const router = useRouter()
+  const defaultMessage = "Segue os dados da automacao {name} em anexo."
+  const defaultCron = "0 8 * * 1-5"
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState("")
-  const [cron, setCron] = useState("")
+  const [cron, setCron] = useState(defaultCron)
   const [enableSchedule, setEnableSchedule] = useState(false)
   const [exportFormat, setExportFormat] = useState("csv")
-  const [message, setMessage] = useState(
-    "Segue os dados da automacao {name} em anexo."
-  )
+  const [message, setMessage] = useState(defaultMessage)
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
+  const activeContacts = contacts.filter((contact) => contact.is_active)
+
+  const resetForm = () => {
+    setName("")
+    setCron(defaultCron)
+    setEnableSchedule(false)
+    setExportFormat("csv")
+    setMessage(defaultMessage)
+    setSelectedContacts([])
+  }
 
   const toggleContact = (id: string) => {
     setSelectedContacts((prev) =>
@@ -61,28 +74,47 @@ export function SaveAutomationDialog({
   }
 
   const handleSave = async () => {
-    if (!name.trim()) return
+    if (!name.trim()) {
+      toast.error("Informe um nome para a automacao")
+      return
+    }
+    if (enableSchedule && (!cron.trim() || cron.trim().split(/\s+/).length !== 5)) {
+      toast.error("Defina uma frequencia valida para o agendamento")
+      return
+    }
+    if (enableSchedule && activeContacts.length > 0 && selectedContacts.length === 0) {
+      toast.error("Selecione ao menos 1 contato para o envio automatico")
+      return
+    }
     setSaving(true)
     try {
       await onSave({
         name: name.trim(),
-        cron_expression: enableSchedule && cron ? cron : null,
+        cron_expression: enableSchedule ? cron.trim() : null,
         export_format: exportFormat,
         message_template: message,
         contact_ids: selectedContacts,
       })
       setOpen(false)
-      setName("")
-      setCron("")
-      setEnableSchedule(false)
-      setSelectedContacts([])
+      resetForm()
+      router.push("/reports")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar automacao")
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (!nextOpen && !saving) {
+          resetForm()
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" disabled={disabled}>
           <Save className="size-3" />
@@ -127,7 +159,13 @@ export function SaveAutomationDialog({
               <Checkbox
                 id="enable-schedule"
                 checked={enableSchedule}
-                onCheckedChange={(v) => setEnableSchedule(v === true)}
+                onCheckedChange={(v) => {
+                  const checked = v === true
+                  setEnableSchedule(checked)
+                  if (checked && !cron.trim()) {
+                    setCron(defaultCron)
+                  }
+                }}
               />
               <Label htmlFor="enable-schedule">Agendar execucao automatica</Label>
             </div>
@@ -146,11 +184,11 @@ export function SaveAutomationDialog({
             />
           </div>
 
-          {contacts.length > 0 && (
+          {activeContacts.length > 0 && (
             <div className="space-y-2">
               <Label>Contatos para envio</Label>
               <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                {contacts.map((contact) => (
+                {activeContacts.map((contact) => (
                   <label
                     key={contact.id}
                     className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent transition-colors"
@@ -173,7 +211,13 @@ export function SaveAutomationDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false)
+              resetForm()
+            }}
+          >
             Cancelar
           </Button>
           <Button onClick={handleSave} disabled={saving || !name.trim()}>

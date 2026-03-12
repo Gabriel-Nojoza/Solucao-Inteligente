@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server"
+import { getSelectedPbiWorkspaceIds, isWorkspaceAccessConfigured } from "@/lib/workspace-access"
 
 export type RequestContext = {
   userId: string
@@ -6,6 +7,8 @@ export type RequestContext = {
   role: "admin" | "client"
   companyId: string
   isPlatformAdmin: boolean
+  workspaceAccessConfigured: boolean
+  selectedPbiWorkspaceIds: string[]
 }
 
 function getRole(user: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }) {
@@ -46,6 +49,8 @@ export async function getRequestContext(): Promise<RequestContext> {
     role: getRole(data.user),
     companyId,
     isPlatformAdmin: isPlatformAdminEmail(email),
+    workspaceAccessConfigured: isWorkspaceAccessConfigured(data.user),
+    selectedPbiWorkspaceIds: getSelectedPbiWorkspaceIds(data.user),
   }
 }
 
