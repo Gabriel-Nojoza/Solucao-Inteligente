@@ -40,6 +40,7 @@ import {
   getDefaultFilterValueTo,
   isDateLikeDataType,
 } from "@/lib/quick-filters"
+import { createId } from "@/lib/id"
 import type { Contact, DatasetColumn, QueryFilter } from "@/lib/types"
 
 type CreatedReport = {
@@ -54,6 +55,7 @@ type CreatedReport = {
 interface SavedReportSendDialogProps {
   report: CreatedReport
   contacts: Contact[]
+  showContacts: boolean
 }
 
 function getInputType(dataType: string) {
@@ -86,6 +88,7 @@ const fetcher = async (url: string) => {
 export function SavedReportSendDialog({
   report,
   contacts,
+  showContacts,
 }: SavedReportSendDialogProps) {
   const [open, setOpen] = useState(false)
   const [sending, setSending] = useState(false)
@@ -99,8 +102,8 @@ export function SavedReportSendDialog({
   }>(open && report.dataset_id ? `/api/automations/catalog?datasetId=${report.dataset_id}` : null, fetcher)
 
   const activeContacts = useMemo(
-    () => contacts.filter((contact) => contact.is_active),
-    [contacts]
+    () => (showContacts ? contacts.filter((contact) => contact.is_active) : []),
+    [contacts, showContacts]
   )
   const fallbackColumns = useMemo(() => {
     const sourceFilters = Array.isArray(report.filters) ? report.filters : []
@@ -180,7 +183,7 @@ export function SavedReportSendDialog({
     setLocalFilters((current) => [
       ...current,
       {
-        id: crypto.randomUUID(),
+        id: createId("filter"),
         tableName,
         columnName,
         operator: "eq",
@@ -236,6 +239,11 @@ export function SavedReportSendDialog({
   }
 
   async function handleSend() {
+    if (!showContacts) {
+      toast.error("Leia o QR Code e conecte o WhatsApp na tela de Contatos para liberar os contatos.")
+      return
+    }
+
     if (selectedContacts.length === 0) {
       toast.error("Selecione ao menos 1 contato")
       return
@@ -500,7 +508,11 @@ export function SavedReportSendDialog({
                 </p>
               </div>
 
-              {activeContacts.length === 0 ? (
+              {!showContacts ? (
+                <div className="text-xs text-muted-foreground">
+                  Os contatos so aparecem depois que o WhatsApp for conectado pela leitura do QR Code na tela de Contatos.
+                </div>
+              ) : activeContacts.length === 0 ? (
                 <div className="text-xs text-muted-foreground">
                   Nenhum contato ativo cadastrado.
                 </div>
@@ -543,7 +555,7 @@ export function SavedReportSendDialog({
           </Button>
           <Button
             onClick={handleSend}
-            disabled={saving || sending || selectedContacts.length === 0}
+            disabled={saving || sending || !showContacts || selectedContacts.length === 0}
           >
             {sending ? (
               <Loader2 className="mr-2 size-4 animate-spin" />

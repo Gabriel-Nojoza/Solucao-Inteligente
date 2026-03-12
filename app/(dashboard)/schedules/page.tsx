@@ -61,6 +61,10 @@ import type { Schedule, Report, Contact, ScheduleExportFormat } from "@/lib/type
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+type BotQrStatus = {
+  status: "starting" | "awaiting_qr" | "connected" | "reconnecting" | "offline" | "error"
+}
+
 type CreatedReport = {
   id: string
   name: string
@@ -106,10 +110,13 @@ export default function SchedulesPage() {
   const { data: reports } = useSWR<Report[]>("/api/reports", fetcher)
   const { data: createdReports } = useSWR<CreatedReport[]>("/api/automations", fetcher)
   const { data: contacts } = useSWR<Contact[]>("/api/contacts", fetcher)
+  const { data: botQrConfig } = useSWR<BotQrStatus>("/api/bot/qr", fetcher)
   const scheduleList = Array.isArray(schedules) ? schedules : []
   const reportList = Array.isArray(reports) ? reports : []
   const createdReportList = Array.isArray(createdReports) ? createdReports : []
   const contactList = Array.isArray(contacts) ? contacts : []
+  const canShowContacts = botQrConfig?.status === "connected"
+  const activeContacts = canShowContacts ? contactList.filter((contact) => contact.is_active) : []
   const reportOptions = useMemo<ScheduleReportOption[]>(
     () => [
       ...createdReportList.map((report) => ({
@@ -163,7 +170,9 @@ export default function SchedulesPage() {
     setFormActive(true)
     setFormErrors({})
     setDialogOpen(true)
-    void syncContactsFromBot(true)
+    if (canShowContacts) {
+      void syncContactsFromBot(true)
+    }
   }
 
   function openEdit(schedule: Schedule & { contacts: { id: string; name: string }[] }) {
@@ -177,7 +186,9 @@ export default function SchedulesPage() {
     setFormActive(schedule.is_active)
     setFormErrors({})
     setDialogOpen(true)
-    void syncContactsFromBot(true)
+    if (canShowContacts) {
+      void syncContactsFromBot(true)
+    }
   }
 
   function validateScheduleForm(): boolean {
@@ -187,7 +198,11 @@ export default function SchedulesPage() {
     if (!formCron.trim()) errors.cron = "Frequencia obrigatoria"
     if (formCron.trim().split(/\s+/).length !== 5)
       errors.cron = "Expressao CRON deve ter 5 campos"
-    if (formContactIds.length === 0) errors.contacts = "Selecione ao menos 1 contato"
+    if (!canShowContacts && formContactIds.length === 0) {
+      errors.contacts = "Conecte o WhatsApp pela leitura do QR Code para liberar os contatos"
+    } else if (formContactIds.length === 0) {
+      errors.contacts = "Selecione ao menos 1 contato"
+    }
     setFormErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -265,6 +280,13 @@ export default function SchedulesPage() {
   }
 
   async function syncContactsFromBot(silent = false) {
+    if (!canShowContacts) {
+      if (!silent) {
+        toast.error("Conecte o WhatsApp pela leitura do QR Code antes de sincronizar contatos.")
+      }
+      return
+    }
+
     setSyncingBotContacts(true)
     try {
       const res = await fetch("/api/contacts/sync-bot", {
@@ -536,7 +558,7 @@ export default function SchedulesPage() {
                   size="sm"
                   className="h-8 gap-1.5 text-xs"
                   onClick={() => void syncContactsFromBot(false)}
-                  disabled={syncingBotContacts}
+                  disabled={syncingBotContacts || !canShowContacts}
                 >
                   {syncingBotContacts ? (
                     <Loader2 className="size-3.5 animate-spin" />
@@ -547,19 +569,21 @@ export default function SchedulesPage() {
                 </Button>
               </div>
               <div className={`max-h-[160px] overflow-y-auto rounded-lg border p-3 ${formErrors.contacts ? "border-destructive" : ""}`}>
-                {syncingBotContacts && contactList.filter((c) => c.is_active).length === 0 ? (
+                {!canShowContacts ? (
+                  <p className="text-sm text-muted-foreground">
+                    Os contatos so aparecem depois que o WhatsApp for conectado pela leitura do QR Code.
+                  </p>
+                ) : syncingBotContacts && activeContacts.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Buscando contatos e grupos conectados no bot...
                   </p>
-                ) : contactList.filter((c) => c.is_active).length === 0 ? (
+                ) : activeContacts.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Nenhum contato ativo encontrado. Sincronize do bot ou cadastre manualmente.
                   </p>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {contactList
-                      .filter((c) => c.is_active)
-                      .map((c) => (
+                    {activeContacts.map((c) => (
                         <label
                           key={c.id}
                           className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-accent"
@@ -593,7 +617,13 @@ export default function SchedulesPage() {
 
             <Button
               onClick={handleSave}
-              disabled={saving || !formName || !formReportId || !formCron}
+              disabled={
+                saving ||
+                !formName ||
+                !formReportId ||
+                !formCron ||
+                (!canShowContacts && formContactIds.length === 0)
+              }
             >
               {saving ? "Salvando..." : "Salvar"}
             </Button>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Save, Loader2 } from "lucide-react"
 import {
@@ -30,6 +30,7 @@ import type { Contact } from "@/lib/types"
 
 interface SaveAutomationDialogProps {
   contacts: Contact[]
+  showContacts: boolean
   onSave: (data: {
     name: string
     cron_expression: string | null
@@ -42,6 +43,7 @@ interface SaveAutomationDialogProps {
 
 export function SaveAutomationDialog({
   contacts,
+  showContacts,
   onSave,
   disabled,
 }: SaveAutomationDialogProps) {
@@ -56,7 +58,15 @@ export function SaveAutomationDialog({
   const [exportFormat, setExportFormat] = useState("csv")
   const [message, setMessage] = useState(defaultMessage)
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
-  const activeContacts = contacts.filter((contact) => contact.is_active)
+  const activeContacts = showContacts
+    ? contacts.filter((contact) => contact.is_active)
+    : []
+
+  useEffect(() => {
+    if (!showContacts) {
+      setSelectedContacts([])
+    }
+  }, [showContacts])
 
   const resetForm = () => {
     setName("")
@@ -80,6 +90,10 @@ export function SaveAutomationDialog({
     }
     if (enableSchedule && (!cron.trim() || cron.trim().split(/\s+/).length !== 5)) {
       toast.error("Defina uma frequencia valida para o agendamento")
+      return
+    }
+    if (enableSchedule && !showContacts) {
+      toast.error("Conecte o WhatsApp pela leitura do QR Code para liberar os contatos")
       return
     }
     if (enableSchedule && activeContacts.length > 0 && selectedContacts.length === 0) {
@@ -184,14 +198,22 @@ export function SaveAutomationDialog({
             />
           </div>
 
-          {activeContacts.length > 0 && (
-            <div className="space-y-2">
-              <Label>Contatos para envio</Label>
+          <div className="space-y-2">
+            <Label>Contatos para envio</Label>
+            {!showContacts ? (
+              <p className="text-xs text-muted-foreground">
+                Os contatos so aparecem depois que o WhatsApp for conectado pela leitura do QR Code.
+              </p>
+            ) : activeContacts.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Nenhum contato ativo cadastrado. Adicione na pagina de Contatos.
+              </p>
+            ) : (
               <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border p-2">
                 {activeContacts.map((contact) => (
                   <label
                     key={contact.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-accent transition-colors"
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent"
                   >
                     <Checkbox
                       checked={selectedContacts.includes(contact.id)}
@@ -206,8 +228,8 @@ export function SaveAutomationDialog({
                   </label>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -220,7 +242,10 @@ export function SaveAutomationDialog({
           >
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={saving || !name.trim()}>
+          <Button
+            onClick={handleSave}
+            disabled={saving || !name.trim() || (enableSchedule && !showContacts)}
+          >
             {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
             Salvar
           </Button>

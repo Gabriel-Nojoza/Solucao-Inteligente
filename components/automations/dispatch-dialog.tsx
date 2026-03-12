@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Send, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -27,6 +27,7 @@ import type { Contact } from "@/lib/types"
 
 interface DispatchDialogProps {
   contacts: Contact[]
+  showContacts: boolean
   daxQuery: string
   datasetId: string
   executionDatasetId?: string
@@ -35,6 +36,7 @@ interface DispatchDialogProps {
 
 export function DispatchDialog({
   contacts,
+  showContacts,
   daxQuery,
   datasetId,
   executionDatasetId,
@@ -45,16 +47,24 @@ export function DispatchDialog({
   const [exportFormat, setExportFormat] = useState("csv")
   const [message, setMessage] = useState("Segue os dados solicitados em anexo.")
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
+  const activeContacts = showContacts ? contacts.filter((c) => c.is_active) : []
+
+  useEffect(() => {
+    if (!showContacts) {
+      setSelectedContacts([])
+    }
+  }, [showContacts])
 
   const toggleContact = (id: string) => {
     setSelectedContacts((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
     )
   }
-
-  const activeContacts = contacts.filter((c) => c.is_active)
-
   const handleDispatch = async () => {
+    if (!showContacts) {
+      toast.error("Conecte o WhatsApp pela leitura do QR Code para liberar os contatos")
+      return
+    }
     if (selectedContacts.length === 0) {
       toast.error("Selecione ao menos 1 contato")
       return
@@ -132,7 +142,11 @@ export function DispatchDialog({
 
           <div className="space-y-2">
             <Label>Contatos ({selectedContacts.length} selecionado(s))</Label>
-            {activeContacts.length === 0 ? (
+            {!showContacts ? (
+              <p className="text-xs text-muted-foreground">
+                Os contatos so aparecem depois que o WhatsApp for conectado pela leitura do QR Code.
+              </p>
+            ) : activeContacts.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 Nenhum contato ativo cadastrado. Adicione na pagina de Contatos.
               </p>
@@ -166,7 +180,7 @@ export function DispatchDialog({
           </Button>
           <Button
             onClick={handleDispatch}
-            disabled={sending || selectedContacts.length === 0}
+            disabled={sending || !showContacts || selectedContacts.length === 0}
           >
             {sending ? (
               <Loader2 className="mr-2 size-4 animate-spin" />

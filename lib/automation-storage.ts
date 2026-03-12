@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Automation, Contact, QueryFilter, SelectedColumn, SelectedMeasure } from "@/lib/types"
 import { normalizeContactForResponse } from "@/lib/contact-compat"
+import { createId } from "@/lib/id"
 
 const AUTOMATIONS_SETTINGS_KEY = "saved_automations"
 
@@ -95,7 +96,7 @@ function normalizeFilters(input: unknown): QueryFilter[] {
         id:
           typeof record.id === "string" && record.id.trim()
             ? record.id.trim()
-            : crypto.randomUUID(),
+            : createId("filter"),
         tableName,
         columnName,
         operator,
@@ -298,7 +299,7 @@ export async function createStoredAutomation(
 
   const automation = normalizeStoredAutomation({
     ...payload,
-    id: crypto.randomUUID(),
+    id: createId("automation"),
     created_at: now,
     updated_at: now,
     is_active: true,

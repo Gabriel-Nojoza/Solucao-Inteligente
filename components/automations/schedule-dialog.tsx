@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { CalendarClock, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -29,6 +29,7 @@ import type { Contact } from "@/lib/types"
 
 interface ScheduleDialogProps {
   contacts: Contact[]
+  showContacts: boolean
   onSave: (data: {
     name: string
     cron_expression: string | null
@@ -41,6 +42,7 @@ interface ScheduleDialogProps {
 
 export function ScheduleDialog({
   contacts,
+  showContacts,
   onSave,
   disabled,
 }: ScheduleDialogProps) {
@@ -51,15 +53,19 @@ export function ScheduleDialog({
   const [exportFormat, setExportFormat] = useState("csv")
   const [message, setMessage] = useState("Segue os dados da automacao {name} em anexo.")
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
+  const activeContacts = showContacts ? contacts.filter((c) => c.is_active) : []
+
+  useEffect(() => {
+    if (!showContacts) {
+      setSelectedContacts([])
+    }
+  }, [showContacts])
 
   const toggleContact = (id: string) => {
     setSelectedContacts((prev) =>
       prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
     )
   }
-
-  const activeContacts = contacts.filter((c) => c.is_active)
-
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error("Informe um nome para o agendamento")
@@ -67,6 +73,10 @@ export function ScheduleDialog({
     }
     if (!cron.trim()) {
       toast.error("Selecione uma frequencia")
+      return
+    }
+    if (!showContacts) {
+      toast.error("Conecte o WhatsApp pela leitura do QR Code para liberar os contatos")
       return
     }
     if (selectedContacts.length === 0) {
@@ -155,7 +165,11 @@ export function ScheduleDialog({
 
           <div className="space-y-2">
             <Label>Contatos ({selectedContacts.length} selecionado(s))</Label>
-            {activeContacts.length === 0 ? (
+            {!showContacts ? (
+              <p className="text-xs text-muted-foreground">
+                Os contatos so aparecem depois que o WhatsApp for conectado pela leitura do QR Code.
+              </p>
+            ) : activeContacts.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 Nenhum contato ativo. Cadastre na pagina de Contatos.
               </p>
@@ -187,7 +201,7 @@ export function ScheduleDialog({
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={saving || !name.trim()}>
+          <Button onClick={handleSave} disabled={saving || !name.trim() || !showContacts}>
             {saving ? (
               <Loader2 className="mr-2 size-4 animate-spin" />
             ) : (

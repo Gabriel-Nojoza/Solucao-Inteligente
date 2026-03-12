@@ -18,6 +18,14 @@ function normalizeAutomationExportFormat(value: unknown) {
   return "pdf"
 }
 
+function getRequestOrigin(request: NextRequest) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    request.headers.get("origin") ||
+    new URL(request.url).origin
+  )
+}
+
 export async function POST(request: NextRequest) {
   const { companyId } = await resolveRequestCompanyContext(request, {
     allowCallbackSecret: true,
@@ -161,7 +169,11 @@ export async function POST(request: NextRequest) {
     .eq("key", "n8n")
     .single()
 
-  const webhookUrl = (n8nSettings?.value as Record<string, string>)?.webhook_url
+  const webhookUrl = String(
+    (n8nSettings?.value as Record<string, string> | null)?.webhook_url ||
+      process.env.N8N_WEBHOOK_URL ||
+      ""
+  ).trim()
   if (!webhookUrl) {
     return NextResponse.json(
       { error: "URL do webhook N8N nao configurada" },
@@ -186,10 +198,12 @@ export async function POST(request: NextRequest) {
     .select()
 
   // Send webhook to N8N
-  try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? request.headers.get("origin") ?? ""
+  let dispatchErrorMessage: string | null = null
 
-    await fetch(webhookUrl, {
+  try {
+    const appUrl = getRequestOrigin(request)
+
+    const webhookResponse = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -211,6 +225,11 @@ export async function POST(request: NextRequest) {
       }),
     })
 
+    if (!webhookResponse.ok) {
+      const responseText = await webhookResponse.text().catch(() => "")
+      throw new Error(responseText || `Webhook N8N retornou ${webhookResponse.status}`)
+    }
+
     // Update logs to 'sending'
     for (const log of insertedLogs ?? []) {
       await supabase
@@ -228,18 +247,25 @@ export async function POST(request: NextRequest) {
       .eq("id", schedule_id)
 
   } catch (error) {
+    dispatchErrorMessage =
+      error instanceof Error ? error.message : "Erro ao enviar para o webhook N8N"
+
     // Mark logs as failed
     for (const log of insertedLogs ?? []) {
       await supabase
         .from("dispatch_logs")
         .update({
           status: "failed",
-          error_message: error instanceof Error ? error.message : "Erro no webhook",
+          error_message: dispatchErrorMessage,
           completed_at: new Date().toISOString(),
         })
         .eq("company_id", companyId)
         .eq("id", log.id)
     }
+  }
+
+  if (dispatchErrorMessage) {
+    return NextResponse.json({ error: dispatchErrorMessage }, { status: 502 })
   }
 
   return NextResponse.json({ success: true, logs_created: (insertedLogs ?? []).length })

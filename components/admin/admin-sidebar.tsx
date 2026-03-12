@@ -89,14 +89,6 @@ export function AdminSidebar() {
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Voltar ao Sistema">
-              <Link href="/">
-                <LayoutDashboard className="size-4" />
-                <span>Ir para Sistema</span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
               tooltip="Alternar tema"

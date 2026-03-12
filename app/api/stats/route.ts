@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext } from "@/lib/tenant"
+import { readWhatsAppBotRuntimeState } from "@/lib/whatsapp-bot"
 
 export async function GET() {
   try {
     const { companyId } = await getRequestContext()
     const supabase = createClient()
+    const botState = await readWhatsAppBotRuntimeState()
+    const whatsappConnected = botState?.status === "connected"
 
     const todayStart = new Date()
     todayStart.setHours(0, 0, 0, 0)
@@ -47,7 +50,7 @@ export async function GET() {
       ])
 
     const totalReports = reportsRes.count ?? 0
-    const activeContacts = contactsRes.count ?? 0
+    const activeContacts = whatsappConnected ? contactsRes.count ?? 0 : 0
     const dispatchesToday = todayLogsRes.count ?? 0
 
     const monthLogs = monthLogsRes.data ?? []
@@ -95,6 +98,7 @@ export async function GET() {
     return NextResponse.json({
       totalReports,
       activeContacts,
+      whatsappConnected,
       dispatchesToday,
       successRate,
       pbiConfigured,

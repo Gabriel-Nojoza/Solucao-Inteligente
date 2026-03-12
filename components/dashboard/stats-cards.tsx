@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 interface StatsData {
   totalReports: number
   activeContacts: number
+  whatsappConnected?: boolean
   dispatchesToday: number
   successRate: number
   pbiConfigured?: boolean
@@ -33,10 +34,14 @@ export function StatsCards({ data }: { data: StatsData }) {
     },
     {
       title: "Contatos Ativos",
-      value: data.activeContacts,
+      value: data.whatsappConnected ? data.activeContacts : "--",
       icon: Users,
-      description: "WhatsApp",
-      status: null,
+      description: data.whatsappConnected
+        ? "WhatsApp conectado"
+        : "Faca login no WhatsApp",
+      status: data.whatsappConnected
+        ? { label: "Conectado", ok: true }
+        : { label: "Aguardando QR", ok: false },
     },
     {
       title: "Disparos Hoje",

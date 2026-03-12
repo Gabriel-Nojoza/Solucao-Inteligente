@@ -43,6 +43,7 @@ export default function DashboardPage() {
             data={{
               totalReports: stats?.totalReports ?? 0,
               activeContacts: stats?.activeContacts ?? 0,
+              whatsappConnected: stats?.whatsappConnected ?? false,
               dispatchesToday: stats?.dispatchesToday ?? 0,
               successRate: stats?.successRate ?? 100,
               pbiConfigured: stats?.pbiConfigured ?? false,

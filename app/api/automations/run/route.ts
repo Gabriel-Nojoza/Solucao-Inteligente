@@ -64,6 +64,14 @@ function buildSelectedItems(
   ]
 }
 
+function getRequestOrigin(request: Request) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    request.headers.get("origin")?.trim() ||
+    new URL(request.url).origin
+  )
+}
+
 export async function POST(request: Request) {
   try {
     const { companyId } = await resolveRequestCompanyContext(request, {
@@ -299,56 +307,88 @@ export async function POST(request: Request) {
         .eq("key", "n8n")
         .single()
 
-      const webhookUrl = (n8nSettings?.value as Record<string, string>)?.webhook_url
+      const webhookUrl = String(
+        (n8nSettings?.value as Record<string, string> | null)?.webhook_url ||
+          process.env.N8N_WEBHOOK_URL ||
+          ""
+      ).trim()
 
-      if (webhookUrl) {
-        const logEntries = contacts.map((contact) => ({
-          company_id: companyId,
-          schedule_id: scheduleIdOverride,
-          report_name: reportTitle,
-          contact_name: String(contact.name || ""),
-          contact_phone: contact.phone ? String(contact.phone) : null,
-          status: "sending",
-          export_format: exportFormat,
-        }))
+      if (!webhookUrl) {
+        return NextResponse.json(
+          { error: "URL do webhook N8N nao configurada" },
+          { status: 400 }
+        )
+      }
 
-        const { data: logs } = await supabase
-          .from("dispatch_logs")
-          .insert(logEntries)
-          .select("id")
+      const logEntries = contacts.map((contact) => ({
+        company_id: companyId,
+        schedule_id: scheduleIdOverride,
+        report_name: reportTitle,
+        contact_name: String(contact.name || ""),
+        contact_phone: contact.phone ? String(contact.phone) : null,
+        status: "sending",
+        export_format: exportFormat,
+      }))
 
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(request.url).origin
-        const message = applyTemplate(messageTemplate, {
-          name: reportTitle,
-          row_count: rowCount,
-          format: exportFormat,
+      const { data: logs } = await supabase
+        .from("dispatch_logs")
+        .insert(logEntries)
+        .select("id")
+
+      const appUrl = getRequestOrigin(request)
+      const message = applyTemplate(messageTemplate, {
+        name: reportTitle,
+        row_count: rowCount,
+        format: exportFormat,
+      })
+
+      let webhookErrorMessage: string | null = null
+
+      try {
+        const webhookResponse = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            automation_name: reportTitle,
+            dataset_id: datasetId,
+            execution_dataset_id: executionDatasetId,
+            export_format: exportFormat,
+            row_count: rowCount,
+            generated_at: generatedAt.toISOString(),
+            columns: result.columns,
+            rows: result.rows,
+            data_csv: csvContent,
+            report_text: textReport,
+            report_html: htmlReport,
+            contacts,
+            message,
+            callback_url: `${appUrl}/api/webhook/n8n-callback`,
+            dispatch_log_ids: logs?.map((log) => log.id) || [],
+          }),
         })
-
-        try {
-          await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              automation_name: reportTitle,
-              dataset_id: datasetId,
-              execution_dataset_id: executionDatasetId,
-              export_format: exportFormat,
-              row_count: rowCount,
-              generated_at: generatedAt.toISOString(),
-              columns: result.columns,
-              rows: result.rows,
-              data_csv: csvContent,
-              report_text: textReport,
-              report_html: htmlReport,
-              contacts,
-              message,
-              callback_url: `${appUrl}/api/webhook/n8n-callback`,
-              dispatch_log_ids: logs?.map((log) => log.id) || [],
-            }),
-          })
-        } catch {
-          // N8N failure should not block query execution response.
+        if (!webhookResponse.ok) {
+          const responseText = await webhookResponse.text().catch(() => "")
+          throw new Error(responseText || `Webhook N8N retornou ${webhookResponse.status}`)
         }
+      } catch (error) {
+        webhookErrorMessage =
+          error instanceof Error ? error.message : "Erro ao enviar para o webhook N8N"
+
+        for (const log of logs ?? []) {
+          await supabase
+            .from("dispatch_logs")
+            .update({
+              status: "failed",
+              error_message: webhookErrorMessage,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("company_id", companyId)
+            .eq("id", log.id)
+        }
+      }
+
+      if (webhookErrorMessage) {
+        return NextResponse.json({ error: webhookErrorMessage }, { status: 502 })
       }
     }
 

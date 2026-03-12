@@ -59,9 +59,13 @@ export function ResultsPanel({
   const [showDax, setShowDax] = useState(true)
   const totalItems = selectedColumns.length + selectedMeasures.length
 
-  const copyDax = () => {
-    navigator.clipboard.writeText(daxQuery)
-    toast.success("DAX copiado para a area de transferencia")
+  const copyDax = async () => {
+    try {
+      await navigator.clipboard.writeText(daxQuery)
+      toast.success("DAX copiado para a area de transferencia")
+    } catch {
+      toast.error("Nao foi possivel copiar automaticamente neste navegador.")
+    }
   }
 
   return (

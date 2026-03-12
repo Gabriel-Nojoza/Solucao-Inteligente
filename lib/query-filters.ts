@@ -1,4 +1,5 @@
 import type { QueryFilter } from "@/lib/types"
+import { createId } from "@/lib/id"
 
 export function normalizeFilters(input: unknown): QueryFilter[] {
   if (!Array.isArray(input)) return []
@@ -30,7 +31,7 @@ export function normalizeFilters(input: unknown): QueryFilter[] {
         id:
           typeof record.id === "string" && record.id.trim()
             ? record.id.trim()
-            : crypto.randomUUID(),
+            : createId("filter"),
         tableName,
         columnName,
         operator,

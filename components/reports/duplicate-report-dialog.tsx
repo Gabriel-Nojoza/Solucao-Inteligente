@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
+import { createId } from "@/lib/id"
 import {
   buildQuickFilters,
   getDefaultFilterValue,
@@ -58,11 +59,13 @@ const fetcher = async (url: string) => {
 interface DuplicateReportDialogProps {
   report: Automation
   contacts: Contact[]
+  showContacts: boolean
 }
 
 export function DuplicateReportDialog({
   report,
   contacts,
+  showContacts,
 }: DuplicateReportDialogProps) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -78,8 +81,8 @@ export function DuplicateReportDialog({
   }>(open && report.dataset_id ? `/api/automations/catalog?datasetId=${report.dataset_id}` : null, fetcher)
 
   const activeContacts = useMemo(
-    () => contacts.filter((contact) => contact.is_active),
-    [contacts]
+    () => (showContacts ? contacts.filter((contact) => contact.is_active) : []),
+    [contacts, showContacts]
   )
   const fallbackColumns = useMemo(() => {
     const sourceFilters = Array.isArray(report.filters) ? report.filters : []
@@ -113,7 +116,7 @@ export function DuplicateReportDialog({
   useEffect(() => {
     if (!open) return
 
-    const sourceContacts = Array.isArray(report.contacts)
+    const sourceContacts = showContacts && Array.isArray(report.contacts)
       ? report.contacts.filter((contact) => contact.is_active).map((contact) => contact.id)
       : []
 
@@ -125,10 +128,10 @@ export function DuplicateReportDialog({
     setSelectedContacts(sourceContacts)
     setLocalFilters(
       Array.isArray(report.filters)
-        ? report.filters.map((filter) => ({ ...filter, id: crypto.randomUUID() }))
+        ? report.filters.map((filter) => ({ ...filter, id: createId("filter") }))
         : []
     )
-  }, [open, report])
+  }, [open, report, showContacts])
 
   function toggleContact(id: string) {
     setSelectedContacts((current) =>
@@ -160,7 +163,7 @@ export function DuplicateReportDialog({
     setLocalFilters((current) => [
       ...current,
       {
-        id: crypto.randomUUID(),
+        id: createId("filter"),
         tableName,
         columnName,
         operator: "eq",
@@ -194,6 +197,11 @@ export function DuplicateReportDialog({
 
     if (enableSchedule && (!cron.trim() || cron.trim().split(/\s+/).length !== 5)) {
       toast.error("Defina uma frequencia valida para o agendamento")
+      return
+    }
+
+    if (enableSchedule && !showContacts) {
+      toast.error("Leia o QR Code e conecte o WhatsApp na tela de Contatos para liberar os contatos.")
       return
     }
 
@@ -501,7 +509,11 @@ export function DuplicateReportDialog({
                 </p>
               </div>
 
-              {activeContacts.length === 0 ? (
+              {!showContacts ? (
+                <div className="text-xs text-muted-foreground">
+                  Os contatos so aparecem depois que o WhatsApp for conectado pela leitura do QR Code na tela de Contatos.
+                </div>
+              ) : activeContacts.length === 0 ? (
                 <div className="text-xs text-muted-foreground">
                   Nenhum contato ativo cadastrado.
                 </div>

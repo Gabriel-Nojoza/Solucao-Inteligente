@@ -35,6 +35,10 @@ import type { Automation, Contact, Report, Workspace } from "@/lib/types"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+type BotQrStatus = {
+  status: "starting" | "awaiting_qr" | "connected" | "reconnecting" | "offline" | "error"
+}
+
 export default function ReportsPage() {
   const { data: reports, isLoading } = useSWR<(Report & { workspace_name: string })[]>(
     "/api/reports",
@@ -46,21 +50,26 @@ export default function ReportsPage() {
     fetcher
   )
   const { data: contacts } = useSWR<Contact[]>("/api/contacts", fetcher)
+  const { data: botQrConfig } = useSWR<BotQrStatus>("/api/bot/qr", fetcher)
   const reportList = Array.isArray(reports) ? reports : []
   const workspaceList = Array.isArray(workspaces) ? workspaces : []
   const createdReports = Array.isArray(automations) ? automations : []
   const contactList = Array.isArray(contacts) ? contacts : []
+  const canShowContacts = botQrConfig?.status === "connected"
   const [search, setSearch] = useState("")
   const [wsFilter, setWsFilter] = useState("all")
+  const workspaceNameById = new Map(workspaceList.map((workspace) => [workspace.id, workspace.name]))
 
   const filtered = reportList.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase())
     const matchWs = wsFilter === "all" || r.workspace_id === wsFilter
     return matchSearch && matchWs
   })
-  const filteredCreatedReports = createdReports.filter((report) =>
-    report.name.toLowerCase().includes(search.toLowerCase())
-  )
+  const filteredCreatedReports = createdReports.filter((report) => {
+    const matchSearch = report.name.toLowerCase().includes(search.toLowerCase())
+    const matchWs = wsFilter === "all" || report.workspace_id === wsFilter
+    return matchSearch && matchWs
+  })
 
   return (
     <div className="flex flex-1 flex-col">
@@ -133,6 +142,11 @@ export default function ReportsPage() {
                           {report.is_active ? "Ativo" : "Inativo"}
                         </Badge>
                         <Badge variant="outline">{report.export_format.toUpperCase()}</Badge>
+                        {report.workspace_id ? (
+                          <Badge variant="outline">
+                            {workspaceNameById.get(report.workspace_id) ?? "Workspace vinculado"}
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>{Array.isArray(report.filters) ? report.filters.length : 0} filtro(s)</span>
@@ -141,8 +155,16 @@ export default function ReportsPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <DuplicateReportDialog report={report} contacts={contactList} />
-                      <SavedReportSendDialog report={report} contacts={contactList} />
+                      <DuplicateReportDialog
+                        report={report}
+                        contacts={contactList}
+                        showContacts={canShowContacts}
+                      />
+                      <SavedReportSendDialog
+                        report={report}
+                        contacts={contactList}
+                        showContacts={canShowContacts}
+                      />
                     </div>
                   </div>
                 ))}

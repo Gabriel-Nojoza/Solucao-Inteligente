@@ -31,6 +31,7 @@ import { SavedAutomationsList } from "@/components/automations/saved-automations
 import { DispatchDialog } from "@/components/automations/dispatch-dialog"
 import { ScheduleDialog } from "@/components/automations/schedule-dialog"
 import { buildDAXQuery } from "@/lib/dax-builder"
+import { createId } from "@/lib/id"
 import {
   buildQuickFilters,
   getDefaultFilterValue,
@@ -87,8 +88,12 @@ export default function AutomationsPage() {
   const { data: rawWorkspaces } = useSWR("/api/workspaces", fetcher)
   const { data: rawContacts } = useSWR("/api/contacts", fetcher)
   const { data: stats } = useSWR<{ n8nConfigured?: boolean }>("/api/stats", fetcher)
+  const { data: botQrConfig } = useSWR<{
+    status?: "starting" | "awaiting_qr" | "connected" | "reconnecting" | "offline" | "error"
+  }>("/api/bot/qr", fetcher)
   const workspaces: Workspace[] = Array.isArray(rawWorkspaces) ? rawWorkspaces : []
   const contacts: Contact[] = Array.isArray(rawContacts) ? rawContacts : []
+  const canShowContacts = botQrConfig?.status === "connected"
 
   const selectedWs = workspaces.find((w) => w.id === selectedWorkspace)
   const pbiWorkspaceId = selectedWs?.pbi_workspace_id
@@ -258,7 +263,7 @@ export default function AutomationsPage() {
         return
       }
 
-      const nextFilterId = crypto.randomUUID()
+      const nextFilterId = createId("filter")
       setAutoOpenFilterSignal(`${nextFilterId}:${Date.now()}`)
       setFilters((prev) => [
         ...prev,
@@ -607,14 +612,21 @@ export default function AutomationsPage() {
             <>
               <DispatchDialog
                 contacts={contacts}
+                showContacts={canShowContacts}
                 daxQuery={daxQuery}
                 datasetId={selectedDataset}
                 executionDatasetId={selectedExecutionDataset || selectedDataset}
                 disabled={!hasQuery}
               />
-              <ScheduleDialog contacts={contacts} onSave={handleSave} disabled={!hasQuery} />
+              <ScheduleDialog
+                contacts={contacts}
+                showContacts={canShowContacts}
+                onSave={handleSave}
+                disabled={!hasQuery}
+              />
               <SaveAutomationDialog
                 contacts={contacts}
+                showContacts={canShowContacts}
                 onSave={handleSave}
                 disabled={!hasQuery}
               />
