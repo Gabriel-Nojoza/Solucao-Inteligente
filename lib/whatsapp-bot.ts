@@ -20,6 +20,17 @@ export type WhatsAppBotRuntimeState = {
   jid: string | null
 }
 
+const DEFAULT_WHATSAPP_BOT_RUNTIME_STATE: WhatsAppBotRuntimeState = {
+  status: "offline",
+  qr_code_data_url: "",
+  updated_at: null,
+  connected_at: null,
+  last_error: null,
+  phone_number: null,
+  display_name: null,
+  jid: null,
+}
+
 export type WhatsAppBotDirectoryEntry = {
   jid: string
   type: "individual" | "group"
@@ -37,23 +48,57 @@ export const WHATSAPP_BOT_RUNTIME_STATE_PATH = path.join(
 )
 
 export async function readWhatsAppBotRuntimeState(): Promise<WhatsAppBotRuntimeState | null> {
+  const serviceState = await readWhatsAppBotRuntimeStateFromService()
+  if (serviceState) {
+    return serviceState
+  }
+
+  return readWhatsAppBotRuntimeStateFromFile()
+}
+
+async function readWhatsAppBotRuntimeStateFromService(): Promise<WhatsAppBotRuntimeState | null> {
   try {
-    const raw = await fs.readFile(WHATSAPP_BOT_RUNTIME_STATE_PATH, "utf-8")
-    const parsed = JSON.parse(raw) as Partial<WhatsAppBotRuntimeState>
+    const response = await fetch(`${getWhatsAppBotServiceBaseUrl()}/status`, {
+      cache: "no-store",
+    })
+    const raw = await response.text()
+    const data = parseWhatsAppBotRuntimeStateResponse(raw)
+
+    if (!response.ok) {
+      if (response.status === 404 || raw.includes("Cannot GET /status")) {
+        return null
+      }
+
+      return {
+        ...DEFAULT_WHATSAPP_BOT_RUNTIME_STATE,
+        status: "error",
+        last_error: data?.error || `Nao foi possivel consultar o bot (${response.status})`,
+      }
+    }
+
+    return normalizeWhatsAppBotRuntimeState(data)
+  } catch (error) {
+    if (!process.env.WHATSAPP_BOT_SERVICE_URL?.trim()) {
+      return null
+    }
 
     return {
-      status: isValidStatus(parsed.status) ? parsed.status : "offline",
-      qr_code_data_url:
-        typeof parsed.qr_code_data_url === "string" ? parsed.qr_code_data_url : "",
-      updated_at: typeof parsed.updated_at === "string" ? parsed.updated_at : null,
-      connected_at: typeof parsed.connected_at === "string" ? parsed.connected_at : null,
-      last_error: typeof parsed.last_error === "string" ? parsed.last_error : null,
-      phone_number:
-        typeof parsed.phone_number === "string" ? parsed.phone_number : null,
-      display_name:
-        typeof parsed.display_name === "string" ? parsed.display_name : null,
-      jid: typeof parsed.jid === "string" ? parsed.jid : null,
+      ...DEFAULT_WHATSAPP_BOT_RUNTIME_STATE,
+      status: "error",
+      last_error:
+        error instanceof Error ? error.message : "Erro ao consultar estado do bot",
     }
+  }
+}
+
+export function getWhatsAppBotServiceBaseUrl() {
+  return (process.env.WHATSAPP_BOT_SERVICE_URL || "http://127.0.0.1:3010").trim()
+}
+
+async function readWhatsAppBotRuntimeStateFromFile(): Promise<WhatsAppBotRuntimeState | null> {
+  try {
+    const raw = await fs.readFile(WHATSAPP_BOT_RUNTIME_STATE_PATH, "utf-8")
+    return normalizeWhatsAppBotRuntimeState(JSON.parse(raw) as Partial<WhatsAppBotRuntimeState>)
   } catch (error) {
     if (
       error &&
@@ -65,20 +110,11 @@ export async function readWhatsAppBotRuntimeState(): Promise<WhatsAppBotRuntimeS
     }
 
     return {
+      ...DEFAULT_WHATSAPP_BOT_RUNTIME_STATE,
       status: "error",
-      qr_code_data_url: "",
-      updated_at: null,
-      connected_at: null,
       last_error: error instanceof Error ? error.message : "Erro ao ler estado do bot",
-      phone_number: null,
-      display_name: null,
-      jid: null,
     }
   }
-}
-
-export function getWhatsAppBotServiceBaseUrl() {
-  return (process.env.WHATSAPP_BOT_SERVICE_URL || "http://127.0.0.1:3010").trim()
 }
 
 export async function controlWhatsAppBot(
@@ -179,4 +215,30 @@ function isValidStatus(value: unknown): value is WhatsAppBotRuntimeStatus {
     value === "offline" ||
     value === "error"
   )
+}
+
+function normalizeWhatsAppBotRuntimeState(
+  parsed: Partial<WhatsAppBotRuntimeState> | null | undefined
+): WhatsAppBotRuntimeState {
+  return {
+    status: isValidStatus(parsed?.status) ? parsed.status : "offline",
+    qr_code_data_url:
+      typeof parsed?.qr_code_data_url === "string" ? parsed.qr_code_data_url : "",
+    updated_at: typeof parsed?.updated_at === "string" ? parsed.updated_at : null,
+    connected_at: typeof parsed?.connected_at === "string" ? parsed.connected_at : null,
+    last_error: typeof parsed?.last_error === "string" ? parsed.last_error : null,
+    phone_number: typeof parsed?.phone_number === "string" ? parsed.phone_number : null,
+    display_name: typeof parsed?.display_name === "string" ? parsed.display_name : null,
+    jid: typeof parsed?.jid === "string" ? parsed.jid : null,
+  }
+}
+
+function parseWhatsAppBotRuntimeStateResponse(
+  raw: string
+): (Partial<WhatsAppBotRuntimeState> & { error?: string }) | null {
+  try {
+    return JSON.parse(raw) as Partial<WhatsAppBotRuntimeState> & { error?: string }
+  } catch {
+    return null
+  }
 }
