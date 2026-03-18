@@ -11,6 +11,7 @@ import { Loader2, Eye, EyeOff, User, Shield } from "lucide-react"
 import { BrandMark } from "@/components/branding/brand-mark"
 import { BRAND_NAME, BRAND_SUBTITLE } from "@/lib/branding"
 import { cn } from "@/lib/utils"
+import { markTabSessionActive } from "@/lib/supabase/tab-session"
 
 type LoginType = "client" | "admin"
 
@@ -55,6 +56,8 @@ export default function LoginPage() {
         await supabase.auth.signOut()
         throw new Error("Voce nao tem permissao de administrador")
       }
+
+      markTabSessionActive()
 
       if (loginType === "admin") {
         router.push("/admin")

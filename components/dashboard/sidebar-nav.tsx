@@ -31,6 +31,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
+import { clearTabSessionMarker } from "@/lib/supabase/tab-session"
 
 const mainNav = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -54,6 +55,7 @@ export function AppSidebar() {
   const handleLogout = async () => {
     const supabase = createClient()
     await supabase.auth.signOut()
+    clearTabSessionMarker()
     router.push("/auth/login")
     router.refresh()
   }
