@@ -1,0 +1,6 @@
+export const BRAND_NAME = "Solução Inteligente"
+export const BRAND_SUBTITLE = "Automação de Relatórios Power BI"
+export const BRAND_ADMIN_SUBTITLE = "Painel Administrativo"
+export const BRAND_LOGO_PATH = "/brand/logo-symbol-transparent.png"
+export const BRAND_LOGS_FILENAME = "solucao-inteligente"
+export const BRAND_BOT_NAME = "SolucaoInteligenteBot"
