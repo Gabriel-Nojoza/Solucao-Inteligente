@@ -16,6 +16,12 @@ import {
   touchStoredAutomationLastRunAt,
 } from "@/lib/automation-storage"
 import type { QueryFilter, SelectedColumn, SelectedMeasure } from "@/lib/types"
+import {
+  buildDispatchTargets,
+  buildN8nCallbackHeaders,
+  buildN8nEndpointUrls,
+  normalizeN8nSettings,
+} from "@/lib/n8n-webhook"
 
 type ContactRecord = {
   id: string
@@ -352,15 +358,21 @@ export async function POST(request: Request) {
         .eq("key", "n8n")
         .single()
 
-      const webhookUrl = String(
-        (n8nSettings?.value as Record<string, string> | null)?.webhook_url ||
-          process.env.N8N_WEBHOOK_URL ||
-          ""
-      ).trim()
+      const normalizedN8nSettings = normalizeN8nSettings(n8nSettings?.value)
+      const webhookUrl =
+        normalizedN8nSettings.webhookUrl || process.env.N8N_WEBHOOK_URL?.trim() || ""
+      const callbackSecret = normalizedN8nSettings.callbackSecret
 
       if (!webhookUrl) {
         return NextResponse.json(
           { error: "URL do webhook N8N nao configurada" },
+          { status: 400 }
+        )
+      }
+
+      if (!callbackSecret) {
+        return NextResponse.json(
+          { error: "Callback secret do N8N nao configurado" },
           { status: 400 }
         )
       }
@@ -397,6 +409,13 @@ export async function POST(request: Request) {
       let webhookErrorMessage: string | null = null
 
       try {
+        const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
+        const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
+        const dispatchTargets = buildDispatchTargets(
+          contacts,
+          logs?.map((log) => log.id) || []
+        )
+
         const webhookResponse = await fetch(webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -418,7 +437,12 @@ export async function POST(request: Request) {
             report_html: htmlReport,
             contacts,
             message,
-            callback_url: `${appUrl}/api/webhook/n8n-callback`,
+            dispatch_targets: dispatchTargets,
+            callback_url: callbackUrl,
+            callback_secret: callbackSecret,
+            callback_headers: callbackHeaders,
+            bot_send_url: botSendUrl,
+            bot_send_headers: callbackHeaders,
             dispatch_log_ids: logs?.map((log) => log.id) || [],
           }),
         })

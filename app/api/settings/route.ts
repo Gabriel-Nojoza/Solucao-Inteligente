@@ -45,6 +45,20 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    if (key === "n8n") {
+      const webhookUrl = String((value as Record<string, unknown>).webhook_url ?? "").trim()
+      const callbackSecret = String(
+        (value as Record<string, unknown>).callback_secret ?? ""
+      ).trim()
+
+      if (webhookUrl && !callbackSecret) {
+        return NextResponse.json(
+          { error: "Callback Secret obrigatorio para o fluxo de WhatsApp via N8N" },
+          { status: 400 }
+        )
+      }
+    }
+
     const { data, error } = await supabase
       .from("company_settings")
       .upsert(

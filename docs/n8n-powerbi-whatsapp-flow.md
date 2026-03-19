@@ -10,7 +10,10 @@ O N8N recebe:
 - `contacts`
 - `message`
 - `dispatch_log_ids`
+- `dispatch_targets`
 - `callback_url`
+- `bot_send_url`
+- `callback_secret`
 
 O `callback_url` aponta para o endpoint que atualiza os logs no app:
 
@@ -28,7 +31,7 @@ O app agora expõe:
 
 - `POST /api/bot/send`
 
-Esse endpoint aceita autenticacao por `x-callback-secret` e repassa a mensagem para o bot local.
+Esse endpoint aceita autenticacao por `x-callback-secret`, repassa a mensagem para o bot local e, quando receber `dispatch_log_id`, ja atualiza o log de envio.
 
 Payload aceito:
 
@@ -85,7 +88,23 @@ Exemplo:
   ],
   "message": "Segue o relatorio em anexo.",
   "dispatch_log_ids": ["log-1", "log-2"],
-  "callback_url": "https://seu-app.com/api/webhook/n8n-callback"
+  "dispatch_targets": [
+    {
+      "dispatch_log_id": "log-1",
+      "name": "Grupo Vendas",
+      "type": "group",
+      "whatsapp_group_id": "1203634...@g.us"
+    },
+    {
+      "dispatch_log_id": "log-2",
+      "name": "Joao",
+      "type": "individual",
+      "phone": "+5511999999999"
+    }
+  ],
+  "callback_url": "https://seu-app.com/api/webhook/n8n-callback",
+  "bot_send_url": "https://seu-app.com/api/bot/send",
+  "callback_secret": "seu-segredo"
 }
 ```
 
@@ -159,19 +178,20 @@ Use `Move Binary Data`:
 
 ### 8. Separar contatos
 
-Use `Split Out` em `contacts`.
+Use `Split Out` em `dispatch_targets`.
 
 Depois monte o payload do bot com um `Set` ou `Code`:
 
 ```json
 {
-  "phone": "={{ $json.contacts.type === 'individual' ? $json.contacts.phone : null }}",
-  "whatsapp_group_id": "={{ $json.contacts.type === 'group' ? $json.contacts.whatsapp_group_id : null }}",
+  "phone": "={{ $json.dispatch_targets.type === 'individual' ? $json.dispatch_targets.phone : null }}",
+  "whatsapp_group_id": "={{ $json.dispatch_targets.type === 'group' ? $json.dispatch_targets.whatsapp_group_id : null }}",
   "message": "={{ $('Webhook').item.json.message }}",
   "document_base64": "={{ $('Move Binary Data').item.json.document_base64 }}",
   "file_name": "={{ $('Webhook').item.json.report_name + '.pdf' }}",
   "mimetype": "application/pdf",
-  "dispatch_log_id": "={{ $('Webhook').item.json.dispatch_log_ids[$itemIndex] }}"
+  "dispatch_log_id": "={{ $json.dispatch_targets.dispatch_log_id }}",
+  "n8n_execution_id": "={{ $execution.id }}"
 }
 ```
 
@@ -183,13 +203,13 @@ Use `HTTP Request`:
 - URL:
 
 ```text
-={{ $('Webhook').item.json.callback_url.replace('/api/webhook/n8n-callback', '/api/bot/send') }}
+={{ $('Webhook').item.json.bot_send_url }}
 ```
 
 - Header:
 
 ```text
-x-callback-secret: <SEU_CALLBACK_SECRET>
+x-callback-secret: ={{ $('Webhook').item.json.callback_secret }}
 Content-Type: application/json
 ```
 
@@ -202,9 +222,13 @@ Content-Type: application/json
   "message": "={{ $json.message }}",
   "document_base64": "={{ $json.document_base64 }}",
   "file_name": "={{ $json.file_name }}",
-  "mimetype": "={{ $json.mimetype }}"
+  "mimetype": "={{ $json.mimetype }}",
+  "dispatch_log_id": "={{ $json.dispatch_log_id }}",
+  "n8n_execution_id": "={{ $json.n8n_execution_id }}"
 }
 ```
+
+Observacao: com `dispatch_log_id`, o proprio `/api/bot/send` ja marca o log como `delivered` ou `failed`. O callback abaixo continua util para falhas antes do envio individual ou para reforcar o status.
 
 ## 10. Callback de sucesso ou erro
 
@@ -238,7 +262,7 @@ Envie esse payload para:
 Com o mesmo header:
 
 ```text
-x-callback-secret: <SEU_CALLBACK_SECRET>
+x-callback-secret: ={{ $('Webhook').item.json.callback_secret }}
 ```
 
 ## Observacoes

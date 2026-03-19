@@ -4,6 +4,7 @@ import {
   type WhatsAppBotSendPayload,
 } from "@/lib/whatsapp-bot"
 import { resolveRequestCompanyContext } from "@/lib/n8n-auth"
+import { createServiceClient as createClient } from "@/lib/supabase/server"
 
 function toOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null
@@ -26,14 +27,32 @@ function normalizeSendPayload(body: unknown): WhatsAppBotSendPayload {
   }
 }
 
+function normalizeDispatchMetadata(body: unknown) {
+  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {}
+
+  return {
+    dispatchLogId: toOptionalString(record.dispatch_log_id),
+    n8nExecutionId: toOptionalString(record.n8n_execution_id),
+  }
+}
+
 export async function POST(request: NextRequest) {
+  const supabase = createClient()
+  let companyId: string | null = null
+  let dispatchLogId: string | null = null
+  let n8nExecutionId: string | null = null
+
   try {
-    await resolveRequestCompanyContext(request, {
+    const context = await resolveRequestCompanyContext(request, {
       allowCallbackSecret: true,
     })
+    companyId = context.companyId
 
     const body = await request.json()
     const payload = normalizeSendPayload(body)
+    const metadata = normalizeDispatchMetadata(body)
+    dispatchLogId = metadata.dispatchLogId
+    n8nExecutionId = metadata.n8nExecutionId
 
     if (!payload.jid && !payload.phone && !payload.whatsapp_group_id) {
       return NextResponse.json(
@@ -56,10 +75,38 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await sendWhatsAppBotMessage(payload)
+
+    if (companyId && dispatchLogId) {
+      await supabase
+        .from("dispatch_logs")
+        .update({
+          status: "delivered",
+          error_message: null,
+          n8n_execution_id: n8nExecutionId,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("company_id", companyId)
+        .eq("id", dispatchLogId)
+    }
+
     return NextResponse.json(result)
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Nao foi possivel enviar mensagem pelo bot"
+
+    if (companyId && dispatchLogId && message !== "Callback secret invalido") {
+      await supabase
+        .from("dispatch_logs")
+        .update({
+          status: "failed",
+          error_message: message,
+          n8n_execution_id: n8nExecutionId,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("company_id", companyId)
+        .eq("id", dispatchLogId)
+    }
+
     const status =
       message === "Callback secret invalido" ||
       message.toLowerCase().includes("auth") ||

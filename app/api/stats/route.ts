@@ -69,7 +69,12 @@ export async function GET() {
     const powerbi = settingsMap.get("powerbi") as Record<string, unknown> | undefined
     const n8n = settingsMap.get("n8n") as Record<string, unknown> | undefined
     const pbiConfigured = !!(powerbi?.client_id || process.env.PBI_CLIENT_ID)
-    const n8nConfigured = !!(n8n?.webhook_url || process.env.N8N_WEBHOOK_URL)
+    const n8nConfigured = !!(
+      typeof n8n?.webhook_url === "string" &&
+      n8n.webhook_url.trim() &&
+      typeof n8n?.callback_secret === "string" &&
+      n8n.callback_secret.trim()
+    )
 
     // Chart data: last 7 days
     const chartData = []

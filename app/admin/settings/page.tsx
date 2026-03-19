@@ -63,11 +63,14 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key, value }),
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Erro ao salvar configuracao")
+      }
       toast.success("Configuracao salva!")
       mutate("/api/settings")
-    } catch {
-      toast.error("Erro ao salvar")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar")
     } finally {
       setSaving("")
     }
@@ -92,6 +95,14 @@ export default function SettingsPage() {
   async function testN8N() {
     setN8nTesting(true)
     setN8nTestResult(null)
+    if (!callbackSecret.trim()) {
+      setN8nTestResult({
+        success: false,
+        message: "Informe o Callback Secret antes de testar o fluxo do WhatsApp.",
+      })
+      setN8nTesting(false)
+      return
+    }
     await saveSetting("n8n", { webhook_url: webhookUrl, callback_secret: callbackSecret })
     try {
       const res = await fetch(webhookUrl, {
@@ -233,13 +244,13 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="callback-secret">Callback Secret (opcional)</Label>
+                  <Label htmlFor="callback-secret">Callback Secret (obrigatorio)</Label>
                   <Input
                     id="callback-secret"
                     type="password"
                     value={callbackSecret}
                     onChange={(e) => setCallbackSecret(e.target.value)}
-                    placeholder="Segredo para validar callbacks"
+                    placeholder="Segredo usado pelo n8n para enviar no WhatsApp e atualizar os logs"
                   />
                 </div>
                 <div className="flex items-center gap-3">

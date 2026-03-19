@@ -709,16 +709,16 @@ export default function UsersPage() {
                         <Input
                           value={formN8nWebhookUrl}
                           onChange={(e) => setFormN8nWebhookUrl(e.target.value)}
-                          placeholder="Opcional por agora (https://n8n.dominio.com/webhook/...)"
+                          placeholder="https://n8n.dominio.com/webhook/..."
                         />
                       </div>
                       <div className="flex flex-col gap-2">
-                        <Label>Callback Secret</Label>
+                        <Label>Callback Secret (obrigatorio com webhook)</Label>
                         <Input
                           type="password"
                           value={formN8nCallbackSecret}
                           onChange={(e) => setFormN8nCallbackSecret(e.target.value)}
-                          placeholder="Opcional"
+                          placeholder="Segredo usado pelo n8n para callbacks e envio"
                         />
                       </div>
                     </div>

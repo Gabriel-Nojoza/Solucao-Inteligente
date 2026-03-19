@@ -79,6 +79,91 @@ function formatLabel(format: ScheduleExportFormat) {
   return format.toUpperCase()
 }
 
+function normalizeScheduleFormat(format: ScheduleExportFormat): ScheduleExportFormat {
+  if (format === "pdf") {
+    return "PDF"
+  }
+
+  return format
+}
+
+function extractApiErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  const error = (payload as { error?: unknown }).error
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim()
+  }
+
+  if (!error || typeof error !== "object") {
+    return null
+  }
+
+  for (const value of Object.values(error as Record<string, unknown>)) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+
+    if (Array.isArray(value)) {
+      const firstMessage = value.find(
+        (item): item is string => typeof item === "string" && item.trim().length > 0
+      )
+
+      if (firstMessage) {
+        return firstMessage.trim()
+      }
+    }
+  }
+
+  return null
+}
+
+function mapApiFieldErrors(payload: unknown): Record<string, string> {
+  if (!payload || typeof payload !== "object") {
+    return {}
+  }
+
+  const error = (payload as { error?: unknown }).error
+
+  if (!error || typeof error !== "object") {
+    return {}
+  }
+
+  const mappedEntries = Object.entries(error as Record<string, unknown>)
+    .map(([key, value]) => {
+      const message = Array.isArray(value)
+        ? value.find(
+            (item): item is string => typeof item === "string" && item.trim().length > 0
+          ) ?? ""
+        : typeof value === "string"
+          ? value
+          : ""
+
+      if (!message.trim()) {
+        return null
+      }
+
+      const fieldKey =
+        key === "report_id"
+          ? "report"
+          : key === "cron_expression"
+            ? "cron"
+            : key === "contact_ids"
+              ? "contacts"
+              : key === "name"
+                ? "name"
+                : key
+
+      return [fieldKey, message.trim()] as const
+    })
+    .filter((entry): entry is readonly [string, string] => entry !== null)
+
+  return Object.fromEntries(mappedEntries)
+}
+
 export default function SchedulesPage() {
   const { data: schedules, isLoading } = useSWR<
     (Schedule & { report_name: string; contacts: { id: string; name: string }[] })[]
@@ -161,8 +246,10 @@ export default function SchedulesPage() {
     setFormName(schedule.name)
     setFormReportId(schedule.report_id)
     setFormCron(schedule.cron_expression)
-    setFormFormat(schedule.export_format)
-    setFormMessage(schedule.message_template ?? "")
+    setFormFormat(normalizeScheduleFormat(schedule.export_format))
+    setFormMessage(
+      schedule.message_template ?? "Segue o relatorio {report_name} em anexo."
+    )
     setFormContactIds(schedule.contacts?.map((c) => c.id) ?? [])
     setFormActive(schedule.is_active)
     setFormErrors({})
@@ -217,13 +304,29 @@ export default function SchedulesPage() {
         body: JSON.stringify(payload),
       })
 
-      if (!res.ok) throw new Error()
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        const apiFieldErrors = mapApiFieldErrors(data)
+        if (Object.keys(apiFieldErrors).length > 0) {
+          setFormErrors((prev) => ({ ...prev, ...apiFieldErrors }))
+        }
+
+        throw new Error(
+          extractApiErrorMessage(data) ??
+            (editSchedule ? "Erro ao atualizar rotina" : "Erro ao criar rotina")
+        )
+      }
 
       toast.success(editSchedule ? "Rotina atualizada!" : "Rotina criada!")
       setDialogOpen(false)
       mutate("/api/schedules")
-    } catch {
-      toast.error("Erro ao salvar rotina")
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : "Erro ao salvar rotina"
+      )
     } finally {
       setSaving(false)
     }
@@ -452,7 +555,10 @@ export default function SchedulesPage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent
+          key={editSchedule?.id ?? "new-schedule"}
+          className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
+        >
           <DialogHeader>
             <DialogTitle>{editSchedule ? "Editar Rotina" : "Nova Rotina"}</DialogTitle>
           </DialogHeader>
@@ -528,7 +634,14 @@ export default function SchedulesPage() {
               </Select>
             </div>
 
-            <CronBuilder value={formCron} onChange={setFormCron} />
+            <CronBuilder
+              key={editSchedule?.id ?? "new-schedule-cron"}
+              value={formCron}
+              onChange={(value) => {
+                setFormCron(value)
+                setFormErrors((prev) => ({ ...prev, cron: "" }))
+              }}
+            />
 
             <div className="flex flex-col gap-2">
               <Label>Mensagem Template</Label>

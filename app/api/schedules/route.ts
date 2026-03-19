@@ -17,6 +17,10 @@ const scheduleSchema = z.object({
   contact_ids: z.array(z.string().uuid()).optional(),
 })
 
+const scheduleUpdateSchema = scheduleSchema.partial().extend({
+  id: z.string().uuid(),
+})
+
 export async function GET() {
   const { companyId } = await getRequestContext()
   const supabase = createClient()
@@ -151,15 +155,23 @@ export async function PUT(request: NextRequest) {
   const { companyId } = await getRequestContext()
   const supabase = createClient()
   const body = await request.json()
-  const { id, contact_ids, ...updates } = body
+  const parsed = scheduleUpdateSchema.safeParse(body)
 
-  if (!id) {
-    return NextResponse.json({ error: "ID obrigatorio" }, { status: 400 })
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.flatten().fieldErrors },
+      { status: 400 }
+    )
   }
+
+  const { id, contact_ids, ...updates } = parsed.data
+  const scheduleUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([, value]) => value !== undefined)
+  )
 
   const { data, error } = await supabase
     .from("schedules")
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update({ ...scheduleUpdates, updated_at: new Date().toISOString() })
     .eq("company_id", companyId)
     .eq("id", id)
     .select()
@@ -171,17 +183,27 @@ export async function PUT(request: NextRequest) {
 
   // Update contacts if provided
   if (contact_ids !== undefined) {
-    await supabase
+    const { error: deleteContactsError } = await supabase
       .from("schedule_contacts")
       .delete()
       .eq("schedule_id", id)
+
+    if (deleteContactsError) {
+      return NextResponse.json({ error: deleteContactsError.message }, { status: 500 })
+    }
 
     if (contact_ids.length > 0) {
       const links = contact_ids.map((cid: string) => ({
         schedule_id: id,
         contact_id: cid,
       }))
-      await supabase.from("schedule_contacts").insert(links)
+      const { error: insertContactsError } = await supabase
+        .from("schedule_contacts")
+        .insert(links)
+
+      if (insertContactsError) {
+        return NextResponse.json({ error: insertContactsError.message }, { status: 500 })
+      }
     }
   }
 

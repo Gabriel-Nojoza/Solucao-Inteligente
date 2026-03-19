@@ -249,6 +249,13 @@ export async function POST(request: Request) {
         )
       }
 
+      if (n8nWebhookUrl && !n8nCallbackSecret) {
+        return NextResponse.json(
+          { error: "Para Cliente: Callback Secret do N8N e obrigatorio quando houver Webhook URL" },
+          { status: 400 }
+        )
+      }
+
       const slug = slugify(companyName)
       const { data: company, error: companyErr } = await supabase
         .from("companies")
@@ -444,6 +451,13 @@ export async function PUT(request: Request) {
       if (!companyName || !pbiTenantId || !pbiClientId || !pbiClientSecret) {
         return NextResponse.json(
           { error: "Para Cliente: empresa e credenciais Power BI sao obrigatorios" },
+          { status: 400 }
+        )
+      }
+
+      if (n8nWebhookUrl && !n8nCallbackSecret) {
+        return NextResponse.json(
+          { error: "Para Cliente: Callback Secret do N8N e obrigatorio quando houver Webhook URL" },
           { status: 400 }
         )
       }

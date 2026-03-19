@@ -6,6 +6,12 @@ import {
   getStoredAutomationById,
   isMissingAutomationRelationError,
 } from "@/lib/automation-storage"
+import {
+  buildDispatchTargets,
+  buildN8nCallbackHeaders,
+  buildN8nEndpointUrls,
+  normalizeN8nSettings,
+} from "@/lib/n8n-webhook"
 
 function getDispatchLogTarget(contact: {
   phone?: string | null
@@ -200,11 +206,10 @@ export async function POST(request: NextRequest) {
     .eq("key", "n8n")
     .single()
 
-  const webhookUrl = String(
-    (n8nSettings?.value as Record<string, string> | null)?.webhook_url ||
-      process.env.N8N_WEBHOOK_URL ||
-      ""
-  ).trim()
+  const normalizedN8nSettings = normalizeN8nSettings(n8nSettings?.value)
+  const webhookUrl =
+    normalizedN8nSettings.webhookUrl || process.env.N8N_WEBHOOK_URL?.trim() || ""
+  const callbackSecret = normalizedN8nSettings.callbackSecret
 
   if (!webhookUrl) {
     return NextResponse.json(
@@ -213,10 +218,23 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  if (!callbackSecret) {
+    return NextResponse.json(
+      { error: "Callback secret do N8N nao configurado" },
+      { status: 400 }
+    )
+  }
+
   let dispatchErrorMessage: string | null = null
 
   try {
     const appUrl = getRequestOrigin(request)
+    const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
+    const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
+    const dispatchTargets = buildDispatchTargets(
+      normalizedContacts,
+      (insertedLogs ?? []).map((log) => log.id)
+    )
 
     const webhookResponse = await fetch(webhookUrl, {
       method: "POST",
@@ -241,7 +259,12 @@ export async function POST(request: NextRequest) {
         })),
         message,
         dispatch_log_ids: (insertedLogs ?? []).map((log) => log.id),
-        callback_url: `${appUrl}/api/webhook/n8n-callback`,
+        dispatch_targets: dispatchTargets,
+        callback_url: callbackUrl,
+        callback_secret: callbackSecret,
+        callback_headers: callbackHeaders,
+        bot_send_url: botSendUrl,
+        bot_send_headers: callbackHeaders,
       }),
     })
 
