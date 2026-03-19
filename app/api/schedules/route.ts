@@ -8,7 +8,11 @@ import {
 } from "@/lib/automation-storage"
 
 function isMissingSchedulesUpdatedAtColumn(message?: string | null) {
-  return typeof message === "string" && message.includes("updated_at") && message.includes("schedules")
+  return (
+    typeof message === "string" &&
+    message.includes("updated_at") &&
+    message.includes("schedules")
+  )
 }
 
 const scheduleSchema = z.object({
@@ -80,7 +84,6 @@ export async function GET() {
     }
   }
 
-  // Enrich with report names and contacts
   const enriched = await Promise.all(
     (schedules ?? []).map(async (schedule) => {
       const { data: scContacts } = await supabase
@@ -89,6 +92,7 @@ export async function GET() {
         .eq("schedule_id", schedule.id)
 
       const contactIds = (scContacts ?? []).map((sc) => sc.contact_id)
+
       let contacts: Array<{ id: string; name: string }> = []
       if (contactIds.length > 0) {
         const { data } = await supabase
@@ -96,6 +100,7 @@ export async function GET() {
           .select("id, name")
           .eq("company_id", companyId)
           .in("id", contactIds)
+
         contacts = data ?? []
       }
 
@@ -143,13 +148,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // Link contacts
   if (contact_ids && contact_ids.length > 0) {
     const links = contact_ids.map((cid) => ({
       schedule_id: schedule.id,
       contact_id: cid,
     }))
-    await supabase.from("schedule_contacts").insert(links)
+
+    const { error: insertContactsError } = await supabase
+      .from("schedule_contacts")
+      .insert(links)
+
+    if (insertContactsError) {
+      return NextResponse.json({ error: insertContactsError.message }, { status: 500 })
+    }
   }
 
   return NextResponse.json(schedule, { status: 201 })
@@ -169,6 +180,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const { id, contact_ids, ...updates } = parsed.data
+
   const scheduleUpdates = Object.fromEntries(
     Object.entries(updates).filter(([, value]) => value !== undefined)
   )
@@ -182,20 +194,19 @@ export async function PUT(request: NextRequest) {
       .select()
       .single()
 
-  let { data, error } = await updateSchedule({
+  let result = await updateSchedule({
     ...scheduleUpdates,
     updated_at: new Date().toISOString(),
   })
 
-  if (error && isMissingSchedulesUpdatedAtColumn(error.message)) {
-    ;({ data, error } = await updateSchedule(scheduleUpdates))
+  if (result.error && isMissingSchedulesUpdatedAtColumn(result.error.message)) {
+    result = await updateSchedule(scheduleUpdates)
   }
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (result.error) {
+    return NextResponse.json({ error: result.error.message }, { status: 500 })
   }
 
-  // Update contacts if provided
   if (contact_ids !== undefined) {
     const { error: deleteContactsError } = await supabase
       .from("schedule_contacts")
@@ -211,6 +222,7 @@ export async function PUT(request: NextRequest) {
         schedule_id: id,
         contact_id: cid,
       }))
+
       const { error: insertContactsError } = await supabase
         .from("schedule_contacts")
         .insert(links)
@@ -221,7 +233,7 @@ export async function PUT(request: NextRequest) {
     }
   }
 
-  return NextResponse.json(data)
+  return NextResponse.json(result.data)
 }
 
 export async function DELETE(request: NextRequest) {
@@ -234,7 +246,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "ID obrigatorio" }, { status: 400 })
   }
 
-  const { error } = await supabase.from("schedules").delete().eq("company_id", companyId).eq("id", id)
+  const { error } = await supabase
+    .from("schedules")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("id", id)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
