@@ -73,6 +73,8 @@ type ScheduleReportOption = {
 }
 
 const POWERBI_FORMATS: ScheduleExportFormat[] = ["PDF", "PNG", "PPTX"]
+const DEFAULT_SCHEDULE_CRON = "0 8 * * 1-5"
+const DEFAULT_SCHEDULE_MESSAGE = "Segue o relatorio {report_name} em anexo."
 
 function formatLabel(format: ScheduleExportFormat) {
   if (format === "table") return "Tabela (texto)"
@@ -223,17 +225,29 @@ export default function SchedulesPage() {
     )
   })
 
-  function openCreate() {
+  function resetScheduleForm() {
     setEditSchedule(null)
     setFormName("")
     setFormReportId("")
-    setFormCron("0 8 * * 1-5")
+    setFormCron(DEFAULT_SCHEDULE_CRON)
     setFormFormat("PDF")
-    setFormMessage("Segue o relatorio {report_name} em anexo.")
+    setFormMessage(DEFAULT_SCHEDULE_MESSAGE)
     setFormContactIds([])
     setFormActive(true)
     setFormErrors({})
     setContactSearch("")
+  }
+
+  function handleDialogOpenChange(open: boolean) {
+    setDialogOpen(open)
+
+    if (!open) {
+      resetScheduleForm()
+    }
+  }
+
+  function openCreate() {
+    resetScheduleForm()
     setDialogOpen(true)
 
     if (canShowContacts) {
@@ -247,9 +261,7 @@ export default function SchedulesPage() {
     setFormReportId(schedule.report_id)
     setFormCron(schedule.cron_expression)
     setFormFormat(normalizeScheduleFormat(schedule.export_format))
-    setFormMessage(
-      schedule.message_template ?? "Segue o relatorio {report_name} em anexo."
-    )
+    setFormMessage(schedule.message_template ?? DEFAULT_SCHEDULE_MESSAGE)
     setFormContactIds(schedule.contacts?.map((c) => c.id) ?? [])
     setFormActive(schedule.is_active)
     setFormErrors({})
@@ -319,7 +331,7 @@ export default function SchedulesPage() {
       }
 
       toast.success(editSchedule ? "Rotina atualizada!" : "Rotina criada!")
-      setDialogOpen(false)
+      handleDialogOpenChange(false)
       mutate("/api/schedules")
     } catch (error) {
       toast.error(
@@ -554,7 +566,7 @@ export default function SchedulesPage() {
         </Card>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent
           key={editSchedule?.id ?? "new-schedule"}
           className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
