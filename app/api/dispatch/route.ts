@@ -250,6 +250,8 @@ export async function POST(request: NextRequest) {
           ? ((report as Record<string, unknown>).workspaces as Record<string, string>)
               .pbi_workspace_id
           : "",
+        pbi_page_name: schedule.pbi_page_name ?? null,
+        page_name: schedule.pbi_page_name ?? null,
         export_format: schedule.export_format,
         contacts: normalizedContacts.map((contact) => ({
           name: contact.name,

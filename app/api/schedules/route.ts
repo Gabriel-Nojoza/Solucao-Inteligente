@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { z } from "zod"
+import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext } from "@/lib/tenant"
 import {
   isMissingAutomationRelationError,
@@ -15,11 +15,21 @@ function isMissingSchedulesUpdatedAtColumn(message?: string | null) {
   )
 }
 
+const nullableTrimmedString = z.preprocess((value) => {
+  if (typeof value !== "string") return value
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}, z.string().min(1).nullable().optional())
+
 const scheduleSchema = z.object({
   name: z.string().min(1),
   report_id: z.string().uuid(),
+  pbi_page_name: nullableTrimmedString,
   cron_expression: z.string().min(1),
-  export_format: z.enum(["PDF", "PNG", "PPTX", "table", "csv", "pdf"]).default("PDF"),
+  export_format: z
+    .enum(["PDF", "PNG", "PPTX", "table", "csv", "pdf"])
+    .default("PDF"),
   message_template: z.string().nullable().optional(),
   is_active: z.boolean().default(true),
   contact_ids: z.array(z.string().uuid()).optional(),
@@ -94,6 +104,7 @@ export async function GET() {
       const contactIds = (scContacts ?? []).map((sc) => sc.contact_id)
 
       let contacts: Array<{ id: string; name: string }> = []
+
       if (contactIds.length > 0) {
         const { data } = await supabase
           .from("contacts")
@@ -218,7 +229,7 @@ export async function PUT(request: NextRequest) {
     }
 
     if (contact_ids.length > 0) {
-      const links = contact_ids.map((cid: string) => ({
+      const links = contact_ids.map((cid) => ({
         schedule_id: id,
         contact_id: cid,
       }))

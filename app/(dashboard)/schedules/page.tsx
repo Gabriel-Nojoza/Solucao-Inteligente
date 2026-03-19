@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import useSWR, { mutate } from "swr"
 import {
   Plus,
@@ -73,9 +73,16 @@ type ScheduleReportOption = {
   defaultFormat: ScheduleExportFormat
 }
 
+type ReportPageOption = {
+  name: string
+  displayName: string
+  order: number
+}
+
 const POWERBI_FORMATS: ScheduleExportFormat[] = ["PDF", "PNG", "PPTX"]
 const DEFAULT_SCHEDULE_CRON = "0 8 * * 1-5"
 const DEFAULT_SCHEDULE_MESSAGE = "Segue o relatorio {report_name} em anexo."
+const DEFAULT_PAGE_OPTION = "__report_default__"
 
 function formatLabel(format: ScheduleExportFormat) {
   if (format === "table") return "Tabela (texto)"
@@ -202,6 +209,7 @@ export default function SchedulesPage() {
 
   const [formName, setFormName] = useState("")
   const [formReportId, setFormReportId] = useState("")
+  const [formPageName, setFormPageName] = useState(DEFAULT_PAGE_OPTION)
   const [formCron, setFormCron] = useState("0 8 * * 1-5")
   const [formFormat, setFormFormat] = useState<ScheduleExportFormat>("PDF")
   const [formMessage, setFormMessage] = useState(
@@ -212,6 +220,9 @@ export default function SchedulesPage() {
   const [saving, setSaving] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [contactSearch, setContactSearch] = useState("")
+  const [reportPages, setReportPages] = useState<ReportPageOption[]>([])
+  const [loadingReportPages, setLoadingReportPages] = useState(false)
+  const [reportPagesError, setReportPagesError] = useState("")
 
   const formatOptions = POWERBI_FORMATS
 
@@ -235,6 +246,7 @@ export default function SchedulesPage() {
     setEditSchedule(null)
     setFormName("")
     setFormReportId("")
+    setFormPageName(DEFAULT_PAGE_OPTION)
     setFormCron(DEFAULT_SCHEDULE_CRON)
     setFormFormat("PDF")
     setFormMessage(DEFAULT_SCHEDULE_MESSAGE)
@@ -242,6 +254,8 @@ export default function SchedulesPage() {
     setFormActive(true)
     setFormErrors({})
     setContactSearch("")
+    setReportPages([])
+    setReportPagesError("")
   }
 
   function handleDialogOpenChange(open: boolean) {
@@ -265,6 +279,7 @@ export default function SchedulesPage() {
     setEditSchedule(schedule)
     setFormName(schedule.name)
     setFormReportId(schedule.report_id)
+    setFormPageName(schedule.pbi_page_name ?? DEFAULT_PAGE_OPTION)
     setFormCron(schedule.cron_expression)
     setFormFormat(normalizeScheduleFormat(schedule.export_format))
     setFormMessage(schedule.message_template ?? DEFAULT_SCHEDULE_MESSAGE)
@@ -272,6 +287,8 @@ export default function SchedulesPage() {
     setFormActive(schedule.is_active)
     setFormErrors({})
     setContactSearch("")
+    setReportPages([])
+    setReportPagesError("")
     setDialogOpen(true)
 
     if (canShowContacts) {
@@ -309,6 +326,8 @@ export default function SchedulesPage() {
         ...(editSchedule ? { id: editSchedule.id } : {}),
         name: formName.trim(),
         report_id: formReportId,
+        pbi_page_name:
+          formPageName && formPageName !== DEFAULT_PAGE_OPTION ? formPageName : null,
         cron_expression: formCron,
         export_format: formFormat,
         message_template: formMessage || null,
@@ -440,6 +459,70 @@ export default function SchedulesPage() {
       setSyncingBotContacts(false)
     }
   }
+
+  useEffect(() => {
+    if (!dialogOpen || !formReportId) {
+      setReportPages([])
+      setReportPagesError("")
+      setLoadingReportPages(false)
+      return
+    }
+
+    let ignore = false
+
+    async function loadReportPages() {
+      setLoadingReportPages(true)
+      setReportPagesError("")
+
+      try {
+        const res = await fetch(`/api/reports/${formReportId}/pages`)
+        const data = await res.json().catch(() => null)
+
+        if (!res.ok) {
+          throw new Error(
+            extractApiErrorMessage(data) ?? "Erro ao carregar paginas do relatorio"
+          )
+        }
+
+        if (ignore) return
+
+        const pages = Array.isArray(data?.pages)
+          ? (data.pages as ReportPageOption[])
+          : []
+
+        setReportPages(pages)
+        setFormPageName((current) => {
+          if (current === DEFAULT_PAGE_OPTION) {
+            return current
+          }
+
+          return pages.some((page) => page.name === current)
+            ? current
+            : DEFAULT_PAGE_OPTION
+        })
+      } catch (error) {
+        if (ignore) return
+
+        setReportPages([])
+        setFormPageName(DEFAULT_PAGE_OPTION)
+        setReportPagesError(
+          error instanceof Error && error.message
+            ? error.message
+            : "Erro ao carregar paginas do relatorio"
+        )
+      } finally {
+        if (!ignore) {
+          setLoadingReportPages(false)
+        }
+      }
+    }
+
+    void loadReportPages()
+
+    return () => {
+      ignore = true
+    }
+  }, [dialogOpen, formReportId])
 
   return (
     <div className="flex flex-1 flex-col">
@@ -607,6 +690,9 @@ export default function SchedulesPage() {
                 value={formReportId}
                 onValueChange={(v) => {
                   setFormReportId(v)
+                  setFormPageName(DEFAULT_PAGE_OPTION)
+                  setReportPages([])
+                  setReportPagesError("")
                   const option = reportOptions.find((item) => item.id === v)
                   if (option && formFormat !== option.defaultFormat) {
                     setFormFormat(option.defaultFormat)
@@ -653,6 +739,44 @@ export default function SchedulesPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label>Pagina do Relatorio</Label>
+              <Select
+                value={formPageName}
+                onValueChange={setFormPageName}
+                disabled={!formReportId || loadingReportPages}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      loadingReportPages
+                        ? "Carregando paginas..."
+                        : "Pagina padrao do relatorio"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_PAGE_OPTION}>
+                    Pagina padrao do relatorio
+                  </SelectItem>
+                  {reportPages.map((page) => (
+                    <SelectItem key={page.name} value={page.name}>
+                      {page.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {reportPagesError ? (
+                <p className="text-xs text-destructive">{reportPagesError}</p>
+              ) : formReportId ? (
+                <p className="text-xs text-muted-foreground">
+                  {loadingReportPages
+                    ? "Buscando paginas disponiveis no Power BI..."
+                    : "Selecione uma pagina especifica ou mantenha a pagina padrao do relatorio."}
+                </p>
+              ) : null}
             </div>
 
             <CronBuilder

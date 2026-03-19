@@ -83,6 +83,10 @@ export async function POST(request: NextRequest) {
 
     const reportId = String(body?.report_id ?? "").trim()
     const format = String(body?.format ?? "PDF").trim().toUpperCase()
+    const pbiPageName =
+      typeof body?.pbi_page_name === "string" && body.pbi_page_name.trim()
+        ? body.pbi_page_name.trim()
+        : null
     const pdfProfile = detectPdfProfile(
       body?.pdf_profile,
       request.headers.get("user-agent")
@@ -176,7 +180,8 @@ export async function POST(request: NextRequest) {
         token,
         workspace.pbi_workspace_id,
         report.pbi_report_id,
-        format as "PDF" | "PNG" | "PPTX"
+        format as "PDF" | "PNG" | "PPTX",
+        { pageName: pbiPageName }
       )
     } catch (exportError) {
       if (isPowerBiEntityNotFoundError(exportError)) {
