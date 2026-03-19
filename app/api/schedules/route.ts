@@ -7,6 +7,10 @@ import {
   loadStoredAutomations,
 } from "@/lib/automation-storage"
 
+function isMissingSchedulesUpdatedAtColumn(message?: string | null) {
+  return typeof message === "string" && message.includes("updated_at") && message.includes("schedules")
+}
+
 const scheduleSchema = z.object({
   name: z.string().min(1),
   report_id: z.string().uuid(),
@@ -169,13 +173,23 @@ export async function PUT(request: NextRequest) {
     Object.entries(updates).filter(([, value]) => value !== undefined)
   )
 
-  const { data, error } = await supabase
-    .from("schedules")
-    .update({ ...scheduleUpdates, updated_at: new Date().toISOString() })
-    .eq("company_id", companyId)
-    .eq("id", id)
-    .select()
-    .single()
+  const updateSchedule = async (payload: Record<string, unknown>) =>
+    supabase
+      .from("schedules")
+      .update(payload)
+      .eq("company_id", companyId)
+      .eq("id", id)
+      .select()
+      .single()
+
+  let { data, error } = await updateSchedule({
+    ...scheduleUpdates,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error && isMissingSchedulesUpdatedAtColumn(error.message)) {
+    ;({ data, error } = await updateSchedule(scheduleUpdates))
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
