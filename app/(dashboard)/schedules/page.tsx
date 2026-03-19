@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import useSWR, { mutate } from "swr"
 import {
   Plus,
@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -224,6 +225,11 @@ export default function SchedulesPage() {
       (contact.whatsapp_group_id ?? "").toLowerCase().includes(search)
     )
   })
+
+  const handleCronValueChange = useCallback((value: string) => {
+    setFormCron(value)
+    setFormErrors((prev) => (prev.cron ? { ...prev, cron: "" } : prev))
+  }, [])
 
   function resetScheduleForm() {
     setEditSchedule(null)
@@ -573,6 +579,9 @@ export default function SchedulesPage() {
         >
           <DialogHeader>
             <DialogTitle>{editSchedule ? "Editar Rotina" : "Nova Rotina"}</DialogTitle>
+            <DialogDescription>
+              Configure os horarios, contatos e formato para esta rotina de disparo.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-4 pt-2">
@@ -649,10 +658,7 @@ export default function SchedulesPage() {
             <CronBuilder
               key={editSchedule?.id ?? "new-schedule-cron"}
               value={formCron}
-              onChange={(value) => {
-                setFormCron(value)
-                setFormErrors((prev) => ({ ...prev, cron: "" }))
-              }}
+              onChange={handleCronValueChange}
             />
 
             <div className="flex flex-col gap-2">
