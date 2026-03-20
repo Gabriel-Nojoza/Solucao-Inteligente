@@ -77,11 +77,20 @@ function detectPdfProfile(
 
 export async function POST(request: NextRequest) {
   try {
+    const requestForBody = request.clone()
+    const body = await requestForBody.json()
+
+    const callbackSecret =
+      typeof body?.callback_secret === "string"
+        ? body.callback_secret.trim()
+        : null
+
     const { companyId, source } = await resolveRequestCompanyContext(request, {
       allowCallbackSecret: true,
+      callbackSecret,
     })
+
     const supabase = createClient()
-    const body = await request.json()
 
     const reportId = String(body?.report_id ?? "").trim()
     const format = String(body?.format ?? "PDF").trim().toUpperCase()
@@ -97,16 +106,19 @@ export async function POST(request: NextRequest) {
       source === "n8n_secret" || body?.prefer_native_export === true
 
     if (!reportId) {
-      return new Response(
-        JSON.stringify({ error: "report_id obrigatorio" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      )
+      return new Response(JSON.stringify({ error: "report_id obrigatorio" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })
     }
 
     if (!["PDF", "PNG", "PPTX"].includes(format)) {
       return new Response(
         JSON.stringify({ error: "Formato invalido. Use PDF, PNG ou PPTX." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
       )
     }
 
@@ -121,7 +133,10 @@ export async function POST(request: NextRequest) {
     if (error || !report) {
       return new Response(
         JSON.stringify({ error: "Relatorio nao encontrado" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
+        {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }
       )
     }
 
@@ -136,7 +151,10 @@ export async function POST(request: NextRequest) {
     if (workspaceError || !workspace?.pbi_workspace_id) {
       return new Response(
         JSON.stringify({ error: "Workspace do relatorio nao encontrado" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
+        {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }
       )
     }
 
@@ -194,7 +212,10 @@ export async function POST(request: NextRequest) {
       }
 
       if (format === "PDF" && browserPdfErrorMessage) {
-        console.error("ExportTo do Power BI falhou apos erro na captura HTML -> PDF", exportError)
+        console.error(
+          "ExportTo do Power BI falhou apos erro na captura HTML -> PDF",
+          exportError
+        )
 
         const errorMessage = isPowerBiFeatureNotAvailableError(exportError)
           ? "Nao foi possivel gerar o PDF automaticamente neste ambiente. A captura do navegador falhou e o ExportTo nativo do Power BI nao esta disponivel para este relatorio."
@@ -258,6 +279,9 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Erro ao exportar relatorio", 500)
+    return jsonError(
+      error instanceof Error ? error.message : "Erro ao exportar relatorio",
+      500
+    )
   }
 }
