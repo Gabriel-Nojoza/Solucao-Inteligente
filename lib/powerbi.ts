@@ -288,6 +288,26 @@ export async function exportReport(
       ? options.pageName.trim()
       : null
 
+  const body =
+    pageName
+      ? {
+          format,
+          powerBIReportConfiguration: {
+            pages: [{ pageName }],
+            settings: {
+              layoutType: "Print",
+            },
+          },
+        }
+      : {
+          format,
+          powerBIReportConfiguration: {
+            settings: {
+              layoutType: "Print",
+            },
+          },
+        }
+
   const res = await fetch(
     `${PBI_API_BASE}/groups/${workspaceId}/reports/${reportId}/ExportTo`,
     {
@@ -296,16 +316,7 @@ export async function exportReport(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(
-        pageName
-          ? {
-              format,
-              powerBIReportConfiguration: {
-                pages: [{ pageName }],
-              },
-            }
-          : { format }
-      ),
+      body: JSON.stringify(body),
     }
   )
 
