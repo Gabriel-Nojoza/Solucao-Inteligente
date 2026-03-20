@@ -6,17 +6,34 @@ export type RequestCompanyContext = {
   source: "auth" | "n8n_secret"
 }
 
-function getSecretFromRequest(request: Request) {
+async function getSecretFromRequest(request: Request) {
   const url = new URL(request.url)
   const querySecret = url.searchParams.get("secret")?.trim()
   const headerSecret = request.headers.get("x-callback-secret")?.trim()
   const authHeader = request.headers.get("authorization")?.trim()
+
   const bearerSecret =
     authHeader && authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : null
 
-  return querySecret || headerSecret || bearerSecret || ""
+  let bodySecret = ""
+
+  const contentType = request.headers.get("content-type") || ""
+  if (contentType.toLowerCase().includes("application/json")) {
+    try {
+      const clonedRequest = request.clone()
+      const body = await clonedRequest.json()
+      bodySecret =
+        typeof body?.callback_secret === "string"
+          ? body.callback_secret.trim()
+          : ""
+    } catch {
+      bodySecret = ""
+    }
+  }
+
+  return querySecret || headerSecret || bearerSecret || bodySecret || ""
 }
 
 async function getCompanyIdFromCallbackSecret(secret: string) {
@@ -36,7 +53,10 @@ async function getCompanyIdFromCallbackSecret(secret: string) {
 
   const match = (data ?? []).find((row) => {
     const value = row.value as Record<string, unknown> | null
-    return typeof value?.callback_secret === "string" && value.callback_secret.trim() === secret
+    return (
+      typeof value?.callback_secret === "string" &&
+      value.callback_secret.trim() === secret
+    )
   })
 
   return match?.company_id ?? null
@@ -47,9 +67,11 @@ export async function resolveRequestCompanyContext(
   options?: { allowCallbackSecret?: boolean }
 ): Promise<RequestCompanyContext> {
   if (options?.allowCallbackSecret) {
-    const secret = getSecretFromRequest(request)
+    const secret = await getSecretFromRequest(request)
+
     if (secret) {
       const companyId = await getCompanyIdFromCallbackSecret(secret)
+
       if (!companyId) {
         throw new Error("Callback secret invalido")
       }
@@ -62,6 +84,7 @@ export async function resolveRequestCompanyContext(
   }
 
   const context = await getRequestContext()
+
   return {
     companyId: context.companyId,
     source: "auth",
