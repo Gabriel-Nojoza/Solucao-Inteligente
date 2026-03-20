@@ -29,6 +29,15 @@ function isPlatformAdminEmail(email: string) {
   return email.trim().toLowerCase() === configured
 }
 
+export function isAuthContextError(error: unknown) {
+  if (!(error instanceof Error)) return false
+
+  return (
+    error.message === "Nao autenticado" ||
+    error.message === "Usuario sem empresa vinculada (company_id)"
+  )
+}
+
 export async function getRequestContext(): Promise<RequestContext> {
   const supabase = await createClient()
   const { data, error } = await supabase.auth.getUser()

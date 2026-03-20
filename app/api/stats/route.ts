@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
-import { getRequestContext } from "@/lib/tenant"
+import { getRequestContext, isAuthContextError } from "@/lib/tenant"
 import { readWhatsAppBotRuntimeState } from "@/lib/whatsapp-bot"
 
 export async function GET() {
@@ -111,6 +111,13 @@ export async function GET() {
       chartData,
     })
   } catch (error) {
+    if (isAuthContextError(error)) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Nao autenticado" },
+        { status: 401 }
+      )
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro" },
       { status: 500 }

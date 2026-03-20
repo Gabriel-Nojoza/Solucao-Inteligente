@@ -7,22 +7,37 @@ import { DispatchChart } from "@/components/dashboard/dispatch-chart"
 import { RecentDispatches } from "@/components/dashboard/recent-dispatches"
 import { Skeleton } from "@/components/ui/skeleton"
 
+type FetchError = Error & { status?: number }
+
 const fetcher = async (url: string) => {
-  const response = await fetch(url)
+  const response = await fetch(url, { cache: "no-store" })
+
+  if (response.status === 401) {
+    const error = new Error(`Sessao expirada ao buscar ${url}`) as FetchError
+    error.status = 401
+    throw error
+  }
+
   if (!response.ok) {
-    throw new Error(`Erro ao buscar ${url}: ${response.status}`)
+    const error = new Error(`Erro ao buscar ${url}: ${response.status}`) as FetchError
+    error.status = response.status
+    throw error
   }
   return response.json()
 }
 
 export default function DashboardPage() {
-  const { data: stats, isLoading: statsLoading } = useSWR("/api/stats", fetcher, {
+  const swrOptions = {
     refreshInterval: 30000,
-  })
+    revalidateOnFocus: false,
+    shouldRetryOnError: (error: FetchError) => error.status !== 401,
+  }
+
+  const { data: stats, isLoading: statsLoading } = useSWR("/api/stats", fetcher, swrOptions)
   const { data: logsData, isLoading: logsLoading } = useSWR(
     "/api/logs?limit=10",
     fetcher,
-    { refreshInterval: 30000 }
+    swrOptions
   )
 
   return (

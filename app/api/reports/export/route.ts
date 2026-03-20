@@ -13,7 +13,7 @@ import {
   type PowerBiPdfProfile,
   sanitizeFileName,
 } from "@/lib/powerbi-report-pdf"
-import { getRequestContext } from "@/lib/tenant"
+import { resolveRequestCompanyContext } from "@/lib/n8n-auth"
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -77,7 +77,9 @@ function detectPdfProfile(
 
 export async function POST(request: NextRequest) {
   try {
-    const { companyId } = await getRequestContext()
+    const { companyId, source } = await resolveRequestCompanyContext(request, {
+      allowCallbackSecret: true,
+    })
     const supabase = createClient()
     const body = await request.json()
 
@@ -91,6 +93,8 @@ export async function POST(request: NextRequest) {
       body?.pdf_profile,
       request.headers.get("user-agent")
     )
+    const preferNativePowerBiExport =
+      source === "n8n_secret" || body?.prefer_native_export === true
 
     if (!reportId) {
       return new Response(
@@ -140,7 +144,7 @@ export async function POST(request: NextRequest) {
     const safeName = sanitizeFileName(report.name || "relatorio")
     let browserPdfErrorMessage: string | null = null
 
-    if (format === "PDF") {
+    if (format === "PDF" && !preferNativePowerBiExport) {
       try {
         const pdfBuffer = await exportPowerBIReportPdf({
           token,

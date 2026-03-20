@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
-import { getRequestContext } from "@/lib/tenant"
+import { getRequestContext, isAuthContextError } from "@/lib/tenant"
 
 export async function GET(request: NextRequest) {
   try {
@@ -49,6 +49,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ data: data ?? [], count: count ?? 0 })
   } catch (error) {
+    if (isAuthContextError(error)) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Nao autenticado" },
+        { status: 401 }
+      )
+    }
+
     console.error("GET /api/logs unexpected error:", error)
     return NextResponse.json(
       { error: "Erro interno inesperado ao buscar logs." },

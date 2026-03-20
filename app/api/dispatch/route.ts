@@ -230,6 +230,7 @@ export async function POST(request: NextRequest) {
   try {
     const appUrl = getRequestOrigin(request)
     const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
+    const reportExportUrl = `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export`
     const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
     const dispatchTargets = buildDispatchTargets(
       normalizedContacts,
@@ -245,6 +246,7 @@ export async function POST(request: NextRequest) {
         cron_expression: schedule.cron_expression,
         is_active: schedule.is_active,
         report_name: report.name,
+        app_report_id: report.id,
         report_id: report.pbi_report_id,
         workspace_id: (report as Record<string, unknown>).workspaces
           ? ((report as Record<string, unknown>).workspaces as Record<string, string>)
@@ -253,6 +255,8 @@ export async function POST(request: NextRequest) {
         pbi_page_name: schedule.pbi_page_name ?? null,
         page_name: schedule.pbi_page_name ?? null,
         export_format: schedule.export_format,
+        report_export_url: reportExportUrl,
+        report_export_headers: callbackHeaders,
         contacts: normalizedContacts.map((contact) => ({
           name: contact.name,
           phone: contact.phone,
