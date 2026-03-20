@@ -8,11 +8,8 @@ import {
   isPowerBiEntityNotFoundError,
   isPowerBiFeatureNotAvailableError,
 } from "@/lib/powerbi"
-import {
-  exportPowerBIReportPdf,
-  type PowerBiPdfProfile,
-  sanitizeFileName,
-} from "@/lib/powerbi-report-pdf"
+import { exportAppReportPdf } from "@/lib/app-report-pdf"
+import { sanitizeFileName } from "@/lib/powerbi-report-pdf"
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -50,28 +47,6 @@ async function deactivateMissingReport(
   if (error) {
     console.error("Nao foi possivel desativar relatorio ausente do Power BI", error)
   }
-}
-
-function isPdfProfile(value: string): value is PowerBiPdfProfile {
-  return value === "desktop" || value === "mobile"
-}
-
-function detectPdfProfile(
-  profile: unknown,
-  userAgent: string | null
-): PowerBiPdfProfile {
-  const normalizedProfile =
-    typeof profile === "string" ? profile.trim().toLowerCase() : ""
-
-  if (isPdfProfile(normalizedProfile)) {
-    return normalizedProfile
-  }
-
-  const normalizedUserAgent = (userAgent ?? "").toLowerCase()
-
-  return /android|iphone|ipad|ipod|mobile/i.test(normalizedUserAgent)
-    ? "mobile"
-    : "desktop"
 }
 
 function getSecretFromRequest(request: NextRequest, body: any) {
@@ -119,6 +94,24 @@ async function resolveCompanyIdByCallbackSecret(
   return match?.company_id ?? null
 }
 
+function detectPdfProfile(
+  profile: unknown,
+  userAgent: string | null
+): "desktop" | "mobile" {
+  const normalizedProfile =
+    typeof profile === "string" ? profile.trim().toLowerCase() : ""
+
+  if (normalizedProfile === "desktop" || normalizedProfile === "mobile") {
+    return normalizedProfile
+  }
+
+  const normalizedUserAgent = (userAgent ?? "").toLowerCase()
+
+  return /android|iphone|ipad|ipod|mobile/i.test(normalizedUserAgent)
+    ? "mobile"
+    : "desktop"
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -145,6 +138,7 @@ export async function POST(request: NextRequest) {
       typeof body?.pbi_page_name === "string" && body.pbi_page_name.trim()
         ? body.pbi_page_name.trim()
         : null
+
     const pdfProfile = detectPdfProfile(
       body?.pdf_profile,
       request.headers.get("user-agent")
@@ -211,13 +205,18 @@ export async function POST(request: NextRequest) {
 
     if (format === "PDF" && !preferNativePowerBiExport) {
       try {
-        const pdfBuffer = await exportPowerBIReportPdf({
-          token,
-          workspaceId: workspace.pbi_workspace_id,
-          reportId: report.pbi_report_id,
-          reportName: report.name || "Relatorio Power BI",
-          embedUrl: report.embed_url,
+        const appBaseUrl =
+          process.env.APP_BASE_URL?.trim() ||
+          "https://appsolucaointeligente.com.br"
+
+        const reportPrintUrl =
+          `${appBaseUrl}/reports/${report.id}/print` +
+          `?callback_secret=${encodeURIComponent(callbackSecret)}`
+
+        const pdfBuffer = await exportAppReportPdf({
+          url: reportPrintUrl,
           pdfProfile,
+          waitForSelector: '[data-report-ready="true"]',
         })
 
         return new Response(pdfBuffer, {
@@ -236,7 +235,7 @@ export async function POST(request: NextRequest) {
 
         browserPdfErrorMessage = getErrorMessage(browserPdfError)
         console.error(
-          "Fallback HTML -> PDF do Power BI falhou, tentando ExportTo",
+          "Captura da pagina do sistema falhou, tentando ExportTo",
           browserPdfError
         )
       }
@@ -260,13 +259,13 @@ export async function POST(request: NextRequest) {
 
       if (format === "PDF" && browserPdfErrorMessage) {
         console.error(
-          "ExportTo do Power BI falhou apos erro na captura HTML -> PDF",
+          "ExportTo do Power BI falhou apos erro na captura da pagina",
           exportError
         )
 
         const errorMessage = isPowerBiFeatureNotAvailableError(exportError)
-          ? "Nao foi possivel gerar o PDF automaticamente neste ambiente. A captura do navegador falhou e o ExportTo nativo do Power BI nao esta disponivel para este relatorio."
-          : "Nao foi possivel gerar o PDF deste relatorio agora. Tente sincronizar os relatorios do Power BI e tente novamente."
+          ? "Nao foi possivel gerar o PDF automaticamente neste ambiente. A captura da pagina falhou e o ExportTo nativo do Power BI nao esta disponivel para este relatorio."
+          : "Nao foi possivel gerar o PDF deste relatorio agora. Tente novamente."
 
         return jsonError(errorMessage, 500)
       }
