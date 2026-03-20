@@ -130,7 +130,10 @@ export async function POST(request: NextRequest) {
       return jsonError("callback_secret obrigatorio", 401)
     }
 
-    const companyId = await resolveCompanyIdByCallbackSecret(supabase, callbackSecret)
+    const companyId = await resolveCompanyIdByCallbackSecret(
+      supabase,
+      callbackSecret
+    )
 
     if (!companyId) {
       return jsonError("Callback secret invalido", 401)
@@ -146,7 +149,8 @@ export async function POST(request: NextRequest) {
       body?.pdf_profile,
       request.headers.get("user-agent")
     )
-    const preferNativePowerBiExport = true
+
+    const preferNativePowerBiExport = body?.prefer_native_export === true
 
     if (!reportId) {
       return new Response(JSON.stringify({ error: "report_id obrigatorio" }), {
