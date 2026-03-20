@@ -1,5 +1,8 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server"
-import { getSelectedPbiWorkspaceIds, isWorkspaceAccessConfigured } from "@/lib/workspace-access"
+import {
+  getSelectedPbiWorkspaceIds,
+  isWorkspaceAccessConfigured,
+} from "@/lib/workspace-access"
 
 export type RequestContext = {
   userId: string
