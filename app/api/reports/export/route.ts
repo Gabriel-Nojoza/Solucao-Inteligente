@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const token = await getAccessToken()
+    const token = await getAccessToken(companyId)
     const safeName = sanitizeFileName(report.name || "relatorio")
     let browserPdfErrorMessage: string | null = null
 
