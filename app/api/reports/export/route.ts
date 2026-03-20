@@ -13,7 +13,6 @@ import {
   type PowerBiPdfProfile,
   sanitizeFileName,
 } from "@/lib/powerbi-report-pdf"
-import { getRequestContext } from "@/lib/tenant"
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -80,10 +79,12 @@ function getSecretFromRequest(request: NextRequest, body: any) {
   const querySecret = url.searchParams.get("secret")?.trim()
   const headerSecret = request.headers.get("x-callback-secret")?.trim()
   const authHeader = request.headers.get("authorization")?.trim()
+
   const bearerSecret =
     authHeader && authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : null
+
   const bodySecret =
     typeof body?.callback_secret === "string"
       ? body.callback_secret.trim()
@@ -92,55 +93,48 @@ function getSecretFromRequest(request: NextRequest, body: any) {
   return querySecret || headerSecret || bearerSecret || bodySecret || ""
 }
 
-async function resolveCompanyIdForExport(
-  request: NextRequest,
-  body: any
-): Promise<{ companyId: string; source: "auth" | "n8n_secret" }> {
-  const secret = getSecretFromRequest(request, body)
+async function resolveCompanyIdByCallbackSecret(
+  supabase: ReturnType<typeof createClient>,
+  secret: string
+) {
+  if (!secret) return null
 
-  if (secret) {
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from("company_settings")
-      .select("company_id, value")
-      .eq("key", "n8n")
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("company_id, value")
+    .eq("key", "n8n")
 
-    if (error) {
-      throw new Error(error.message)
-    }
-
-    const match = (data ?? []).find((row) => {
-      const value = row.value as Record<string, unknown> | null
-      return (
-        typeof value?.callback_secret === "string" &&
-        value.callback_secret.trim() === secret
-      )
-    })
-
-    if (!match?.company_id) {
-      throw new Error("Callback secret invalido")
-    }
-
-    return {
-      companyId: match.company_id,
-      source: "n8n_secret",
-    }
+  if (error) {
+    throw new Error(error.message)
   }
 
-  const context = await getRequestContext()
-  return {
-    companyId: context.companyId,
-    source: "auth",
-  }
+  const match = (data ?? []).find((row) => {
+    const value = row.value as Record<string, unknown> | null
+    return (
+      typeof value?.callback_secret === "string" &&
+      value.callback_secret.trim() === secret
+    )
+  })
+
+  return match?.company_id ?? null
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const requestForBody = request.clone()
-    const body = await requestForBody.json()
-
-    const { companyId, source } = await resolveCompanyIdForExport(request, body)
+    const body = await request.json()
     const supabase = createClient()
+
+    const callbackSecret = getSecretFromRequest(request, body)
+
+    if (!callbackSecret) {
+      return jsonError("callback_secret obrigatorio", 401)
+    }
+
+    const companyId = await resolveCompanyIdByCallbackSecret(supabase, callbackSecret)
+
+    if (!companyId) {
+      return jsonError("Callback secret invalido", 401)
+    }
 
     const reportId = String(body?.report_id ?? "").trim()
     const format = String(body?.format ?? "PDF").trim().toUpperCase()
@@ -152,8 +146,7 @@ export async function POST(request: NextRequest) {
       body?.pdf_profile,
       request.headers.get("user-agent")
     )
-    const preferNativePowerBiExport =
-      source === "n8n_secret" || body?.prefer_native_export === true
+    const preferNativePowerBiExport = true
 
     if (!reportId) {
       return new Response(JSON.stringify({ error: "report_id obrigatorio" }), {
