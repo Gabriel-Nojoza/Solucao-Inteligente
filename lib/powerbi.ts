@@ -362,8 +362,6 @@ export async function getExportFile(
   return res.arrayBuffer()
 }
 
-// === Dataset Metadata & DAX Queries ===
-
 export async function listDatasets(token: string, workspaceId: string) {
   const res = await fetch(`${PBI_API_BASE}/groups/${workspaceId}/datasets`, {
     headers: { Authorization: `Bearer ${token}` },
