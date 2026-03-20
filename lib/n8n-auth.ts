@@ -6,7 +6,7 @@ export type RequestCompanyContext = {
   source: "auth" | "n8n_secret"
 }
 
-async function getSecretFromRequest(request: Request) {
+function getSecretFromRequest(request: Request) {
   const url = new URL(request.url)
   const querySecret = url.searchParams.get("secret")?.trim()
   const headerSecret = request.headers.get("x-callback-secret")?.trim()
@@ -17,23 +17,7 @@ async function getSecretFromRequest(request: Request) {
       ? authHeader.slice(7).trim()
       : null
 
-  let bodySecret = ""
-
-  const contentType = request.headers.get("content-type") || ""
-  if (contentType.toLowerCase().includes("application/json")) {
-    try {
-      const clonedRequest = request.clone()
-      const body = await clonedRequest.json()
-      bodySecret =
-        typeof body?.callback_secret === "string"
-          ? body.callback_secret.trim()
-          : ""
-    } catch {
-      bodySecret = ""
-    }
-  }
-
-  return querySecret || headerSecret || bearerSecret || bodySecret || ""
+  return querySecret || headerSecret || bearerSecret || ""
 }
 
 async function getCompanyIdFromCallbackSecret(secret: string) {
@@ -64,10 +48,13 @@ async function getCompanyIdFromCallbackSecret(secret: string) {
 
 export async function resolveRequestCompanyContext(
   request: Request,
-  options?: { allowCallbackSecret?: boolean }
+  options?: { allowCallbackSecret?: boolean; callbackSecret?: string | null }
 ): Promise<RequestCompanyContext> {
   if (options?.allowCallbackSecret) {
-    const secret = await getSecretFromRequest(request)
+    const secret =
+      (typeof options.callbackSecret === "string"
+        ? options.callbackSecret.trim()
+        : "") || getSecretFromRequest(request)
 
     if (secret) {
       const companyId = await getCompanyIdFromCallbackSecret(secret)
