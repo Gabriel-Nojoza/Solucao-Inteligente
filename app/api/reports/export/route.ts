@@ -8,8 +8,7 @@ import {
   isPowerBiEntityNotFoundError,
   isPowerBiFeatureNotAvailableError,
 } from "@/lib/powerbi"
-import { exportAppReportPdf } from "@/lib/app-report-pdf"
-import { sanitizeFileName } from "@/lib/powerbi-report-pdf"
+import { exportPowerBIReportPdf, sanitizeFileName } from "@/lib/powerbi-report-pdf"
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -205,18 +204,13 @@ export async function POST(request: NextRequest) {
 
     if (format === "PDF" && !preferNativePowerBiExport) {
       try {
-        const appBaseUrl =
-          process.env.APP_BASE_URL?.trim() ||
-          "https://appsolucaointeligente.com.br"
-
-        const reportPrintUrl =
-          `${appBaseUrl}/reports/${report.id}/print` +
-          `?callback_secret=${encodeURIComponent(callbackSecret)}`
-
-        const pdfBuffer = await exportAppReportPdf({
-          url: reportPrintUrl,
+        const pdfBuffer = await exportPowerBIReportPdf({
+          token,
+          workspaceId: workspace.pbi_workspace_id,
+          reportId: report.pbi_report_id,
+          reportName: report.name,
+          embedUrl: report.embed_url,
           pdfProfile,
-          waitForSelector: '[data-report-ready="true"]',
         })
 
         return new Response(pdfBuffer, {
