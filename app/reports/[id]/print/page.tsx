@@ -142,7 +142,7 @@ export default async function ReportPrintPage({
       <body>
         <div className="page">
           <div id="status" className="status">
-            Carregando relatório...
+            Carregando relatorio...
           </div>
           <div className="report-shell">
             <div id="report-container" />
@@ -189,7 +189,7 @@ export default async function ReportPrintPage({
 
                 report.on("loaded", function () {
                   if (statusNode) {
-                    statusNode.textContent = "Renderizando relatório...";
+                    statusNode.textContent = "Renderizando relatorio...";
                   }
                 });
 
@@ -207,7 +207,7 @@ export default async function ReportPrintPage({
                 report.on("error", function (event) {
                   if (statusNode) {
                     statusNode.textContent =
-                      event?.detail?.message || "Erro ao renderizar relatório.";
+                      event?.detail?.message || "Erro ao renderizar relatorio.";
                   }
                 });
               })();
@@ -225,11 +225,11 @@ async function fetchEmbedToken(input: {
   reportId: string
 }) {
   const response = await fetch(
-    \`https://api.powerbi.com/v1.0/myorg/groups/\${input.workspaceId}/reports/\${input.reportId}/GenerateToken\`,
+    `https://api.powerbi.com/v1.0/myorg/groups/${input.workspaceId}/reports/${input.reportId}/GenerateToken`,
     {
       method: "POST",
       headers: {
-        Authorization: \`Bearer \${input.token}\`,
+        Authorization: `Bearer ${input.token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -242,14 +242,14 @@ async function fetchEmbedToken(input: {
 
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(\`Falha ao gerar embed token: \${errorText}\`)
+    throw new Error(`Falha ao gerar embed token: ${errorText}`)
   }
 
   const data = (await response.json()) as { token?: string | null }
   const embedToken = typeof data.token === "string" ? data.token.trim() : ""
 
   if (!embedToken) {
-    throw new Error("Power BI não retornou token de exibição.")
+    throw new Error("Power BI nao retornou token de exibicao.")
   }
 
   return embedToken
