@@ -224,25 +224,29 @@ async function fetchEmbedToken(input: {
   workspaceId: string
   reportId: string
 }) {
-  const response = await fetch(
-    `https://api.powerbi.com/v1.0/myorg/groups/${input.workspaceId}/reports/${input.reportId}/GenerateToken`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        accessLevel: "View",
-        allowSaveAs: false,
-      }),
-      cache: "no-store",
-    }
-  )
+  const url =
+    "https://api.powerbi.com/v1.0/myorg/groups/" +
+    input.workspaceId +
+    "/reports/" +
+    input.reportId +
+    "/GenerateToken"
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + input.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      accessLevel: "View",
+      allowSaveAs: false,
+    }),
+    cache: "no-store",
+  })
 
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(`Falha ao gerar embed token: ${errorText}`)
+    throw new Error("Falha ao gerar embed token: " + errorText)
   }
 
   const data = (await response.json()) as { token?: string | null }
