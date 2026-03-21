@@ -84,14 +84,13 @@ export async function exportAppReportPdf(input: {
 
     await page.waitForTimeout(3000)
 
-    return await page.pdf({
-      printBackground: true,
-      width: preset.width,
-      height: preset.height,
-      margin: preset.margin,
-      preferCSSPageSize: false,
-      scale: preset.scale,
-      timeout: 120000,
+      return await page.pdf({
+          printBackground: true,
+          width: preset.width,
+          height: preset.height,
+          margin: preset.margin,
+          preferCSSPageSize: false,
+          scale: preset.scale,
     })
   } finally {
     await browser.close()
