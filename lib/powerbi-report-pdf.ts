@@ -337,14 +337,14 @@ export async function exportPowerBIReportPdf(input: {
   const preset = getPowerBiPdfPreset(input.pdfProfile ?? "desktop")
 
   return renderHtmlScreenshotToPdf(html, {
-    screenshotTimeoutMs: 40000,
-    waitForReadyTimeoutMs: 70000,
-    viewportWidth: preset.viewportWidth,
-    viewportHeight: preset.viewportHeight,
+    pngTimeoutMs: 70000,
+    pdfTimeoutMs: 60000,
+    captureWidth: preset.viewportWidth,
+    captureHeight: preset.viewportHeight,
     deviceScaleFactor: preset.deviceScaleFactor,
     pageWidthMm: preset.pageWidthMm,
     pageHeightMm: preset.pageHeightMm,
     pageMarginMm: preset.pageMarginMm,
-    pdfTimeoutMs: 60000,
+    screenshotScale: 3.5,
   })
 }
