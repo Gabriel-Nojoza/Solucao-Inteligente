@@ -99,6 +99,13 @@ type CdpSendOptions = {
   sessionId?: string
 }
 
+type SegmentMetadata = {
+  width: number
+  height: number
+  scrollTop: number
+  viewportHeight: number
+}
+
 const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ])
@@ -698,115 +705,76 @@ async function waitForDomReady(
   )
 }
 
-async function expandScrollableAreas(client: CdpClient, sessionId: string) {
-  await client.send(
+async function prepareScrollableSegments(
+  client: CdpClient,
+  sessionId: string
+) {
+  const result = await client.send(
     "Runtime.evaluate",
     {
       expression: `async (() => {
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-        const elements = Array.from(document.querySelectorAll("*"))
-          .filter((el) => el instanceof HTMLElement);
+        const candidates = Array.from(document.querySelectorAll("*"))
+          .filter((el) => el instanceof HTMLElement)
+          .map((el) => {
+            const style = window.getComputedStyle(el)
+            const canScrollY =
+              (style.overflowY === "auto" ||
+                style.overflowY === "scroll" ||
+                style.overflow === "auto" ||
+                style.overflow === "scroll") &&
+              el.scrollHeight > el.clientHeight + 20
 
-        const scrollables = elements.filter((el) => {
-          const style = window.getComputedStyle(el);
-
-          const canScrollY =
-            (style.overflowY === "auto" ||
-              style.overflowY === "scroll" ||
-              style.overflow === "auto" ||
-              style.overflow === "scroll") &&
-            el.scrollHeight > el.clientHeight + 8;
-
-          const canScrollX =
-            (style.overflowX === "auto" ||
-              style.overflowX === "scroll" ||
-              style.overflow === "auto" ||
-              style.overflow === "scroll") &&
-            el.scrollWidth > el.clientWidth + 8;
-
-          return canScrollY || canScrollX;
-        });
-
-        for (const el of scrollables) {
-          const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-          const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth);
-
-          if (maxScrollTop > 0) {
-            const stepY = Math.max(200, Math.floor(el.clientHeight * 0.7));
-
-            for (let y = 0; y <= maxScrollTop; y += stepY) {
-              el.scrollTop = Math.min(y, maxScrollTop);
-              el.dispatchEvent(new Event("scroll", { bubbles: true }));
-              await sleep(250);
+            return {
+              el,
+              canScrollY,
+              scrollHeight: el.scrollHeight,
+              clientHeight: el.clientHeight,
+              scrollWidth: el.scrollWidth,
+              clientWidth: el.clientWidth,
+              area: el.clientWidth * el.clientHeight,
             }
+          })
+          .filter((item) => item.canScrollY)
+          .sort((a, b) => b.area - a.area)
 
-            el.scrollTop = maxScrollTop;
-            el.dispatchEvent(new Event("scroll", { bubbles: true }));
-            await sleep(500);
-          }
+        const target = candidates[0]?.el || null
 
-          if (maxScrollLeft > 0) {
-            const stepX = Math.max(200, Math.floor(el.clientWidth * 0.7));
-
-            for (let x = 0; x <= maxScrollLeft; x += stepX) {
-              el.scrollLeft = Math.min(x, maxScrollLeft);
-              el.dispatchEvent(new Event("scroll", { bubbles: true }));
-              await sleep(150);
-            }
-
-            el.scrollLeft = maxScrollLeft;
-            el.dispatchEvent(new Event("scroll", { bubbles: true }));
-            await sleep(250);
+        if (!target) {
+          return {
+            mode: "single",
+            viewportHeight: window.innerHeight,
+            totalHeight: Math.max(
+              document.body?.scrollHeight || 0,
+              document.documentElement?.scrollHeight || 0
+            ),
           }
         }
 
-        for (const el of scrollables) {
-          const style = window.getComputedStyle(el);
+        const originalScrollTop = target.scrollTop
+        const viewportHeight = target.clientHeight
+        const maxScrollTop = Math.max(0, target.scrollHeight - target.clientHeight)
+        const step = Math.max(220, Math.floor(viewportHeight * 0.8))
+        const positions = []
 
-          const hasScrollY =
-            (style.overflowY === "auto" ||
-              style.overflowY === "scroll" ||
-              style.overflow === "auto" ||
-              style.overflow === "scroll") &&
-            el.scrollHeight > el.clientHeight + 8;
-
-          const hasScrollX =
-            (style.overflowX === "auto" ||
-              style.overflowX === "scroll" ||
-              style.overflow === "auto" ||
-              style.overflow === "scroll") &&
-            el.scrollWidth > el.clientWidth + 8;
-
-          el.style.setProperty("overflow", "visible", "important");
-          el.style.setProperty("overflow-y", "visible", "important");
-          el.style.setProperty("overflow-x", "visible", "important");
-          el.style.setProperty("max-height", "none", "important");
-          el.style.setProperty("max-width", "none", "important");
-
-          if (hasScrollY) {
-            el.style.setProperty("height", el.scrollHeight + "px", "important");
-          }
-
-          if (hasScrollX) {
-            el.style.setProperty("width", el.scrollWidth + "px", "important");
-          }
+        for (let y = 0; y <= maxScrollTop; y += step) {
+          positions.push(Math.min(y, maxScrollTop))
         }
 
-        document.documentElement.style.setProperty("overflow", "visible", "important");
-        document.body.style.setProperty("overflow", "visible", "important");
-        document.body.style.setProperty(
-          "min-height",
-          Math.max(
-            document.body.scrollHeight,
-            document.documentElement.scrollHeight
-          ) + "px",
-          "important"
-        );
+        if (positions.length === 0 || positions[positions.length - 1] !== maxScrollTop) {
+          positions.push(maxScrollTop)
+        }
 
-        await sleep(1200);
+        const uniquePositions = Array.from(new Set(positions))
 
-        return true;
+        return {
+          mode: "segmented",
+          viewportHeight,
+          totalHeight: target.scrollHeight,
+          positions: uniquePositions,
+          originalScrollTop,
+        }
       })()`,
       returnByValue: true,
       awaitPromise: true,
@@ -814,7 +782,142 @@ async function expandScrollableAreas(client: CdpClient, sessionId: string) {
     { sessionId }
   )
 
-  await delay(1500)
+  return (result.result as { value?: Record<string, unknown> } | undefined)?.value ?? null
+}
+
+async function scrollSegmentTarget(
+  client: CdpClient,
+  sessionId: string,
+  scrollTop: number
+) {
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `async (() => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const candidates = Array.from(document.querySelectorAll("*"))
+          .filter((el) => el instanceof HTMLElement)
+          .map((el) => {
+            const style = window.getComputedStyle(el)
+            const canScrollY =
+              (style.overflowY === "auto" ||
+                style.overflowY === "scroll" ||
+                style.overflow === "auto" ||
+                style.overflow === "scroll") &&
+              el.scrollHeight > el.clientHeight + 20
+
+            return {
+              el,
+              canScrollY,
+              area: el.clientWidth * el.clientHeight,
+            }
+          })
+          .filter((item) => item.canScrollY)
+          .sort((a, b) => b.area - a.area)
+
+        const target = candidates[0]?.el || null
+        if (!target) return false
+
+        target.scrollTop = ${Math.max(0, scrollTop)}
+        target.dispatchEvent(new Event("scroll", { bubbles: true }))
+        await sleep(700)
+        return true
+      })()`,
+      returnByValue: true,
+      awaitPromise: true,
+    },
+    { sessionId }
+  )
+}
+
+async function restoreSegmentTarget(
+  client: CdpClient,
+  sessionId: string,
+  scrollTop: number
+) {
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `(() => {
+        const candidates = Array.from(document.querySelectorAll("*"))
+          .filter((el) => el instanceof HTMLElement)
+          .map((el) => {
+            const style = window.getComputedStyle(el)
+            const canScrollY =
+              (style.overflowY === "auto" ||
+                style.overflowY === "scroll" ||
+                style.overflow === "auto" ||
+                style.overflow === "scroll") &&
+              el.scrollHeight > el.clientHeight + 20
+
+            return {
+              el,
+              canScrollY,
+              area: el.clientWidth * el.clientHeight,
+            }
+          })
+          .filter((item) => item.canScrollY)
+          .sort((a, b) => b.area - a.area)
+
+        const target = candidates[0]?.el || null
+        if (!target) return false
+
+        target.scrollTop = ${Math.max(0, scrollTop)}
+        return true
+      })()`,
+      returnByValue: true,
+      awaitPromise: true,
+    },
+    { sessionId }
+  )
+}
+
+async function captureViewportPng(
+  client: CdpClient,
+  sessionId: string,
+  width: number,
+  height: number,
+  deviceScaleFactor: number,
+  screenshotScale: number
+) {
+  await client.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width,
+      height,
+      deviceScaleFactor,
+      mobile: false,
+      scale: screenshotScale,
+    },
+    { sessionId }
+  )
+
+  await delay(500)
+
+  const screenshot = await client.send(
+    "Page.captureScreenshot",
+    {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: false,
+      clip: {
+        x: 0,
+        y: 0,
+        width,
+        height,
+        scale: 1,
+      },
+    },
+    { sessionId }
+  )
+
+  const data = String(screenshot.data || "")
+  if (!data) {
+    throw new Error("O navegador nao retornou a captura do relatorio")
+  }
+
+  return Buffer.from(data, "base64")
 }
 
 export async function renderHtmlToPdf(
@@ -909,70 +1012,160 @@ export async function renderHtmlToPng(
       )
     }
 
-    if (options?.forceExpandScrollable !== false) {
-      await expandScrollableAreas(client, sessionId)
-    }
+    if (options?.forceExpandScrollable === false) {
+      const layoutMetrics = await client.send("Page.getLayoutMetrics", {}, { sessionId })
+      const contentSize = layoutMetrics.contentSize as
+        | { width?: number; height?: number }
+        | undefined
 
-    const refreshedState = await waitForDomReady(client, sessionId, 1500)
+      const fullWidth = Math.max(
+        captureWidth,
+        Math.ceil(contentSize?.width ?? lastState.scrollWidth ?? captureWidth)
+      )
+      const fullHeight = Math.max(
+        captureHeight,
+        Math.ceil(contentSize?.height ?? lastState.scrollHeight ?? captureHeight)
+      )
+      const safeFullHeight = Math.min(fullHeight, 30000)
 
-    const layoutMetrics = await client.send(
-      "Page.getLayoutMetrics",
-      {},
-      { sessionId }
-    )
-
-    const contentSize = layoutMetrics.contentSize as
-      | { width?: number; height?: number; x?: number; y?: number }
-      | undefined
-
-    const fullWidth = Math.max(
-      captureWidth,
-      Math.ceil(contentSize?.width ?? refreshedState.scrollWidth ?? captureWidth)
-    )
-    const fullHeight = Math.max(
-      captureHeight,
-      Math.ceil(contentSize?.height ?? refreshedState.scrollHeight ?? captureHeight)
-    )
-
-    const safeFullHeight = Math.min(fullHeight, 30000)
-
-    await client.send(
-      "Emulation.setDeviceMetricsOverride",
-      {
-        width: fullWidth,
-        height: safeFullHeight,
-        deviceScaleFactor,
-        mobile: false,
-        scale: screenshotScale,
-      },
-      { sessionId }
-    )
-
-    await delay(700)
-
-    const screenshot = await client.send(
-      "Page.captureScreenshot",
-      {
-        format: "png",
-        fromSurface: true,
-        captureBeyondViewport: true,
-        clip: {
-          x: 0,
-          y: 0,
+      await client.send(
+        "Emulation.setDeviceMetricsOverride",
+        {
           width: fullWidth,
           height: safeFullHeight,
-          scale: 1,
+          deviceScaleFactor,
+          mobile: false,
+          scale: screenshotScale,
         },
-      },
-      { sessionId }
-    )
+        { sessionId }
+      )
 
-    const data = String(screenshot.data || "")
-    if (!data) {
-      throw new Error("O navegador nao retornou a captura do relatorio")
+      await delay(700)
+
+      const screenshot = await client.send(
+        "Page.captureScreenshot",
+        {
+          format: "png",
+          fromSurface: true,
+          captureBeyondViewport: true,
+          clip: {
+            x: 0,
+            y: 0,
+            width: fullWidth,
+            height: safeFullHeight,
+            scale: 1,
+          },
+        },
+        { sessionId }
+      )
+
+      const data = String(screenshot.data || "")
+      if (!data) {
+        throw new Error("O navegador nao retornou a captura do relatorio")
+      }
+
+      return Buffer.from(data, "base64")
     }
 
-    return Buffer.from(data, "base64")
+    const segmentation = await prepareScrollableSegments(client, sessionId)
+
+    if (!segmentation || segmentation.mode !== "segmented") {
+      const layoutMetrics = await client.send("Page.getLayoutMetrics", {}, { sessionId })
+      const contentSize = layoutMetrics.contentSize as
+        | { width?: number; height?: number }
+        | undefined
+
+      const fullWidth = Math.max(
+        captureWidth,
+        Math.ceil(contentSize?.width ?? lastState.scrollWidth ?? captureWidth)
+      )
+      const fullHeight = Math.max(
+        captureHeight,
+        Math.ceil(contentSize?.height ?? lastState.scrollHeight ?? captureHeight)
+      )
+      const safeFullHeight = Math.min(fullHeight, 30000)
+
+      await client.send(
+        "Emulation.setDeviceMetricsOverride",
+        {
+          width: fullWidth,
+          height: safeFullHeight,
+          deviceScaleFactor,
+          mobile: false,
+          scale: screenshotScale,
+        },
+        { sessionId }
+      )
+
+      await delay(700)
+
+      const screenshot = await client.send(
+        "Page.captureScreenshot",
+        {
+          format: "png",
+          fromSurface: true,
+          captureBeyondViewport: true,
+          clip: {
+            x: 0,
+            y: 0,
+            width: fullWidth,
+            height: safeFullHeight,
+            scale: 1,
+          },
+        },
+        { sessionId }
+      )
+
+      const data = String(screenshot.data || "")
+      if (!data) {
+        throw new Error("O navegador nao retornou a captura do relatorio")
+      }
+
+      return Buffer.from(data, "base64")
+    }
+
+    const positions = Array.isArray(segmentation.positions)
+      ? (segmentation.positions as number[])
+      : []
+
+    const viewportHeight = Number(segmentation.viewportHeight || captureHeight)
+    const originalScrollTop = Number(segmentation.originalScrollTop || 0)
+
+    const segmentBuffers: Buffer[] = []
+
+    for (const scrollTop of positions) {
+      await scrollSegmentTarget(client, sessionId, scrollTop)
+
+      const png = await captureViewportPng(
+        client,
+        sessionId,
+        captureWidth,
+        viewportHeight,
+        deviceScaleFactor,
+        screenshotScale
+      )
+
+      segmentBuffers.push(png)
+    }
+
+    await restoreSegmentTarget(client, sessionId, originalScrollTop)
+
+    const metadata: SegmentMetadata[] = segmentBuffers.map((buffer, index) => {
+      const dimensions = parsePngDimensions(buffer)
+      return {
+        width: dimensions.width,
+        height: dimensions.height,
+        scrollTop: positions[index] ?? 0,
+        viewportHeight,
+      }
+    })
+
+    const payload = {
+      segments: segmentBuffers.map((buffer) => buffer.toString("base64")),
+      metadata,
+    }
+
+    return Buffer.from(JSON.stringify(payload), "utf-8")
   })
 }
 
@@ -980,7 +1173,7 @@ export async function renderHtmlScreenshotToPdf(
   html: string,
   options?: ScreenshotToPdfOptions
 ) {
-  const screenshot = await renderHtmlToPng(html, {
+  const screenshotPayload = await renderHtmlToPng(html, {
     timeoutMs: options?.pngTimeoutMs ?? 60000,
     captureWidth: options?.captureWidth,
     captureHeight: options?.captureHeight,
@@ -988,6 +1181,34 @@ export async function renderHtmlScreenshotToPdf(
     screenshotScale: options?.screenshotScale,
     forceExpandScrollable: true,
   })
+
+  let segments: string[] = []
+  let metadata: SegmentMetadata[] = []
+
+  try {
+    const parsed = JSON.parse(screenshotPayload.toString("utf-8")) as {
+      segments?: string[]
+      metadata?: SegmentMetadata[]
+    }
+
+    segments = Array.isArray(parsed.segments) ? parsed.segments : []
+    metadata = Array.isArray(parsed.metadata) ? parsed.metadata : []
+  } catch {
+    segments = [screenshotPayload.toString("base64")]
+    const dimensions = parsePngDimensions(screenshotPayload)
+    metadata = [
+      {
+        width: dimensions.width,
+        height: dimensions.height,
+        scrollTop: 0,
+        viewportHeight: dimensions.height,
+      },
+    ]
+  }
+
+  if (!segments.length || !metadata.length) {
+    throw new Error("Nenhuma captura valida foi gerada para o relatorio")
+  }
 
   const pageWidthMm = options?.pageWidthMm ?? 420
   const pageHeightMm = options?.pageHeightMm ?? 594
@@ -999,38 +1220,37 @@ export async function renderHtmlScreenshotToPdf(
   const contentWidthPx = Math.max(1, pageWidthPx - pageMarginPx * 2)
   const contentHeightPx = Math.max(1, pageHeightPx - pageMarginPx * 2)
 
-  const screenshotDimensions = parsePngDimensions(screenshot)
-  const renderedImageWidthPx = contentWidthPx
-  const renderedImageHeightPx = Math.max(
-    1,
-    Math.round(
-      (screenshotDimensions.height * renderedImageWidthPx) /
-        screenshotDimensions.width
-    )
-  )
+  const pagesHtml = segments
+    .map((segmentBase64, index) => {
+      const info = metadata[index]
+      const renderedImageWidthPx = contentWidthPx
+      const renderedImageHeightPx = Math.max(
+        1,
+        Math.round((info.height * renderedImageWidthPx) / info.width)
+      )
 
-  const totalSlices = Math.max(
-    1,
-    Math.ceil(renderedImageHeightPx / contentHeightPx)
-  )
+      const localSlices = Math.max(
+        1,
+        Math.ceil(renderedImageHeightPx / contentHeightPx)
+      )
 
-  const base64 = screenshot.toString("base64")
+      return Array.from({ length: localSlices }, (_, sliceIndex) => {
+        const offsetY = sliceIndex * contentHeightPx
 
-  const pagesHtml = Array.from({ length: totalSlices }, (_, index) => {
-    const offsetY = index * contentHeightPx
-
-    return `
-      <section class="pdf-page">
-        <div class="slice">
-          <img
-            src="data:image/png;base64,${escapeHtmlAttribute(base64)}"
-            alt="Relatorio Power BI"
-            style="transform: translateY(-${offsetY}px);"
-          />
-        </div>
-      </section>
-    `
-  }).join("")
+        return `
+          <section class="pdf-page">
+            <div class="slice">
+              <img
+                src="data:image/png;base64,${escapeHtmlAttribute(segmentBase64)}"
+                alt="Relatorio Power BI - segmento ${index + 1}"
+                style="transform: translateY(-${offsetY}px);"
+              />
+            </div>
+          </section>
+        `
+      }).join("")
+    })
+    .join("")
 
   const imageHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1088,8 +1308,7 @@ export async function renderHtmlScreenshotToPdf(
 
     img {
       display: block;
-      width: ${renderedImageWidthPx}px;
-      height: ${renderedImageHeightPx}px;
+      width: ${contentWidthPx}px;
       max-width: none;
       max-height: none;
       object-fit: contain;
