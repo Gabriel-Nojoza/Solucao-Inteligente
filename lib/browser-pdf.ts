@@ -100,14 +100,7 @@ type CdpSendOptions = {
 }
 
 const PNG_SIGNATURE = Buffer.from([
-  0x89,
-  0x50,
-  0x4e,
-  0x47,
-  0x0d,
-  0x0a,
-  0x1a,
-  0x0a,
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ])
 
 const CSS_PIXELS_PER_INCH = 96
@@ -403,7 +396,8 @@ class CdpClient {
     this.ws = ws
 
     ws.addEventListener("message", (event) => {
-      const raw = typeof event.data === "string" ? event.data : event.data.toString()
+      const raw =
+        typeof event.data === "string" ? event.data : event.data.toString()
       const message = JSON.parse(raw) as CdpMessage
 
       if (typeof message.id === "number") {
@@ -472,11 +466,15 @@ class CdpClient {
     sessionId?: string
   ) {
     const store = sessionId
-      ? this.sessions.get(sessionId) ?? new Map<string, Array<(params: Record<string, unknown>) => void>>()
+      ? this.sessions.get(sessionId) ??
+        new Map<string, Array<(params: Record<string, unknown>) => void>>()
       : this.rootListeners
 
     if (sessionId && !this.sessions.has(sessionId)) {
-      this.sessions.set(sessionId, store as Map<string, Array<(params: Record<string, unknown>) => void>>)
+      this.sessions.set(
+        sessionId,
+        store as Map<string, Array<(params: Record<string, unknown>) => void>>
+      )
     }
 
     const listeners = store.get(method) ?? []
@@ -495,7 +493,10 @@ class CdpClient {
   }
 
   async close() {
-    if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+    if (
+      this.ws.readyState === WebSocket.OPEN ||
+      this.ws.readyState === WebSocket.CONNECTING
+    ) {
       this.ws.close()
     }
   }
@@ -534,10 +535,7 @@ async function closeChrome(child: ChildProcess) {
   }
 }
 
-async function openHtmlInNewPage(
-  client: CdpClient,
-  htmlUrl: string
-) {
+async function openHtmlInNewPage(client: CdpClient, htmlUrl: string) {
   const targetResult = await client.send("Target.createTarget", {
     url: "about:blank",
     width: 1280,
@@ -685,60 +683,128 @@ async function waitForDomReady(
     },
     { sessionId }
   )
-  const resultValue = (state.result as { value?: ScreenshotReadyState} | undefined)?.value
 
-  return resultValue ?? {
-    ready: false,
-    error: "Nao foi possivel ler o DOM do relatorio",
-    scrollWidth: 0,
-    scrollHeight: 0,
-  } as ScreenshotReadyState
+  const resultValue = (
+    state.result as { value?: ScreenshotReadyState } | undefined
+  )?.value
+
+  return (
+    resultValue ?? {
+      ready: false,
+      error: "Nao foi possivel ler o DOM do relatorio",
+      scrollWidth: 0,
+      scrollHeight: 0,
+    }
+  )
 }
 
 async function expandScrollableAreas(client: CdpClient, sessionId: string) {
   await client.send(
     "Runtime.evaluate",
     {
-      expression: `(() => {
-        const all = Array.from(document.querySelectorAll('*'));
+      expression: `async (() => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-        for (const el of all) {
-          if (!(el instanceof HTMLElement)) continue;
+        const elements = Array.from(document.querySelectorAll("*"))
+          .filter((el) => el instanceof HTMLElement);
 
+        const scrollables = elements.filter((el) => {
           const style = window.getComputedStyle(el);
-          const hasScrollY =
-            (style.overflowY === 'auto' ||
-              style.overflowY === 'scroll' ||
-              style.overflow === 'auto' ||
-              style.overflow === 'scroll') &&
+
+          const canScrollY =
+            (style.overflowY === "auto" ||
+              style.overflowY === "scroll" ||
+              style.overflow === "auto" ||
+              style.overflow === "scroll") &&
             el.scrollHeight > el.clientHeight + 8;
 
-          const hasScrollX =
-            (style.overflowX === 'auto' ||
-              style.overflowX === 'scroll' ||
-              style.overflow === 'auto' ||
-              style.overflow === 'scroll') &&
+          const canScrollX =
+            (style.overflowX === "auto" ||
+              style.overflowX === "scroll" ||
+              style.overflow === "auto" ||
+              style.overflow === "scroll") &&
             el.scrollWidth > el.clientWidth + 8;
 
-          if (hasScrollY || hasScrollX) {
-            el.style.setProperty('overflow', 'visible', 'important');
-            el.style.setProperty('overflow-y', 'visible', 'important');
-            el.style.setProperty('overflow-x', 'visible', 'important');
-            el.style.setProperty('max-height', 'none', 'important');
-            el.style.setProperty('max-width', 'none', 'important');
+          return canScrollY || canScrollX;
+        });
 
-            if (hasScrollY) {
-              el.style.setProperty('height', el.scrollHeight + 'px', 'important');
+        for (const el of scrollables) {
+          const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+          const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+
+          if (maxScrollTop > 0) {
+            const stepY = Math.max(200, Math.floor(el.clientHeight * 0.7));
+
+            for (let y = 0; y <= maxScrollTop; y += stepY) {
+              el.scrollTop = Math.min(y, maxScrollTop);
+              el.dispatchEvent(new Event("scroll", { bubbles: true }));
+              await sleep(250);
             }
 
-            if (hasScrollX) {
-              el.style.setProperty('width', el.scrollWidth + 'px', 'important');
+            el.scrollTop = maxScrollTop;
+            el.dispatchEvent(new Event("scroll", { bubbles: true }));
+            await sleep(500);
+          }
+
+          if (maxScrollLeft > 0) {
+            const stepX = Math.max(200, Math.floor(el.clientWidth * 0.7));
+
+            for (let x = 0; x <= maxScrollLeft; x += stepX) {
+              el.scrollLeft = Math.min(x, maxScrollLeft);
+              el.dispatchEvent(new Event("scroll", { bubbles: true }));
+              await sleep(150);
             }
+
+            el.scrollLeft = maxScrollLeft;
+            el.dispatchEvent(new Event("scroll", { bubbles: true }));
+            await sleep(250);
           }
         }
 
-        document.documentElement.style.setProperty('overflow', 'visible', 'important');
-        document.body.style.setProperty('overflow', 'visible', 'important');
+        for (const el of scrollables) {
+          const style = window.getComputedStyle(el);
+
+          const hasScrollY =
+            (style.overflowY === "auto" ||
+              style.overflowY === "scroll" ||
+              style.overflow === "auto" ||
+              style.overflow === "scroll") &&
+            el.scrollHeight > el.clientHeight + 8;
+
+          const hasScrollX =
+            (style.overflowX === "auto" ||
+              style.overflowX === "scroll" ||
+              style.overflow === "auto" ||
+              style.overflow === "scroll") &&
+            el.scrollWidth > el.clientWidth + 8;
+
+          el.style.setProperty("overflow", "visible", "important");
+          el.style.setProperty("overflow-y", "visible", "important");
+          el.style.setProperty("overflow-x", "visible", "important");
+          el.style.setProperty("max-height", "none", "important");
+          el.style.setProperty("max-width", "none", "important");
+
+          if (hasScrollY) {
+            el.style.setProperty("height", el.scrollHeight + "px", "important");
+          }
+
+          if (hasScrollX) {
+            el.style.setProperty("width", el.scrollWidth + "px", "important");
+          }
+        }
+
+        document.documentElement.style.setProperty("overflow", "visible", "important");
+        document.body.style.setProperty("overflow", "visible", "important");
+        document.body.style.setProperty(
+          "min-height",
+          Math.max(
+            document.body.scrollHeight,
+            document.documentElement.scrollHeight
+          ) + "px",
+          "important"
+        );
+
+        await sleep(1200);
 
         return true;
       })()`,
@@ -748,7 +814,7 @@ async function expandScrollableAreas(client: CdpClient, sessionId: string) {
     { sessionId }
   )
 
-  await delay(1200)
+  await delay(1500)
 }
 
 export async function renderHtmlToPdf(
@@ -767,7 +833,9 @@ export async function renderHtmlToPdf(
     const lastState = await waitForDomReady(client, sessionId, virtualTimeBudgetMs)
 
     if (!lastState.ready) {
-      throw new Error(lastState.error || "O HTML do relatorio nao ficou pronto para gerar o PDF")
+      throw new Error(
+        lastState.error || "O HTML do relatorio nao ficou pronto para gerar o PDF"
+      )
     }
 
     await client.send(
@@ -836,12 +904,16 @@ export async function renderHtmlToPng(
     const lastState = await waitForDomReady(client, sessionId, 4000)
 
     if (!lastState.ready) {
-      throw new Error(lastState.error || "O HTML do relatorio nao ficou pronto para captura")
+      throw new Error(
+        lastState.error || "O HTML do relatorio nao ficou pronto para captura"
+      )
     }
 
     if (options?.forceExpandScrollable !== false) {
       await expandScrollableAreas(client, sessionId)
     }
+
+    const refreshedState = await waitForDomReady(client, sessionId, 1500)
 
     const layoutMetrics = await client.send(
       "Page.getLayoutMetrics",
@@ -855,18 +927,20 @@ export async function renderHtmlToPng(
 
     const fullWidth = Math.max(
       captureWidth,
-      Math.ceil(contentSize?.width ?? lastState.scrollWidth ?? captureWidth)
+      Math.ceil(contentSize?.width ?? refreshedState.scrollWidth ?? captureWidth)
     )
     const fullHeight = Math.max(
       captureHeight,
-      Math.ceil(contentSize?.height ?? lastState.scrollHeight ?? captureHeight)
+      Math.ceil(contentSize?.height ?? refreshedState.scrollHeight ?? captureHeight)
     )
+
+    const safeFullHeight = Math.min(fullHeight, 30000)
 
     await client.send(
       "Emulation.setDeviceMetricsOverride",
       {
         width: fullWidth,
-        height: Math.min(fullHeight, 16384),
+        height: safeFullHeight,
         deviceScaleFactor,
         mobile: false,
         scale: screenshotScale,
@@ -874,7 +948,7 @@ export async function renderHtmlToPng(
       { sessionId }
     )
 
-    await delay(400)
+    await delay(700)
 
     const screenshot = await client.send(
       "Page.captureScreenshot",
@@ -886,7 +960,7 @@ export async function renderHtmlToPng(
           x: 0,
           y: 0,
           width: fullWidth,
-          height: fullHeight,
+          height: safeFullHeight,
           scale: 1,
         },
       },
@@ -930,7 +1004,8 @@ export async function renderHtmlScreenshotToPdf(
   const renderedImageHeightPx = Math.max(
     1,
     Math.round(
-      (screenshotDimensions.height * renderedImageWidthPx) / screenshotDimensions.width
+      (screenshotDimensions.height * renderedImageWidthPx) /
+        screenshotDimensions.width
     )
   )
 
