@@ -14,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const HTTP_PORT = Number(process.env.BOT_PORT || 3010)
+const BODY_LIMIT = process.env.BOT_BODY_LIMIT || "100mb"
 const AUTH_DIR = path.join(__dirname, "auth")
 const RUNTIME_DIR = path.join(__dirname, "runtime")
 const QR_STATE_PATH = path.join(RUNTIME_DIR, "qr-state.json")
@@ -769,7 +770,16 @@ async function startBot() {
 }
 
 const app = express()
-app.use(express.json({ limit: "50mb" }))
+
+app.use(express.json({
+  limit: BODY_LIMIT,
+}))
+
+app.use(express.urlencoded({
+  extended: true,
+  limit: BODY_LIMIT,
+  parameterLimit: 100000,
+}))
 
 app.get("/health", async (_req, res) => {
   const runtimeState = await readRuntimeState()
