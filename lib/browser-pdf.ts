@@ -63,6 +63,42 @@ type ScreenshotReadyState = {
   scrollHeight: number
 }
 
+type PdfRenderOptions = {
+  timeoutMs?: number
+  virtualTimeBudgetMs?: number
+  pageWidthMm?: number
+  pageHeightMm?: number
+  marginMm?: number
+  landscape?: boolean
+  scale?: number
+  printBackground?: boolean
+}
+
+type PngRenderOptions = {
+  timeoutMs?: number
+  captureWidth?: number
+  captureHeight?: number
+  deviceScaleFactor?: number
+  screenshotScale?: number
+  forceExpandScrollable?: boolean
+}
+
+type ScreenshotToPdfOptions = {
+  pngTimeoutMs?: number
+  pdfTimeoutMs?: number
+  pageWidthMm?: number
+  pageHeightMm?: number
+  pageMarginMm?: number
+  captureWidth?: number
+  captureHeight?: number
+  deviceScaleFactor?: number
+  screenshotScale?: number
+}
+
+type CdpSendOptions = {
+  sessionId?: string
+}
+
 const PNG_SIGNATURE = Buffer.from([
   0x89,
   0x50,
@@ -79,6 +115,14 @@ const MILLIMETERS_PER_INCH = 25.4
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function parseEnvNumber(name: string, fallback: number) {
+  const raw = process.env[name]?.trim()
+  if (!raw) return fallback
+
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function parsePngDimensions(png: Buffer) {
@@ -103,6 +147,14 @@ function millimetersToCssPixels(value: number) {
   )
 }
 
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+}
+
 async function pathExists(targetPath: string) {
   try {
     await fs.access(targetPath)
@@ -118,8 +170,8 @@ async function findExecutableOnPath(command: string) {
   const extEntries =
     process.platform === "win32"
       ? (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM")
-        .split(";")
-        .filter(Boolean)
+          .split(";")
+          .filter(Boolean)
       : [""]
 
   for (const entry of pathEntries) {
@@ -163,7 +215,10 @@ export async function resolvePdfBrowserExecutable() {
   )
 }
 
-async function createBrowserWorkspace(prefix: string, html: string): Promise<BrowserWorkspace> {
+async function createBrowserWorkspace(
+  prefix: string,
+  html: string
+): Promise<BrowserWorkspace> {
   const workingDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
   const htmlPath = path.join(workingDir, "report.html")
   const profilePath = path.join(workingDir, "profile")
@@ -200,11 +255,7 @@ function getCommonBrowserArgs(profilePath: string) {
   ]
 }
 
-function runProcess(
-  command: string,
-  args: string[],
-  timeoutMs: number
-) {
+function runProcess(command: string, args: string[], timeoutMs: number) {
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
@@ -249,8 +300,8 @@ function runProcess(
       reject(
         new Error(
           stderr.trim() ||
-          stdout.trim() ||
-          `Falha ao executar o navegador para gerar PDF (codigo ${code ?? "desconhecido"})`
+            stdout.trim() ||
+            `Falha ao executar o navegador para gerar PDF (codigo ${code ?? "desconhecido"})`
         )
       )
     })
@@ -258,187 +309,139 @@ function runProcess(
 }
 
 async function launchChromeWithDebugging(
-  browserExecutable: string,
+  executablePath: string,
+  htmlUrl: string,
   profilePath: string,
   timeoutMs: number
 ): Promise<ChromeLaunchResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      browserExecutable,
-      [
-        ...getCommonBrowserArgs(profilePath),
-        "--remote-debugging-port=0",
-        "about:blank",
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    )
+    const args = [
+      ...getCommonBrowserArgs(profilePath),
+      "--remote-debugging-port=0",
+      "about:blank",
+    ]
 
-    let settled = false
-    let stderr = ""
+    const child = spawn(executablePath, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+
+    let finished = false
     let stdout = ""
-
-    const finish = (callback: () => void) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      callback()
-    }
-
-    const handleChunk = (chunk: string) => {
-      const match = chunk.match(/DevTools listening on (ws:\/\/[^\s]+)/)
-      if (!match?.[1]) {
-        return
-      }
-
-      finish(() => {
-        resolve({
-          child,
-          websocketUrl: match[1],
-        })
-      })
-    }
+    let stderr = ""
 
     const timeout = setTimeout(() => {
-      finish(() => {
-        child.kill()
-        reject(
-          new Error(
-            stderr.trim() ||
-            stdout.trim() ||
-            "Tempo limite ao iniciar o navegador para captura"
-          )
-        )
-      })
+      if (finished) return
+      finished = true
+      child.kill()
+      reject(new Error("Tempo limite ao iniciar o navegador para captura"))
     }, timeoutMs)
 
-    child.stdout.on("data", (buffer) => {
-      const text = buffer.toString()
+    const handleOutput = (chunk: Buffer) => {
+      const text = chunk.toString()
       stdout += text
-      handleChunk(text)
-    })
-
-    child.stderr.on("data", (buffer) => {
-      const text = buffer.toString()
       stderr += text
-      handleChunk(text)
-    })
+
+      const match = text.match(/DevTools listening on (ws:\/\/[^\s]+)/i)
+      if (!match || finished) return
+
+      finished = true
+      clearTimeout(timeout)
+
+      resolve({
+        child,
+        websocketUrl: match[1],
+      })
+    }
+
+    child.stdout.on("data", handleOutput)
+    child.stderr.on("data", handleOutput)
 
     child.once("error", (error) => {
-      finish(() => reject(error))
+      if (finished) return
+      finished = true
+      clearTimeout(timeout)
+      reject(error)
     })
 
     child.once("exit", (code) => {
-      if (settled) {
-        return
-      }
-
-      finish(() => {
-        reject(
-          new Error(
-            stderr.trim() ||
+      if (finished) return
+      finished = true
+      clearTimeout(timeout)
+      reject(
+        new Error(
+          stderr.trim() ||
             stdout.trim() ||
-            `O navegador encerrou antes da captura (codigo ${code ?? "desconhecido"})`
-          )
+            `Falha ao iniciar o navegador para captura (codigo ${code ?? "desconhecido"})`
         )
-      })
+      )
     })
   })
 }
 
-function parseMessageData(data: unknown) {
-  if (typeof data === "string") {
-    return data
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data).toString("utf-8")
-  }
-
-  if (typeof Blob !== "undefined" && data instanceof Blob) {
-    return data.text()
-  }
-
-  return ""
-}
-
-class CdpConnection {
-  private socket: WebSocket
+class CdpClient {
+  private ws: WebSocket
   private nextId = 1
   private pending = new Map<
     number,
     {
       resolve: (value: Record<string, unknown>) => void
-      reject: (reason?: unknown) => void
+      reject: (error: Error) => void
     }
   >()
-  private eventListeners = new Set<(message: CdpMessage) => void>()
 
-  private constructor(socket: WebSocket) {
-    this.socket = socket
-  }
+  private sessions = new Map<
+    string,
+    Map<string, Array<(params: Record<string, unknown>) => void>>
+  >()
 
-  static async connect(websocketUrl: string) {
-    const socket = new WebSocket(websocketUrl)
+  private rootListeners = new Map<
+    string,
+    Array<(params: Record<string, unknown>) => void>
+  >()
 
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Tempo limite ao conectar ao navegador headless"))
-      }, 15000)
+  constructor(ws: WebSocket) {
+    this.ws = ws
 
-      socket.addEventListener("open", () => {
-        clearTimeout(timeout)
-        resolve()
-      })
+    ws.addEventListener("message", (event) => {
+      const raw = typeof event.data === "string" ? event.data : event.data.toString()
+      const message = JSON.parse(raw) as CdpMessage
 
-      socket.addEventListener("error", () => {
-        clearTimeout(timeout)
-        reject(new Error("Nao foi possivel conectar ao navegador headless"))
-      })
-    })
+      if (typeof message.id === "number") {
+        const pending = this.pending.get(message.id)
+        if (!pending) return
 
-    const connection = new CdpConnection(socket)
-    connection.attachListeners()
-    return connection
-  }
+        this.pending.delete(message.id)
 
-  private attachListeners() {
-    this.socket.addEventListener("message", async (event) => {
-      const raw = await parseMessageData(event.data)
-      if (!raw) {
-        return
-      }
-
-      const parsed = JSON.parse(raw) as CdpMessage
-
-      if (parsed.id) {
-        const pending = this.pending.get(parsed.id)
-        if (!pending) {
+        if (message.error?.message) {
+          pending.reject(new Error(message.error.message))
           return
         }
 
-        this.pending.delete(parsed.id)
-
-        if (parsed.error?.message) {
-          pending.reject(new Error(parsed.error.message))
-          return
-        }
-
-        pending.resolve(parsed.result ?? {})
+        pending.resolve(message.result ?? {})
         return
       }
 
-      for (const listener of this.eventListeners) {
-        listener(parsed)
+      if (!message.method) return
+
+      if (message.sessionId) {
+        const sessionListeners = this.sessions.get(message.sessionId)
+        const listeners = sessionListeners?.get(message.method) ?? []
+        for (const listener of listeners) {
+          listener(message.params ?? {})
+        }
+        return
+      }
+
+      const rootListeners = this.rootListeners.get(message.method) ?? []
+      for (const listener of rootListeners) {
+        listener(message.params ?? {})
       }
     })
 
-    this.socket.addEventListener("close", () => {
+    ws.addEventListener("close", () => {
       for (const [, pending] of this.pending) {
-        pending.reject(new Error("Conexao com o navegador foi encerrada"))
+        pending.reject(new Error("A conexao com o navegador foi encerrada"))
       }
-
       this.pending.clear()
     })
   }
@@ -446,239 +449,434 @@ class CdpConnection {
   send(
     method: string,
     params?: Record<string, unknown>,
-    sessionId?: string
-  ): Promise<Record<string, unknown>> {
-    const id = this.nextId++
-
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
-
-      this.socket.send(
-        JSON.stringify({
-          id,
-          method,
-          params,
-          ...(sessionId ? { sessionId } : {}),
-        })
-      )
-    })
-  }
-
-  waitForEvent(
-    method: string,
-    options?: {
-      sessionId?: string
-      timeoutMs?: number
-      predicate?: (message: CdpMessage) => boolean
-    }
+    options?: CdpSendOptions
   ) {
-    return new Promise<CdpMessage>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup()
-        reject(new Error(`Tempo limite aguardando evento ${method}`))
-      }, options?.timeoutMs ?? 15000)
+    const id = this.nextId++
+    const payload: Record<string, unknown> = {
+      id,
+      method,
+    }
 
-      const listener = (message: CdpMessage) => {
-        if (message.method !== method) {
-          return
-        }
+    if (params) payload.params = params
+    if (options?.sessionId) payload.sessionId = options.sessionId
 
-        if (options?.sessionId && message.sessionId !== options.sessionId) {
-          return
-        }
-
-        if (options?.predicate && !options.predicate(message)) {
-          return
-        }
-
-        cleanup()
-        resolve(message)
-      }
-
-      const cleanup = () => {
-        clearTimeout(timeout)
-        this.eventListeners.delete(listener)
-      }
-
-      this.eventListeners.add(listener)
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject })
+      this.ws.send(JSON.stringify(payload))
     })
   }
 
-  close() {
-    this.socket.close()
+  on(
+    method: string,
+    listener: (params: Record<string, unknown>) => void,
+    sessionId?: string
+  ) {
+    const store = sessionId
+      ? this.sessions.get(sessionId) ?? new Map<string, Array<(params: Record<string, unknown>) => void>>()
+      : this.rootListeners
+
+    if (sessionId && !this.sessions.has(sessionId)) {
+      this.sessions.set(sessionId, store as Map<string, Array<(params: Record<string, unknown>) => void>>)
+    }
+
+    const listeners = store.get(method) ?? []
+    listeners.push(listener)
+    store.set(method, listeners)
+
+    return () => {
+      const current = store.get(method) ?? []
+      const next = current.filter((item) => item !== listener)
+      if (next.length > 0) {
+        store.set(method, next)
+      } else {
+        store.delete(method)
+      }
+    }
+  }
+
+  async close() {
+    if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+      this.ws.close()
+    }
   }
 }
 
-async function closeChromeProcess(child: ChildProcess) {
-  if (child.killed || child.exitCode !== null) {
-    return
-  }
+async function connectCdp(websocketUrl: string) {
+  const ws = new WebSocket(websocketUrl)
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      child.kill()
-      resolve()
-    }, 3000)
+      reject(new Error("Tempo limite ao conectar no Chrome DevTools Protocol"))
+    }, 15000)
 
-    child.once("exit", () => {
+    ws.addEventListener("open", () => {
       clearTimeout(timeout)
       resolve()
     })
 
-    child.kill()
+    ws.addEventListener("error", () => {
+      clearTimeout(timeout)
+      reject(new Error("Falha ao conectar no Chrome DevTools Protocol"))
+    })
   })
+
+  return new CdpClient(ws)
 }
 
-async function renderHtmlToPng(
-  html: string,
-  options?: {
-    timeoutMs?: number
-    waitForReadyTimeoutMs?: number
-    viewportWidth?: number
-    viewportHeight?: number
-    deviceScaleFactor?: number
+async function closeChrome(child: ChildProcess) {
+  if (child.killed || child.exitCode !== null) return
+
+  child.kill("SIGTERM")
+  await delay(500)
+
+  if (child.exitCode === null && !child.killed) {
+    child.kill("SIGKILL")
   }
+}
+
+async function openHtmlInNewPage(
+  client: CdpClient,
+  htmlUrl: string
 ) {
-  const workspace = await createBrowserWorkspace("si-report-shot-", html)
-  let connection: CdpConnection | null = null
-  let child: ChildProcess | null = null
+  const targetResult = await client.send("Target.createTarget", {
+    url: "about:blank",
+    width: 1280,
+    height: 720,
+    newWindow: false,
+    background: true,
+  })
 
-  try {
-    const browserExecutable = await resolvePdfBrowserExecutable()
-    const launch = await launchChromeWithDebugging(
-      browserExecutable,
-      workspace.profilePath,
-      options?.timeoutMs ?? 30000
-    )
+  const targetId = String(targetResult.targetId)
+  if (!targetId) {
+    throw new Error("Nao foi possivel criar a pagina do navegador")
+  }
 
-    child = launch.child
-    connection = await CdpConnection.connect(launch.websocketUrl)
+  const attachResult = await client.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  })
 
-    const createTargetResult = await connection.send("Target.createTarget", {
-      url: "about:blank",
-    })
-    const targetId = String(createTargetResult.targetId ?? "")
+  const sessionId = String(attachResult.sessionId)
+  if (!sessionId) {
+    throw new Error("Nao foi possivel conectar a pagina do navegador")
+  }
 
-    if (!targetId) {
-      throw new Error("Nao foi possivel criar pagina temporaria para captura")
-    }
+  await client.send("Page.enable", {}, { sessionId })
+  await client.send("Runtime.enable", {}, { sessionId })
+  await client.send("DOM.enable", {}, { sessionId })
+  await client.send("Network.enable", {}, { sessionId })
 
-    const attachResult = await connection.send("Target.attachToTarget", {
-      targetId,
-      flatten: true,
-    })
-    const sessionId = String(attachResult.sessionId ?? "")
+  const navigateResult = await client.send(
+    "Page.navigate",
+    { url: htmlUrl },
+    { sessionId }
+  )
 
-    if (!sessionId) {
-      throw new Error("Nao foi possivel anexar a pagina temporaria para captura")
-    }
+  if (!navigateResult.frameId) {
+    throw new Error("Nao foi possivel abrir o HTML temporario no navegador")
+  }
 
-    await Promise.all([
-      connection.send("Page.enable", {}, sessionId),
-      connection.send("Runtime.enable", {}, sessionId),
-      connection.send("Network.enable", {}, sessionId),
-      connection.send(
-        "Emulation.setDeviceMetricsOverride",
-        {
-          width: options?.viewportWidth ?? 1600,
-          height: options?.viewportHeight ?? 1100,
-          mobile: false,
-          deviceScaleFactor: options?.deviceScaleFactor ?? 2,
-        },
-        sessionId
-      ),
-      connection.send(
-        "Emulation.setDefaultBackgroundColorOverride",
-        { color: { r: 255, g: 255, b: 255, a: 1 } },
-        sessionId
-      ),
-    ])
+  await waitForPageLoad(client, sessionId, 30000)
 
-    const loadEvent = connection.waitForEvent("Page.loadEventFired", {
-      sessionId,
-      timeoutMs: options?.waitForReadyTimeoutMs ?? 70000,
-    })
+  return {
+    sessionId,
+    targetId,
+  }
+}
 
-    await connection.send(
-      "Page.navigate",
-      {
-        url: pathToFileURL(workspace.htmlPath).toString(),
+async function waitForPageLoad(
+  client: CdpClient,
+  sessionId: string,
+  timeoutMs: number
+) {
+  await new Promise<void>((resolve, reject) => {
+    let resolved = false
+
+    const cleanupLoad = client.on(
+      "Page.loadEventFired",
+      () => {
+        if (resolved) return
+        resolved = true
+        clearTimeout(timeout)
+        cleanupLoad()
+        resolve()
       },
       sessionId
     )
 
-    await loadEvent
+    const timeout = setTimeout(() => {
+      if (resolved) return
+      resolved = true
+      cleanupLoad()
+      reject(new Error("Tempo limite ao carregar o HTML no navegador"))
+    }, timeoutMs)
+  })
 
-    const startTime = Date.now()
-    const maxWaitMs = options?.waitForReadyTimeoutMs ?? 70000
-    let lastState: ScreenshotReadyState | null = null
+  await delay(400)
+}
 
-    while (Date.now() - startTime < maxWaitMs) {
-      const evaluateResult = await connection.send(
-        "Runtime.evaluate",
-        {
-          expression: `(() => {
-            const root = document.documentElement
-            const body = document.body
-            return {
-              ready: Boolean(window.__REPORT_READY__),
-              error: typeof window.__REPORT_ERROR__ === "string" ? window.__REPORT_ERROR__ : null,
-              scrollWidth: Math.max(root?.scrollWidth || 0, body?.scrollWidth || 0, root?.clientWidth || 0),
-              scrollHeight: Math.max(root?.scrollHeight || 0, body?.scrollHeight || 0, root?.clientHeight || 0)
+async function withBrowserPage<T>(
+  html: string,
+  timeoutMs: number,
+  fn: (client: CdpClient, sessionId: string, htmlUrl: string) => Promise<T>
+) {
+  const executablePath = await resolvePdfBrowserExecutable()
+  const workspace = await createBrowserWorkspace("browser-pdf-", html)
+  const htmlUrl = pathToFileURL(workspace.htmlPath).toString()
+
+  let chrome: ChromeLaunchResult | null = null
+  let client: CdpClient | null = null
+
+  try {
+    chrome = await launchChromeWithDebugging(
+      executablePath,
+      htmlUrl,
+      workspace.profilePath,
+      timeoutMs
+    )
+
+    client = await connectCdp(chrome.websocketUrl)
+    const page = await openHtmlInNewPage(client, htmlUrl)
+
+    return await fn(client, page.sessionId, htmlUrl)
+  } finally {
+    if (client) {
+      await client.close().catch(() => {})
+    }
+
+    if (chrome) {
+      await closeChrome(chrome.child).catch(() => {})
+    }
+
+    await cleanupBrowserWorkspace(workspace).catch(() => {})
+  }
+}
+
+async function waitForDomReady(
+  client: CdpClient,
+  sessionId: string,
+  virtualTimeBudgetMs: number
+) {
+  await delay(Math.max(300, Math.min(virtualTimeBudgetMs, 5000)))
+
+  const state = await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `(() => {
+        const readyState = document.readyState;
+        const body = document.body;
+        const documentElement = document.documentElement;
+
+        return {
+          ready: readyState === 'complete' || readyState === 'interactive',
+          error: null,
+          scrollWidth: Math.max(
+            body?.scrollWidth || 0,
+            documentElement?.scrollWidth || 0
+          ),
+          scrollHeight: Math.max(
+            body?.scrollHeight || 0,
+            documentElement?.scrollHeight || 0
+          )
+        };
+      })()`,
+      returnByValue: true,
+      awaitPromise: true,
+    },
+    { sessionId }
+  )
+  const resultValue = (state.result as { value?: ScreenshotReadyState} | undefined)?.value
+
+  return resultValue ?? {
+    ready: false,
+    error: "Nao foi possivel ler o DOM do relatorio",
+    scrollWidth: 0,
+    scrollHeight: 0,
+  } as ScreenshotReadyState
+}
+
+async function expandScrollableAreas(client: CdpClient, sessionId: string) {
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `(() => {
+        const all = Array.from(document.querySelectorAll('*'));
+
+        for (const el of all) {
+          if (!(el instanceof HTMLElement)) continue;
+
+          const style = window.getComputedStyle(el);
+          const hasScrollY =
+            (style.overflowY === 'auto' ||
+              style.overflowY === 'scroll' ||
+              style.overflow === 'auto' ||
+              style.overflow === 'scroll') &&
+            el.scrollHeight > el.clientHeight + 8;
+
+          const hasScrollX =
+            (style.overflowX === 'auto' ||
+              style.overflowX === 'scroll' ||
+              style.overflow === 'auto' ||
+              style.overflow === 'scroll') &&
+            el.scrollWidth > el.clientWidth + 8;
+
+          if (hasScrollY || hasScrollX) {
+            el.style.setProperty('overflow', 'visible', 'important');
+            el.style.setProperty('overflow-y', 'visible', 'important');
+            el.style.setProperty('overflow-x', 'visible', 'important');
+            el.style.setProperty('max-height', 'none', 'important');
+            el.style.setProperty('max-width', 'none', 'important');
+
+            if (hasScrollY) {
+              el.style.setProperty('height', el.scrollHeight + 'px', 'important');
             }
-          })()`,
-          returnByValue: true,
-          awaitPromise: true,
-        },
-        sessionId
-      )
 
-      const state = (evaluateResult.result as { value?: ScreenshotReadyState } | undefined)
-        ?.value
+            if (hasScrollX) {
+              el.style.setProperty('width', el.scrollWidth + 'px', 'important');
+            }
+          }
+        }
 
-      if (state) {
-        lastState = state
-      }
+        document.documentElement.style.setProperty('overflow', 'visible', 'important');
+        document.body.style.setProperty('overflow', 'visible', 'important');
 
-      if (state?.error) {
-        throw new Error(state.error)
-      }
+        return true;
+      })()`,
+      returnByValue: true,
+      awaitPromise: true,
+    },
+    { sessionId }
+  )
 
-      if (state?.ready) {
-        await delay(1500)
-        break
-      }
+  await delay(1200)
+}
 
-      await delay(1000)
+export async function renderHtmlToPdf(
+  html: string,
+  options?: PdfRenderOptions
+) {
+  const timeoutMs = options?.timeoutMs ?? 60000
+  const virtualTimeBudgetMs = options?.virtualTimeBudgetMs ?? 3000
+  const pageWidthMm = options?.pageWidthMm ?? 420
+  const pageHeightMm = options?.pageHeightMm ?? 594
+  const marginMm = options?.marginMm ?? 0
+  const scale = options?.scale ?? 1
+  const printBackground = options?.printBackground ?? true
+
+  return withBrowserPage(html, timeoutMs, async (client, sessionId) => {
+    const lastState = await waitForDomReady(client, sessionId, virtualTimeBudgetMs)
+
+    if (!lastState.ready) {
+      throw new Error(lastState.error || "O HTML do relatorio nao ficou pronto para gerar o PDF")
     }
 
-    if (!lastState?.ready) {
-      throw new Error(
-        lastState?.error ||
-        "O relatorio do Power BI nao terminou de renderizar a tempo para gerar o PDF"
-      )
+    await client.send(
+      "Emulation.setEmulatedMedia",
+      {
+        media: "print",
+      },
+      { sessionId }
+    )
+
+    const pdf = await client.send(
+      "Page.printToPDF",
+      {
+        printBackground,
+        preferCSSPageSize: true,
+        paperWidth: pageWidthMm / MILLIMETERS_PER_INCH,
+        paperHeight: pageHeightMm / MILLIMETERS_PER_INCH,
+        marginTop: marginMm / MILLIMETERS_PER_INCH,
+        marginBottom: marginMm / MILLIMETERS_PER_INCH,
+        marginLeft: marginMm / MILLIMETERS_PER_INCH,
+        marginRight: marginMm / MILLIMETERS_PER_INCH,
+        landscape: options?.landscape ?? false,
+        scale,
+      },
+      { sessionId }
+    )
+
+    const data = String(pdf.data || "")
+    if (!data) {
+      throw new Error("O navegador nao retornou o PDF do relatorio")
     }
 
-    const metricsResult = await connection.send("Page.getLayoutMetrics", {}, sessionId)
-    const contentSize = metricsResult.contentSize as
-      | { width?: number; height?: number }
+    return Buffer.from(data, "base64")
+  })
+}
+
+export async function renderHtmlToPng(
+  html: string,
+  options?: PngRenderOptions
+) {
+  const timeoutMs = options?.timeoutMs ?? 60000
+  const captureWidth =
+    options?.captureWidth ?? parseEnvNumber("REPORT_PDF_CAPTURE_WIDTH", 2560)
+  const captureHeight =
+    options?.captureHeight ?? parseEnvNumber("REPORT_PDF_CAPTURE_HEIGHT", 1707)
+  const deviceScaleFactor =
+    options?.deviceScaleFactor ??
+    parseEnvNumber("REPORT_PDF_DEVICE_SCALE_FACTOR", 3)
+  const screenshotScale =
+    options?.screenshotScale ??
+    parseEnvNumber("REPORT_PDF_SCREENSHOT_SCALE", 3.5)
+
+  return withBrowserPage(html, timeoutMs, async (client, sessionId) => {
+    await client.send(
+      "Emulation.setDeviceMetricsOverride",
+      {
+        width: captureWidth,
+        height: captureHeight,
+        deviceScaleFactor,
+        mobile: false,
+        scale: screenshotScale,
+      },
+      { sessionId }
+    )
+
+    const lastState = await waitForDomReady(client, sessionId, 4000)
+
+    if (!lastState.ready) {
+      throw new Error(lastState.error || "O HTML do relatorio nao ficou pronto para captura")
+    }
+
+    if (options?.forceExpandScrollable !== false) {
+      await expandScrollableAreas(client, sessionId)
+    }
+
+    const layoutMetrics = await client.send(
+      "Page.getLayoutMetrics",
+      {},
+      { sessionId }
+    )
+
+    const contentSize = layoutMetrics.contentSize as
+      | { width?: number; height?: number; x?: number; y?: number }
       | undefined
-    const width = Math.ceil(
-      Math.max(
-        contentSize?.width ?? 0,
-        lastState.scrollWidth || 0,
-        options?.viewportWidth ?? 1600
-      )
+
+    const fullWidth = Math.max(
+      captureWidth,
+      Math.ceil(contentSize?.width ?? lastState.scrollWidth ?? captureWidth)
     )
-    const height = Math.ceil(
-      Math.max(
-        contentSize?.height ?? 0,
-        lastState.scrollHeight || 0,
-        options?.viewportHeight ?? 1100
-      )
+    const fullHeight = Math.max(
+      captureHeight,
+      Math.ceil(contentSize?.height ?? lastState.scrollHeight ?? captureHeight)
     )
 
-    const screenshotResult = await connection.send(
+    await client.send(
+      "Emulation.setDeviceMetricsOverride",
+      {
+        width: fullWidth,
+        height: Math.min(fullHeight, 16384),
+        deviceScaleFactor,
+        mobile: false,
+        scale: screenshotScale,
+      },
+      { sessionId }
+    )
+
+    await delay(400)
+
+    const screenshot = await client.send(
       "Page.captureScreenshot",
       {
         format: "png",
@@ -687,124 +885,77 @@ async function renderHtmlToPng(
         clip: {
           x: 0,
           y: 0,
-          width,
-          height,
+          width: fullWidth,
+          height: fullHeight,
           scale: 1,
         },
       },
-      sessionId
+      { sessionId }
     )
 
-    const pngBase64 = String(screenshotResult.data ?? "")
-    if (!pngBase64) {
+    const data = String(screenshot.data || "")
+    if (!data) {
       throw new Error("O navegador nao retornou a captura do relatorio")
     }
 
-    await connection.send("Target.closeTarget", { targetId })
-    return Buffer.from(pngBase64, "base64")
-  } finally {
-    connection?.close()
-    if (child) {
-      await closeChromeProcess(child)
-    }
-    await cleanupBrowserWorkspace(workspace)
-  }
-}
-
-export async function renderHtmlToPdf(
-  html: string,
-  options?: {
-    timeoutMs?: number
-    virtualTimeBudgetMs?: number
-  }
-) {
-  const workspace = await createBrowserWorkspace("si-report-pdf-", html)
-  const pdfPath = path.join(workspace.workingDir, "report.pdf")
-
-  try {
-    const browserExecutable = await resolvePdfBrowserExecutable()
-
-    await runProcess(
-      browserExecutable,
-      [
-        ...getCommonBrowserArgs(workspace.profilePath),
-        "--print-to-pdf-no-header",
-        `--virtual-time-budget=${options?.virtualTimeBudgetMs ?? 30000}`,
-        `--print-to-pdf=${pdfPath}`,
-        pathToFileURL(workspace.htmlPath).toString(),
-      ],
-      options?.timeoutMs ?? 60000
-    )
-
-    const pdf = await fs.readFile(pdfPath)
-    if (!pdf.length) {
-      throw new Error("O navegador gerou um PDF vazio")
-    }
-
-    return pdf
-  } finally {
-    await cleanupBrowserWorkspace(workspace)
-  }
+    return Buffer.from(data, "base64")
+  })
 }
 
 export async function renderHtmlScreenshotToPdf(
   html: string,
-  options?: {
-    screenshotTimeoutMs?: number
-    waitForReadyTimeoutMs?: number
-    viewportWidth?: number
-    viewportHeight?: number
-    deviceScaleFactor?: number
-    pdfTimeoutMs?: number
-    pageWidthMm?: number
-    pageHeightMm?: number
-    pageMarginMm?: number
-  }
+  options?: ScreenshotToPdfOptions
 ) {
   const screenshot = await renderHtmlToPng(html, {
-    timeoutMs: options?.screenshotTimeoutMs ?? 40000,
-    waitForReadyTimeoutMs: options?.waitForReadyTimeoutMs ?? 70000,
-    viewportWidth: options?.viewportWidth ?? 3200,
-    viewportHeight: options?.viewportHeight ?? 2400,
-    deviceScaleFactor: options?.deviceScaleFactor ?? 2,
+    timeoutMs: options?.pngTimeoutMs ?? 60000,
+    captureWidth: options?.captureWidth,
+    captureHeight: options?.captureHeight,
+    deviceScaleFactor: options?.deviceScaleFactor,
+    screenshotScale: options?.screenshotScale,
+    forceExpandScrollable: true,
   })
 
-  const pageWidthMm = options?.pageWidthMm ?? 594
-  const pageHeightMm = options?.pageHeightMm ?? 420
-  const pageMarginMm = options?.pageMarginMm ?? 2
-  const { width: imageWidthPx, height: imageHeightPx } = parsePngDimensions(
-    screenshot
-  )
+  const pageWidthMm = options?.pageWidthMm ?? 420
+  const pageHeightMm = options?.pageHeightMm ?? 594
+  const pageMarginMm = options?.pageMarginMm ?? 8
+
   const pageWidthPx = millimetersToCssPixels(pageWidthMm)
   const pageHeightPx = millimetersToCssPixels(pageHeightMm)
   const pageMarginPx = millimetersToCssPixels(pageMarginMm)
-  const contentWidthPx = pageWidthPx - pageMarginPx * 2
-  const contentHeightPx = pageHeightPx - pageMarginPx * 2
+  const contentWidthPx = Math.max(1, pageWidthPx - pageMarginPx * 2)
+  const contentHeightPx = Math.max(1, pageHeightPx - pageMarginPx * 2)
 
-  if (contentWidthPx <= 0 || contentHeightPx <= 0) {
-    throw new Error("O tamanho configurado para a pagina do PDF e invalido")
-  }
-
-  const widthScale = contentWidthPx / imageWidthPx
-  const heightScale = contentHeightPx / imageHeightPx
-  const imageScale = Math.max(0.01, Math.min(widthScale, heightScale))
-
-  const renderedImageWidthPx = Math.max(
-    1,
-    Math.round(imageWidthPx * imageScale)
-  )
-
+  const screenshotDimensions = parsePngDimensions(screenshot)
+  const renderedImageWidthPx = contentWidthPx
   const renderedImageHeightPx = Math.max(
     1,
-    Math.round(imageHeightPx * imageScale)
+    Math.round(
+      (screenshotDimensions.height * renderedImageWidthPx) / screenshotDimensions.width
+    )
   )
 
-  const resolvedPageHeightMm = pageHeightMm
-  const resolvedPageHeightPx = millimetersToCssPixels(resolvedPageHeightMm)
-  const resolvedContentHeightPx = Math.max(
+  const totalSlices = Math.max(
     1,
-    resolvedPageHeightPx - pageMarginPx * 2
+    Math.ceil(renderedImageHeightPx / contentHeightPx)
   )
+
+  const base64 = screenshot.toString("base64")
+
+  const pagesHtml = Array.from({ length: totalSlices }, (_, index) => {
+    const offsetY = index * contentHeightPx
+
+    return `
+      <section class="pdf-page">
+        <div class="slice">
+          <img
+            src="data:image/png;base64,${escapeHtmlAttribute(base64)}"
+            alt="Relatorio Power BI"
+            style="transform: translateY(-${offsetY}px);"
+          />
+        </div>
+      </section>
+    `
+  }).join("")
 
   const imageHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -813,7 +964,7 @@ export async function renderHtmlScreenshotToPdf(
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     @page {
-      size: ${pageWidthMm}mm ${resolvedPageHeightMm}mm;
+      size: ${pageWidthMm}mm ${pageHeightMm}mm;
       margin: 0;
     }
 
@@ -823,67 +974,89 @@ export async function renderHtmlScreenshotToPdf(
 
     html, body {
       width: 100%;
-      height: 100%;
       margin: 0;
       padding: 0;
       background: #ffffff;
-      overflow: hidden;
       print-color-adjust: exact;
       -webkit-print-color-adjust: exact;
     }
 
     body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .slice {
-      width: ${contentWidthPx}px;
-      height: ${resolvedContentHeightPx}px;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      break-inside: avoid-page;
-      page-break-inside: avoid;
+      background: #ffffff;
     }
 
     .pdf-page {
       width: ${pageWidthPx}px;
-      height: ${resolvedPageHeightPx}px;
+      height: ${pageHeightPx}px;
       padding: ${pageMarginPx}px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       background: #ffffff;
       overflow: hidden;
-      break-inside: avoid-page;
-      page-break-inside: avoid;
+      break-after: page;
+      page-break-after: always;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+
+    .pdf-page:last-child {
+      break-after: auto;
+      page-break-after: auto;
+    }
+
+    .slice {
+      width: ${contentWidthPx}px;
+      height: ${contentHeightPx}px;
+      overflow: hidden;
+      position: relative;
+      flex: 0 0 auto;
     }
 
     img {
       display: block;
       width: ${renderedImageWidthPx}px;
       height: ${renderedImageHeightPx}px;
-      max-width: 100%;
-      max-height: 100%;
+      max-width: none;
+      max-height: none;
       object-fit: contain;
       image-rendering: auto;
-      break-inside: avoid-page;
-      page-break-inside: avoid;
     }
   </style>
 </head>
 <body>
-  <section class="pdf-page">
-    <img src="data:image/png;base64,${screenshot.toString("base64")}" alt="Relatorio Power BI" />
-  </section>
+  ${pagesHtml}
 </body>
 </html>`
 
   return renderHtmlToPdf(imageHtml, {
     timeoutMs: options?.pdfTimeoutMs ?? 60000,
     virtualTimeBudgetMs: 3000,
+    pageWidthMm,
+    pageHeightMm,
+    marginMm: 0,
+    printBackground: true,
   })
+}
+
+export async function renderHtmlToPdfViaCli(
+  html: string,
+  options?: PdfRenderOptions
+) {
+  const executablePath = await resolvePdfBrowserExecutable()
+  const timeoutMs = options?.timeoutMs ?? 60000
+  const workspace = await createBrowserWorkspace("browser-pdf-cli-", html)
+  const outputPath = path.join(workspace.workingDir, "report.pdf")
+  const htmlUrl = pathToFileURL(workspace.htmlPath).toString()
+
+  try {
+    const args = [
+      ...getCommonBrowserArgs(workspace.profilePath),
+      `--print-to-pdf=${outputPath}`,
+      htmlUrl,
+    ]
+
+    await runProcess(executablePath, args, timeoutMs)
+    return await fs.readFile(outputPath)
+  } finally {
+    await cleanupBrowserWorkspace(workspace).catch(() => {})
+  }
 }
