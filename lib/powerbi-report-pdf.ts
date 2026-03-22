@@ -268,40 +268,23 @@ export type PowerBiPdfProfile = "desktop" | "mobile"
 
 function getPowerBiPdfPreset(profile: PowerBiPdfProfile) {
   if (profile === "mobile") {
-    const viewportWidth = 2304
-    const viewportHeight = 1536
-    const pageMarginMm = 2
-    const pageWidthMm = 320
-    const usableWidthMm = pageWidthMm - pageMarginMm * 2
-    const pageHeightMm =
-      Math.round((usableWidthMm * (viewportHeight / viewportWidth) + pageMarginMm * 2) * 100) /
-      100
-
     return {
-      viewportWidth,
-      viewportHeight,
+      viewportWidth: 2304,
+      viewportHeight: 1536,
       deviceScaleFactor: 3,
-      pageWidthMm,
-      pageHeightMm,
-      pageMarginMm,
+      pageWidthMm: 2378,
+      pageHeightMm: 1682,
+      pageMarginMm: 5,
     }
   }
 
-  const viewportWidth = 2560
-  const viewportHeight = 1703
-  const pageMarginMm = 2
-  const pageWidthMm = 320
-  const usableWidthMm = pageWidthMm - pageMarginMm * 2
-  const pageHeightMm =
-    Math.round((usableWidthMm * (viewportHeight / viewportWidth) + pageMarginMm * 2) * 100) / 100
-
   return {
-    viewportWidth,
-    viewportHeight,
+    viewportWidth: 2560,
+    viewportHeight: 1703,
     deviceScaleFactor: 3,
-    pageWidthMm,
-    pageHeightMm,
-    pageMarginMm,
+    pageWidthMm: 2378,
+    pageHeightMm: 1682,
+    pageMarginMm: 5,
   }
 }
 
