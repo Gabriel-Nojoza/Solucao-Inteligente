@@ -249,24 +249,18 @@ export async function POST(request: NextRequest) {
 
   const datasetId = getReportDatasetId(reportRecord)
   const query = getScheduleQuery(scheduleRecord)
-
-  const useDataaExport = datasetId && query
-
-  if (!query) {
-    return NextResponse.json(
-      { error: "dax_query da rotina nao configurada" },
-      { status: 400 }
-    )
-  }
+  const useDataExport = Boolean(datasetId && query)
 
   let dispatchErrorMessage: string | null = null
 
   try {
     const appUrl = getRequestOrigin(request)
     const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
-    const reportExportUrl = useDataaExport
+
+    const reportExportUrl = useDataExport
       ? `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export-data-pdf`
       : `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export`
+
     const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
     const dispatchTargets = buildDispatchTargets(
       normalizedContacts,
@@ -281,31 +275,42 @@ export async function POST(request: NextRequest) {
         schedule_name: schedule.name,
         cron_expression: schedule.cron_expression,
         is_active: schedule.is_active,
+
         report_name: report.name,
         app_report_id: report.id,
         report_id: report.pbi_report_id,
+
         workspace_id: reportRecord.workspaces
           ? (reportRecord.workspaces as Record<string, string>).pbi_workspace_id
           : "",
-        dataset_id: datasetId,
-        query,
+
+        dataset_id: datasetId || null,
+        query: query || null,
+        use_data_export: useDataExport,
+
         pbi_page_name: schedule.pbi_page_name ?? null,
         page_name: schedule.pbi_page_name ?? null,
         export_format: schedule.export_format,
+
         report_export_url: reportExportUrl,
         report_export_headers: callbackHeaders,
+
         contacts: normalizedContacts.map((contact) => ({
           name: contact.name,
           phone: contact.phone,
           type: contact.type,
           whatsapp_group_id: contact.whatsapp_group_id,
         })),
+
         message,
+
         dispatch_log_ids: (insertedLogs ?? []).map((log) => log.id),
         dispatch_targets: dispatchTargets,
+
         callback_url: callbackUrl,
         callback_secret: callbackSecret,
         callback_headers: callbackHeaders,
+
         bot_send_url: botSendUrl,
         bot_send_headers: callbackHeaders,
       }),
@@ -350,5 +355,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: dispatchErrorMessage }, { status: 502 })
   }
 
-  return NextResponse.json({ success: true, logs_created: (insertedLogs ?? []).length })
+  return NextResponse.json({
+    success: true,
+    logs_created: (insertedLogs ?? []).length,
+    export_mode: useDataExport ? "data" : "report",
+  })
 }
