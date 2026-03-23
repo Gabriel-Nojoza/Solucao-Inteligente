@@ -106,6 +106,13 @@ type SegmentMetadata = {
   viewportHeight: number
 }
 
+type ClipBox = {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ])
@@ -712,11 +719,11 @@ async function prepareScrollableSegments(
   const result = await client.send(
     "Runtime.evaluate",
     {
-      expression: `async (() => {
-        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-        const candidates = Array.from(document.querySelectorAll("*"))
+      expression: `(() => {
+        const elements = Array.from(document.querySelectorAll("*"))
           .filter((el) => el instanceof HTMLElement)
+
+        const candidates = elements
           .map((el) => {
             const style = window.getComputedStyle(el)
             const canScrollY =
@@ -726,20 +733,38 @@ async function prepareScrollableSegments(
                 style.overflow === "scroll") &&
               el.scrollHeight > el.clientHeight + 20
 
+            if (!canScrollY) return null
+
+            const rect = el.getBoundingClientRect()
+            const overflowHeight = el.scrollHeight - el.clientHeight
+
             return {
-              el,
               canScrollY,
               scrollHeight: el.scrollHeight,
               clientHeight: el.clientHeight,
               scrollWidth: el.scrollWidth,
               clientWidth: el.clientWidth,
-              area: el.clientWidth * el.clientHeight,
+              overflowHeight,
+              rectTop: rect.top,
+              rectLeft: rect.left,
+              rectWidth: rect.width,
+              rectHeight: rect.height,
+              area: rect.width * rect.height,
+              textLength: (el.innerText || "").length,
             }
           })
-          .filter((item) => item.canScrollY)
-          .sort((a, b) => b.area - a.area)
+          .filter(Boolean)
+          .sort((a, b) => {
+            if (b.overflowHeight !== a.overflowHeight) {
+              return b.overflowHeight - a.overflowHeight
+            }
+            if (b.rectHeight !== a.rectHeight) {
+              return b.rectHeight - a.rectHeight
+            }
+            return b.area - a.area
+          })
 
-        const target = candidates[0]?.el || null
+        const target = candidates[0] || null
 
         if (!target) {
           return {
@@ -752,28 +777,29 @@ async function prepareScrollableSegments(
           }
         }
 
-        const originalScrollTop = target.scrollTop
-        const viewportHeight = target.clientHeight
-        const maxScrollTop = Math.max(0, target.scrollHeight - target.clientHeight)
-        const step = Math.max(220, Math.floor(viewportHeight * 0.8))
         const positions = []
+        const maxScrollTop = Math.max(0, target.scrollHeight - target.clientHeight)
+        const step = Math.max(120, Math.floor(target.clientHeight * 0.55))
 
         for (let y = 0; y <= maxScrollTop; y += step) {
           positions.push(Math.min(y, maxScrollTop))
         }
 
-        if (positions.length === 0 || positions[positions.length - 1] !== maxScrollTop) {
+        if (!positions.length || positions[positions.length - 1] !== maxScrollTop) {
           positions.push(maxScrollTop)
         }
 
-        const uniquePositions = Array.from(new Set(positions))
-
         return {
           mode: "segmented",
-          viewportHeight,
+          viewportHeight: target.clientHeight,
           totalHeight: target.scrollHeight,
-          positions: uniquePositions,
-          originalScrollTop,
+          positions: Array.from(new Set(positions)),
+          clip: {
+            x: Math.max(0, Math.floor(target.rectLeft)),
+            y: Math.max(0, Math.floor(target.rectTop)),
+            width: Math.max(1, Math.floor(target.rectWidth)),
+            height: Math.max(1, Math.floor(target.rectHeight)),
+          },
         }
       })()`,
       returnByValue: true,
@@ -794,10 +820,12 @@ async function scrollSegmentTarget(
     "Runtime.evaluate",
     {
       expression: `async (() => {
-        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-        const candidates = Array.from(document.querySelectorAll("*"))
+        const elements = Array.from(document.querySelectorAll("*"))
           .filter((el) => el instanceof HTMLElement)
+
+        const candidates = elements
           .map((el) => {
             const style = window.getComputedStyle(el)
             const canScrollY =
@@ -807,21 +835,35 @@ async function scrollSegmentTarget(
                 style.overflow === "scroll") &&
               el.scrollHeight > el.clientHeight + 20
 
+            if (!canScrollY) return null
+
+            const rect = el.getBoundingClientRect()
+            const overflowHeight = el.scrollHeight - el.clientHeight
+
             return {
               el,
-              canScrollY,
-              area: el.clientWidth * el.clientHeight,
+              overflowHeight,
+              rectHeight: rect.height,
+              area: rect.width * rect.height,
             }
           })
-          .filter((item) => item.canScrollY)
-          .sort((a, b) => b.area - a.area)
+          .filter(Boolean)
+          .sort((a, b) => {
+            if (b.overflowHeight !== a.overflowHeight) {
+              return b.overflowHeight - a.overflowHeight
+            }
+            if (b.rectHeight !== a.rectHeight) {
+              return b.rectHeight - a.rectHeight
+            }
+            return b.area - a.area
+          })
 
         const target = candidates[0]?.el || null
         if (!target) return false
 
         target.scrollTop = ${Math.max(0, scrollTop)}
         target.dispatchEvent(new Event("scroll", { bubbles: true }))
-        await sleep(700)
+        await sleep(1200)
         return true
       })()`,
       returnByValue: true,
@@ -840,8 +882,10 @@ async function restoreSegmentTarget(
     "Runtime.evaluate",
     {
       expression: `(() => {
-        const candidates = Array.from(document.querySelectorAll("*"))
+        const elements = Array.from(document.querySelectorAll("*"))
           .filter((el) => el instanceof HTMLElement)
+
+        const candidates = elements
           .map((el) => {
             const style = window.getComputedStyle(el)
             const canScrollY =
@@ -851,14 +895,28 @@ async function restoreSegmentTarget(
                 style.overflow === "scroll") &&
               el.scrollHeight > el.clientHeight + 20
 
+            if (!canScrollY) return null
+
+            const rect = el.getBoundingClientRect()
+            const overflowHeight = el.scrollHeight - el.clientHeight
+
             return {
               el,
-              canScrollY,
-              area: el.clientWidth * el.clientHeight,
+              overflowHeight,
+              rectHeight: rect.height,
+              area: rect.width * rect.height,
             }
           })
-          .filter((item) => item.canScrollY)
-          .sort((a, b) => b.area - a.area)
+          .filter(Boolean)
+          .sort((a, b) => {
+            if (b.overflowHeight !== a.overflowHeight) {
+              return b.overflowHeight - a.overflowHeight
+            }
+            if (b.rectHeight !== a.rectHeight) {
+              return b.rectHeight - a.rectHeight
+            }
+            return b.area - a.area
+          })
 
         const target = candidates[0]?.el || null
         if (!target) return false
@@ -879,7 +937,8 @@ async function captureViewportPng(
   width: number,
   height: number,
   deviceScaleFactor: number,
-  screenshotScale: number
+  screenshotScale: number,
+  clip?: ClipBox
 ) {
   await client.send(
     "Emulation.setDeviceMetricsOverride",
@@ -893,7 +952,7 @@ async function captureViewportPng(
     { sessionId }
   )
 
-  await delay(500)
+  await delay(700)
 
   const screenshot = await client.send(
     "Page.captureScreenshot",
@@ -901,13 +960,21 @@ async function captureViewportPng(
       format: "png",
       fromSurface: true,
       captureBeyondViewport: false,
-      clip: {
-        x: 0,
-        y: 0,
-        width,
-        height,
-        scale: 1,
-      },
+      clip: clip
+        ? {
+            x: clip.x,
+            y: clip.y,
+            width: clip.width,
+            height: clip.height,
+            scale: 1,
+          }
+        : {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            scale: 1,
+          },
     },
     { sessionId }
   )
@@ -1129,7 +1196,8 @@ export async function renderHtmlToPng(
       : []
 
     const viewportHeight = Number(segmentation.viewportHeight || captureHeight)
-    const originalScrollTop = Number(segmentation.originalScrollTop || 0)
+    const originalScrollTop = 0
+    const clip = segmentation.clip as ClipBox | undefined
 
     const segmentBuffers: Buffer[] = []
 
@@ -1140,9 +1208,10 @@ export async function renderHtmlToPng(
         client,
         sessionId,
         captureWidth,
-        viewportHeight,
+        captureHeight,
         deviceScaleFactor,
-        screenshotScale
+        screenshotScale,
+        clip
       )
 
       segmentBuffers.push(png)
