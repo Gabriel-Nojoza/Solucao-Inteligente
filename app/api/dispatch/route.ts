@@ -40,10 +40,27 @@ function getRequestOrigin(request: NextRequest) {
   )
 }
 
+function getReportDatasetId(report: Record<string, unknown>) {
+  return (
+    (typeof report.pbi_dataset_id === "string" && report.pbi_dataset_id.trim()) ||
+    (typeof report.dataset_id === "string" && report.dataset_id.trim()) ||
+    null
+  )
+}
+
+function getScheduleQuery(schedule: Record<string, unknown>) {
+  return (
+    (typeof schedule.dax_query === "string" && schedule.dax_query.trim()) ||
+    (typeof schedule.query === "string" && schedule.query.trim()) ||
+    null
+  )
+}
+
 export async function POST(request: NextRequest) {
   const { companyId } = await resolveRequestCompanyContext(request, {
     allowCallbackSecret: true,
   })
+
   const supabase = createClient()
   const body = await request.json()
   const { schedule_id } = body
@@ -76,6 +93,7 @@ export async function POST(request: NextRequest) {
     .eq("schedule_id", schedule_id)
 
   const contactIds = (scContacts ?? []).map((sc) => sc.contact_id)
+
   const { data: contacts } = await supabase
     .from("contacts")
     .select("*")
@@ -153,6 +171,7 @@ export async function POST(request: NextRequest) {
     })
 
     const runPayload = await runResponse.json().catch(() => null)
+
     if (!runResponse.ok) {
       return NextResponse.json(
         { error: runPayload?.error || "Erro ao disparar relatorio salvo" },
@@ -225,6 +244,26 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  const reportRecord = report as Record<string, unknown>
+  const scheduleRecord = schedule as Record<string, unknown>
+
+  const datasetId = getReportDatasetId(reportRecord)
+  const query = getScheduleQuery(scheduleRecord)
+
+  if (!datasetId) {
+    return NextResponse.json(
+      { error: "dataset_id do relatorio nao configurado" },
+      { status: 400 }
+    )
+  }
+
+  if (!query) {
+    return NextResponse.json(
+      { error: "dax_query da rotina nao configurada" },
+      { status: 400 }
+    )
+  }
+
   let dispatchErrorMessage: string | null = null
 
   try {
@@ -248,10 +287,11 @@ export async function POST(request: NextRequest) {
         report_name: report.name,
         app_report_id: report.id,
         report_id: report.pbi_report_id,
-        workspace_id: (report as Record<string, unknown>).workspaces
-          ? ((report as Record<string, unknown>).workspaces as Record<string, string>)
-              .pbi_workspace_id
+        workspace_id: reportRecord.workspaces
+          ? (reportRecord.workspaces as Record<string, string>).pbi_workspace_id
           : "",
+        dataset_id: datasetId,
+        query,
         pbi_page_name: schedule.pbi_page_name ?? null,
         page_name: schedule.pbi_page_name ?? null,
         export_format: schedule.export_format,
