@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
   try {
     const appUrl = getRequestOrigin(request)
     const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
-    const reportExportUrl = `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export`
+    const reportExportUrl = `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export-data-pdf`
     const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
     const dispatchTargets = buildDispatchTargets(
       normalizedContacts,
