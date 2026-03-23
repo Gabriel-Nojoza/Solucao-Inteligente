@@ -22,10 +22,18 @@ const nullableTrimmedString = z.preprocess((value) => {
   return trimmed.length > 0 ? trimmed : null
 }, z.string().min(1).nullable().optional())
 
+const requiredTrimmedString = z.preprocess((value) => {
+  if (typeof value !== "string") return value
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : value
+}, z.string().min(1))
+
 const scheduleSchema = z.object({
   name: z.string().min(1),
   report_id: z.string().uuid(),
   pbi_page_name: nullableTrimmedString,
+  dax_query: requiredTrimmedString,
   cron_expression: z.string().min(1),
   export_format: z
     .enum(["PDF", "PNG", "PPTX", "table", "csv", "pdf"])
