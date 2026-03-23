@@ -250,12 +250,7 @@ export async function POST(request: NextRequest) {
   const datasetId = getReportDatasetId(reportRecord)
   const query = getScheduleQuery(scheduleRecord)
 
-  if (!datasetId) {
-    return NextResponse.json(
-      { error: "dataset_id do relatorio nao configurado" },
-      { status: 400 }
-    )
-  }
+  const useDataaExport = datasetId && query
 
   if (!query) {
     return NextResponse.json(
@@ -269,7 +264,9 @@ export async function POST(request: NextRequest) {
   try {
     const appUrl = getRequestOrigin(request)
     const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
-    const reportExportUrl = `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export-data-pdf`
+    const reportExportUrl = useDataaExport
+      ? `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export-data-pdf`
+      : `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export`
     const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
     const dispatchTargets = buildDispatchTargets(
       normalizedContacts,
