@@ -31,15 +31,25 @@ const requiredTrimmedString = z.preprocess((value) => {
 
 const scheduleSchema = z.object({
   name: z.string().min(1),
+
   report_id: z.string().uuid(),
+
   pbi_page_name: nullableTrimmedString,
-  dax_query: requiredTrimmedString,
+
+  dax_query: nullableTrimmedString,
+
+  dataset_id: nullableTrimmedString,
+
   cron_expression: z.string().min(1),
+
   export_format: z
     .enum(["PDF", "PNG", "PPTX", "table", "csv", "pdf"])
     .default("PDF"),
+
   message_template: z.string().nullable().optional(),
+
   is_active: z.boolean().default(true),
+
   contact_ids: z.array(z.string().uuid()).optional(),
 })
 
