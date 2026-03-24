@@ -9,6 +9,7 @@ import {
   isPowerBiFeatureNotAvailableError,
 } from "@/lib/powerbi"
 import { exportPowerBIReportPdf, sanitizeFileName } from "@/lib/powerbi-report-pdf"
+import { normalizeSchedulePageNames } from "@/lib/schedule-page-selection"
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -133,10 +134,9 @@ export async function POST(request: NextRequest) {
 
     const reportId = String(body?.report_id ?? "").trim()
     const format = String(body?.format ?? "PDF").trim().toUpperCase()
-    const pbiPageName =
-      typeof body?.pbi_page_name === "string" && body.pbi_page_name.trim()
-        ? body.pbi_page_name.trim()
-        : null
+    const pbiPageNames = normalizeSchedulePageNames(
+      body?.pbi_page_names ?? body?.page_names ?? body?.pbi_page_name ?? body?.page_name
+    )
 
     const pdfProfile = detectPdfProfile(
       body?.pdf_profile,
@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
     const safeName = sanitizeFileName(report.name || "relatorio")
     let browserPdfErrorMessage: string | null = null
 
-    if (format === "PDF" && !preferNativePowerBiExport) {
+    if (format === "PDF" && !preferNativePowerBiExport && pbiPageNames.length === 0) {
       try {
         const pdfBuffer = await exportPowerBIReportPdf({
           token,
@@ -243,7 +243,7 @@ export async function POST(request: NextRequest) {
         workspace.pbi_workspace_id,
         report.pbi_report_id,
         format as "PDF" | "PNG" | "PPTX",
-        { pageName: pbiPageName }
+        { pageNames: pbiPageNames }
       )
     } catch (exportError) {
       if (isPowerBiEntityNotFoundError(exportError)) {

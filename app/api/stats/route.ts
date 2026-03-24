@@ -3,6 +3,76 @@ import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext, isAuthContextError } from "@/lib/tenant"
 import { readWhatsAppBotRuntimeState } from "@/lib/whatsapp-bot"
 
+type DispatchLogRecord = {
+  status?: string | null
+  created_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+}
+
+function getLogTimestamp(log: DispatchLogRecord) {
+  const candidates = [log.created_at, log.started_at, log.completed_at]
+
+  for (const value of candidates) {
+    if (!value) {
+      continue
+    }
+
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed
+    }
+  }
+
+  return null
+}
+
+function summarizeDispatchLogs(logs: DispatchLogRecord[]) {
+  return logs.reduce(
+    (summary, log) => {
+      const status = typeof log.status === "string" ? log.status.trim() : ""
+
+      if (status === "delivered") {
+        summary.delivered += 1
+      } else if (status === "failed") {
+        summary.failed += 1
+      } else if (status) {
+        summary.inProgress += 1
+      }
+
+      summary.total += 1
+      return summary
+    },
+    { total: 0, delivered: 0, failed: 0, inProgress: 0 }
+  )
+}
+
+async function loadRecentDispatchLogs(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  sinceIso: string
+) {
+  const timestampColumns = ["created_at", "started_at", "completed_at"] as const
+
+  for (const column of timestampColumns) {
+    const { data, error } = await supabase
+      .from("dispatch_logs")
+      .select("*")
+      .eq("company_id", companyId)
+      .gte(column, sinceIso)
+
+    if (!error) {
+      return (data ?? []) as DispatchLogRecord[]
+    }
+
+    if (error.code !== "42703") {
+      throw error
+    }
+  }
+
+  return [] as DispatchLogRecord[]
+}
+
 export async function GET() {
   try {
     const { companyId } = await getRequestContext()
@@ -16,58 +86,48 @@ export async function GET() {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
 
-    const [reportsRes, contactsRes, todayLogsRes, monthLogsRes, weekLogs, settingsRes] =
-      await Promise.all([
-        supabase
-          .from("reports")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId),
-        supabase
-          .from("contacts")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId)
-          .eq("is_active", true),
-        supabase
-          .from("dispatch_logs")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId)
-          .gte("created_at", todayStart.toISOString()),
-        supabase
-          .from("dispatch_logs")
-          .select("status")
-          .eq("company_id", companyId)
-          .gte("created_at", thirtyDaysAgo.toISOString()),
-        supabase
-          .from("dispatch_logs")
-          .select("status, created_at")
-          .eq("company_id", companyId)
-          .gte("created_at", sevenDaysAgo.toISOString()),
-        supabase
-          .from("company_settings")
-          .select("key, value")
-          .eq("company_id", companyId)
-          .in("key", ["powerbi", "n8n"]),
-      ])
+    const [reportsRes, contactsRes, monthLogs, settingsRes] = await Promise.all([
+      supabase
+        .from("reports")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("is_active", true),
+      supabase
+        .from("contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("is_active", true),
+      loadRecentDispatchLogs(supabase, companyId, thirtyDaysAgo.toISOString()),
+      supabase
+        .from("company_settings")
+        .select("key, value")
+        .eq("company_id", companyId)
+        .in("key", ["powerbi", "n8n"]),
+    ])
 
     const totalReports = reportsRes.count ?? 0
-    const activeContacts = whatsappConnected ? contactsRes.count ?? 0 : 0
-    const dispatchesToday = todayLogsRes.count ?? 0
+    const activeContacts = contactsRes.count ?? 0
+    const todayLogs = monthLogs.filter((log) => {
+      const timestamp = getLogTimestamp(log)
+      return timestamp ? timestamp >= todayStart : false
+    })
+    const weekLogs = monthLogs.filter((log) => {
+      const timestamp = getLogTimestamp(log)
+      return timestamp ? timestamp >= sevenDaysAgo : false
+    })
 
-    const monthLogs = monthLogsRes.data ?? []
-    const deliveredCount = monthLogs.filter(
-      (l) => l.status === "delivered"
-    ).length
+    const todaySummary = summarizeDispatchLogs(todayLogs)
+    const monthSummary = summarizeDispatchLogs(monthLogs)
+    const completedDispatches30d = monthSummary.delivered + monthSummary.failed
     const successRate =
-      monthLogs.length > 0
-        ? Math.round((deliveredCount / monthLogs.length) * 100)
-        : 100
+      completedDispatches30d > 0
+        ? Math.round((monthSummary.delivered / completedDispatches30d) * 100)
+        : null
 
-    // Configuration status
-    const settingsMap = new Map(
-      (settingsRes.data ?? []).map((s) => [s.key, s.value])
-    )
+    const settingsMap = new Map((settingsRes.data ?? []).map((setting) => [setting.key, setting.value]))
     const powerbi = settingsMap.get("powerbi") as Record<string, unknown> | undefined
     const n8n = settingsMap.get("n8n") as Record<string, unknown> | undefined
+
     const pbiConfigured = !!(powerbi?.client_id || process.env.PBI_CLIENT_ID)
     const n8nConfigured = !!(
       typeof n8n?.webhook_url === "string" &&
@@ -76,27 +136,27 @@ export async function GET() {
       n8n.callback_secret.trim()
     )
 
-    // Chart data: last 7 days
     const chartData = []
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const dayStr = d.toLocaleDateString("pt-BR", {
-        day: "2-digit",
-        month: "2-digit",
+    for (let i = 6; i >= 0; i -= 1) {
+      const day = new Date()
+      day.setDate(day.getDate() - i)
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate())
+      const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)
+      const dayItems = weekLogs.filter((log) => {
+        const timestamp = getLogTimestamp(log)
+        return timestamp ? timestamp >= dayStart && timestamp < dayEnd : false
       })
-      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-      const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
-
-      const dayItems = (weekLogs.data ?? []).filter((l) => {
-        const c = new Date(l.created_at)
-        return c >= dayStart && c < dayEnd
-      })
+      const daySummary = summarizeDispatchLogs(dayItems)
 
       chartData.push({
-        date: dayStr,
-        delivered: dayItems.filter((l) => l.status === "delivered").length,
-        failed: dayItems.filter((l) => l.status === "failed").length,
+        date: day.toLocaleDateString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+        }),
+        total: daySummary.total,
+        delivered: daySummary.delivered,
+        failed: daySummary.failed,
+        inProgress: daySummary.inProgress,
       })
     }
 
@@ -104,8 +164,17 @@ export async function GET() {
       totalReports,
       activeContacts,
       whatsappConnected,
-      dispatchesToday,
+      whatsappStatus: botState?.status ?? "offline",
+      whatsappPhoneNumber: botState?.phone_number ?? null,
+      whatsappDisplayName: botState?.display_name ?? null,
+      dispatchesToday: todaySummary.total,
+      deliveredToday: todaySummary.delivered,
+      failedToday: todaySummary.failed,
+      inProgressToday: todaySummary.inProgress,
       successRate,
+      completedDispatches30d,
+      deliveredDispatches30d: monthSummary.delivered,
+      failedDispatches30d: monthSummary.failed,
       pbiConfigured,
       n8nConfigured,
       chartData,

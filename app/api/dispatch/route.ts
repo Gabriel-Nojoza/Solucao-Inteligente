@@ -12,6 +12,7 @@ import {
   buildN8nEndpointUrls,
   normalizeN8nSettings,
 } from "@/lib/n8n-webhook"
+import { getSchedulePageNames } from "@/lib/schedule-page-selection"
 
 function getDispatchLogTarget(contact: {
   phone?: string | null
@@ -246,6 +247,7 @@ export async function POST(request: NextRequest) {
 
   const reportRecord = report as Record<string, unknown>
   const scheduleRecord = schedule as Record<string, unknown>
+  const selectedPageNames = getSchedulePageNames(scheduleRecord)
 
   const datasetId = getReportDatasetId(reportRecord)
   const query = getScheduleQuery(scheduleRecord)
@@ -288,8 +290,10 @@ export async function POST(request: NextRequest) {
         query: query || null,
         use_data_export: useDataExport,
 
-        pbi_page_name: schedule.pbi_page_name ?? null,
-        page_name: schedule.pbi_page_name ?? null,
+        pbi_page_name: selectedPageNames[0] ?? null,
+        page_name: selectedPageNames[0] ?? null,
+        pbi_page_names: selectedPageNames,
+        page_names: selectedPageNames,
         export_format: schedule.export_format,
 
         report_export_url: reportExportUrl,

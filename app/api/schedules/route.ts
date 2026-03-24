@@ -6,6 +6,12 @@ import {
   isMissingAutomationRelationError,
   loadStoredAutomations,
 } from "@/lib/automation-storage"
+import {
+  buildSchedulePageSelectionPayload,
+  normalizeSchedulePageNames,
+  normalizeSchedulePageSelectionForResponse,
+  schedulesSupportPageNames,
+} from "@/lib/schedule-page-selection"
 
 function isMissingSchedulesUpdatedAtColumn(message?: string | null) {
   return (
@@ -29,12 +35,26 @@ const requiredTrimmedString = z.preprocess((value) => {
   return trimmed.length > 0 ? trimmed : value
 }, z.string().min(1))
 
+const optionalPageNamesSchema = z.preprocess((value) => {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (value === null) {
+    return []
+  }
+
+  return Array.isArray(value) ? value : [value]
+}, z.array(z.string()).optional())
+
 const scheduleSchema = z.object({
   name: z.string().min(1),
 
   report_id: z.string().uuid(),
 
   pbi_page_name: nullableTrimmedString,
+
+  pbi_page_names: optionalPageNamesSchema,
 
   dax_query: nullableTrimmedString,
 
@@ -134,7 +154,7 @@ export async function GET() {
       }
 
       return {
-        ...schedule,
+        ...normalizeSchedulePageSelectionForResponse(schedule),
         report_name:
           reportMap.get(schedule.report_id) ??
           automationMap.get(schedule.report_id) ??
@@ -165,11 +185,31 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { contact_ids, ...scheduleData } = parsed.data
+  const { contact_ids, pbi_page_name, pbi_page_names, ...scheduleData } = parsed.data
+  const normalizedPageNames = normalizeSchedulePageNames(
+    pbi_page_names ?? pbi_page_name
+  )
+  const supportsPageNames = await schedulesSupportPageNames(supabase)
+
+  if (!supportsPageNames && normalizedPageNames.length > 1) {
+    return NextResponse.json(
+      {
+        error:
+          "O banco ainda nao suporta selecionar varias paginas por rotina. Aplique a migracao mais recente do Supabase.",
+      },
+      { status: 400 }
+    )
+  }
+
+  const schedulePayload = {
+    ...scheduleData,
+    ...buildSchedulePageSelectionPayload(normalizedPageNames, supportsPageNames),
+    company_id: companyId,
+  }
 
   const { data: schedule, error } = await supabase
     .from("schedules")
-    .insert({ ...scheduleData, company_id: companyId })
+    .insert(schedulePayload)
     .select()
     .single()
 
@@ -192,7 +232,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json(schedule, { status: 201 })
+  return NextResponse.json(normalizeSchedulePageSelectionForResponse(schedule), { status: 201 })
 }
 
 export async function PUT(request: NextRequest) {
@@ -208,11 +248,38 @@ export async function PUT(request: NextRequest) {
     )
   }
 
-  const { id, contact_ids, ...updates } = parsed.data
+  const { id, contact_ids, pbi_page_name, pbi_page_names, ...updates } = parsed.data
+  const supportsPageNames = await schedulesSupportPageNames(supabase)
+  const hasPageSelectionUpdate = pbi_page_name !== undefined || pbi_page_names !== undefined
+  const normalizedPageNames = hasPageSelectionUpdate
+    ? normalizeSchedulePageNames(pbi_page_names ?? pbi_page_name)
+    : null
+
+  if (!supportsPageNames && (normalizedPageNames?.length ?? 0) > 1) {
+    return NextResponse.json(
+      {
+        error:
+          "O banco ainda nao suporta selecionar varias paginas por rotina. Aplique a migracao mais recente do Supabase.",
+      },
+      { status: 400 }
+    )
+  }
 
   const scheduleUpdates = Object.fromEntries(
     Object.entries(updates).filter(([, value]) => value !== undefined)
   )
+
+  if (normalizedPageNames) {
+    Object.assign(
+      scheduleUpdates,
+      buildSchedulePageSelectionPayload(normalizedPageNames, supportsPageNames)
+    )
+  } else if (hasPageSelectionUpdate) {
+    Object.assign(
+      scheduleUpdates,
+      buildSchedulePageSelectionPayload([], supportsPageNames)
+    )
+  }
 
   const updateSchedule = async (payload: Record<string, unknown>) =>
     supabase
@@ -262,7 +329,7 @@ export async function PUT(request: NextRequest) {
     }
   }
 
-  return NextResponse.json(result.data)
+  return NextResponse.json(normalizeSchedulePageSelectionForResponse(result.data))
 }
 
 export async function DELETE(request: NextRequest) {

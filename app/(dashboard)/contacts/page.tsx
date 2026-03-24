@@ -7,16 +7,19 @@ import {
   Search,
   Trash2,
   Pencil,
+  Loader2,
   Phone,
   UsersRound,
   Bot,
   QrCode,
   RotateCcw,
+  RefreshCw,
   PlugZap,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { formatDateTimePtBr } from "@/lib/datetime"
+import { useBotContactSync } from "@/hooks/use-bot-contact-sync"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -103,6 +106,7 @@ export default function ContactsPage() {
     fetcher,
     { refreshInterval: 5000 }
   )
+  const { syncingBotContacts, syncContactsFromBot } = useBotContactSync(botQrConfig)
 
   const [mounted, setMounted] = useState(false)
   const [search, setSearch] = useState("")
@@ -376,6 +380,30 @@ export default function ContactsPage() {
     }
   }
 
+  async function handleSyncBotContacts() {
+    if (!shouldShowContacts) {
+      toast.error("Conecte o WhatsApp pela leitura do QR Code antes de sincronizar.")
+      return
+    }
+
+    try {
+      const data = await syncContactsFromBot()
+
+      if ((data.inserted ?? 0) === 0 && (data.updated ?? 0) === 0) {
+        toast.success("Contatos do bot ja estao atualizados.")
+        return
+      }
+
+      toast.success(
+        `${data.inserted ?? 0} contato(s) novo(s) e ${data.updated ?? 0} atualizado(s).`
+      )
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao sincronizar contatos do bot"
+      )
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader title="Contatos" description="Gerencie contatos e grupos WhatsApp">
@@ -471,6 +499,19 @@ export default function ContactsPage() {
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button
                   variant="outline"
+                  onClick={handleSyncBotContacts}
+                  disabled={syncingBotContacts || !shouldShowContacts}
+                >
+                  {syncingBotContacts ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 size-4" />
+                  )}
+                  {syncingBotContacts ? "Sincronizando..." : "Sincronizar contatos"}
+                </Button>
+
+                <Button
+                  variant="outline"
                   onClick={() => handleBotControl("disconnect")}
                   disabled={botActionLoading !== null || botQrConfig?.status === "offline"}
                 >
@@ -560,6 +601,11 @@ export default function ContactsPage() {
                 {Array.from({ length: 5 }).map((_, i) => (
                   <Skeleton key={i} className="h-12 rounded" />
                 ))}
+              </div>
+            ) : syncingBotContacts && visibleContacts.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Sincronizando contatos do telefone conectado...
               </div>
             ) : visibleContacts.length === 0 ? (
               <p className="py-12 text-center text-sm text-muted-foreground">
