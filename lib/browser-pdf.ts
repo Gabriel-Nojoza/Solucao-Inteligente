@@ -552,10 +552,6 @@ async function closeChrome(child: ChildProcess) {
 async function openHtmlInNewPage(client: CdpClient, htmlUrl: string) {
   const targetResult = await client.send("Target.createTarget", {
     url: "about:blank",
-    width: 1280,
-    height: 720,
-    newWindow: false,
-    background: true,
   })
 
   const targetId = String(targetResult.targetId)
