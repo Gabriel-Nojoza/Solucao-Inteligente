@@ -91,9 +91,9 @@ ${columns.map(c => `<td>${escapeHtml(r[c])}</td>`).join("")}
 `
 
         const pdf = await renderHtmlScreenshotToPdf(html, {
-            pageWidthMm: 2378,
-            pageHeightMm: 1682,
-            pageMarginMm: 5,
+            pageWidthMm: 420,
+            pageHeightMm: 297,
+            pageMarginMm: 6,
             deviceScaleFactor: 2,
         })
 

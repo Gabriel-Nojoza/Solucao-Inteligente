@@ -61,6 +61,8 @@ type ScreenshotReadyState = {
   error: string | null
   scrollWidth: number
   scrollHeight: number
+  reportPending?: boolean
+  reportReady?: boolean
 }
 
 type PdfRenderOptions = {
@@ -665,47 +667,71 @@ async function waitForDomReady(
   sessionId: string,
   virtualTimeBudgetMs: number
 ) {
-  await delay(Math.max(300, Math.min(virtualTimeBudgetMs, 5000)))
+  const maxWaitMs = Math.max(1000, Math.min(virtualTimeBudgetMs, 45000))
+  const pollIntervalMs = 500
+  const startedAt = Date.now()
+  let latestState: ScreenshotReadyState = {
+    ready: false,
+    error: null,
+    scrollWidth: 0,
+    scrollHeight: 0,
+  }
 
-  const state = await client.send(
-    "Runtime.evaluate",
-    {
-      expression: `(() => {
-        const readyState = document.readyState;
-        const body = document.body;
-        const documentElement = document.documentElement;
+  while (Date.now() - startedAt <= maxWaitMs) {
+    const state = await client.send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => {
+          const readyState = document.readyState;
+          const body = document.body;
+          const documentElement = document.documentElement;
+          const reportPending = window.__REPORT_PENDING__ === true;
+          const reportReady = Boolean(window.__REPORT_READY__);
+          const reportError =
+            typeof window.__REPORT_ERROR__ === "string" &&
+            window.__REPORT_ERROR__.trim()
+              ? window.__REPORT_ERROR__.trim()
+              : null;
 
-        return {
-          ready: readyState === 'complete' || readyState === 'interactive',
-          error: null,
-          scrollWidth: Math.max(
-            body?.scrollWidth || 0,
-            documentElement?.scrollWidth || 0
-          ),
-          scrollHeight: Math.max(
-            body?.scrollHeight || 0,
-            documentElement?.scrollHeight || 0
-          )
-        };
-      })()`,
-      returnByValue: true,
-      awaitPromise: true,
-    },
-    { sessionId }
-  )
+          return {
+            ready:
+              (readyState === "complete" || readyState === "interactive") &&
+              (!reportPending || reportReady || Boolean(reportError)),
+            error: reportError,
+            reportPending,
+            reportReady,
+            scrollWidth: Math.max(
+              body?.scrollWidth || 0,
+              documentElement?.scrollWidth || 0
+            ),
+            scrollHeight: Math.max(
+              body?.scrollHeight || 0,
+              documentElement?.scrollHeight || 0
+            )
+          };
+        })()`,
+        returnByValue: true,
+        awaitPromise: true,
+      },
+      { sessionId }
+    )
 
-  const resultValue = (
-    state.result as { value?: ScreenshotReadyState } | undefined
-  )?.value
+    latestState =
+      (state.result as { value?: ScreenshotReadyState } | undefined)?.value ?? {
+        ready: false,
+        error: "Nao foi possivel ler o DOM do relatorio",
+        scrollWidth: 0,
+        scrollHeight: 0,
+      }
 
-  return (
-    resultValue ?? {
-      ready: false,
-      error: "Nao foi possivel ler o DOM do relatorio",
-      scrollWidth: 0,
-      scrollHeight: 0,
+    if (latestState.ready) {
+      return latestState
     }
-  )
+
+    await delay(pollIntervalMs)
+  }
+
+  return latestState
 }
 
 async function prepareScrollableSegments(
@@ -998,6 +1024,10 @@ export async function renderHtmlToPdf(
   return withBrowserPage(html, timeoutMs, async (client, sessionId) => {
     const lastState = await waitForDomReady(client, sessionId, virtualTimeBudgetMs)
 
+    if (lastState.error) {
+      throw new Error(lastState.error)
+    }
+
     if (!lastState.ready) {
       throw new Error(
         lastState.error || "O HTML do relatorio nao ficou pronto para gerar o PDF"
@@ -1068,6 +1098,10 @@ export async function renderHtmlToPng(
     )
 
     const lastState = await waitForDomReady(client, sessionId, 4000)
+
+    if (lastState.error) {
+      throw new Error(lastState.error)
+    }
 
     if (!lastState.ready) {
       throw new Error(

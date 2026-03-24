@@ -132,10 +132,12 @@ function buildPowerBICaptureHtml(input: {
       const reportContainer = document.getElementById("report-container")
       const frameNode = document.querySelector(".frame")
       let finished = false
+      window.__REPORT_PENDING__ = true
 
       function markReady(reason) {
         if (finished) return
         finished = true
+        window.__REPORT_PENDING__ = false
         statusNode.hidden = true
         window.__REPORT_READY__ = reason || "rendered"
       }
@@ -143,6 +145,7 @@ function buildPowerBICaptureHtml(input: {
       function markError(message) {
         if (finished) return
         finished = true
+        window.__REPORT_PENDING__ = false
         statusNode.hidden = true
         errorNode.hidden = false
         errorNode.textContent = message
@@ -272,9 +275,9 @@ function getPowerBiPdfPreset(profile: PowerBiPdfProfile) {
       viewportWidth: 2304,
       viewportHeight: 1536,
       deviceScaleFactor: 3,
-      pageWidthMm: 2378,
-      pageHeightMm: 1682,
-      pageMarginMm: 5,
+      pageWidthMm: 420,
+      pageHeightMm: 297,
+      pageMarginMm: 6,
     }
   }
 
@@ -282,9 +285,9 @@ function getPowerBiPdfPreset(profile: PowerBiPdfProfile) {
     viewportWidth: 2560,
     viewportHeight: 1703,
     deviceScaleFactor: 3,
-    pageWidthMm: 2378,
-    pageHeightMm: 1682,
-    pageMarginMm: 5,
+    pageWidthMm: 420,
+    pageHeightMm: 297,
+    pageMarginMm: 6,
   }
 }
 
