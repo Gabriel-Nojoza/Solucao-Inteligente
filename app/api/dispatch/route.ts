@@ -251,7 +251,7 @@ export async function POST(request: NextRequest) {
 
   const datasetId = getReportDatasetId(reportRecord)
   const query = getScheduleQuery(scheduleRecord)
-  const useDataExport = Boolean(datasetId && query)
+  const useDataExport = false
 
   let dispatchErrorMessage: string | null = null
 
@@ -259,9 +259,7 @@ export async function POST(request: NextRequest) {
     const appUrl = getRequestOrigin(request)
     const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
 
-    const reportExportUrl = useDataExport
-      ? `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export-data-pdf`
-      : `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export`
+    const reportExportUrl = `${appUrl.trim().replace(/\/+$/, "")}/api/reports/export`
 
     const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
     const dispatchTargets = buildDispatchTargets(
@@ -362,6 +360,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: true,
     logs_created: (insertedLogs ?? []).length,
-    export_mode: useDataExport ? "data" : "report",
+    export_mode: "report",
   })
 }
