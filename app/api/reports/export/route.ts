@@ -200,40 +200,6 @@ export async function POST(request: NextRequest) {
 
     const token = await getAccessToken(companyId)
     const safeName = sanitizeFileName(report.name || "relatorio")
-    let browserPdfErrorMessage: string | null = null
-
-    if (format === "PDF" && !preferNativePowerBiExport && pbiPageNames.length === 0) {
-      try {
-        const pdfBuffer = await exportPowerBIReportPdf({
-          token,
-          workspaceId: workspace.pbi_workspace_id,
-          reportId: report.pbi_report_id,
-          reportName: report.name,
-          embedUrl: report.embed_url,
-          pdfProfile,
-        })
-
-        return new Response(pdfBuffer, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `inline; filename="${safeName}.pdf"`,
-            "Cache-Control": "no-store",
-          },
-        })
-      } catch (browserPdfError) {
-        if (isPowerBiEntityNotFoundError(browserPdfError)) {
-          await deactivateMissingReport(supabase, companyId, report.id)
-          return jsonError(getMissingReportMessage(), 404)
-        }
-
-        browserPdfErrorMessage = getErrorMessage(browserPdfError)
-        console.error(
-          "Captura da pagina do sistema falhou, tentando ExportTo",
-          browserPdfError
-        )
-      }
-    }
 
     let exportJob: Awaited<ReturnType<typeof exportReport>>
 
@@ -251,17 +217,49 @@ export async function POST(request: NextRequest) {
         return jsonError(getMissingReportMessage(), 404)
       }
 
-      if (format === "PDF" && browserPdfErrorMessage) {
-        console.error(
-          "ExportTo do Power BI falhou apos erro na captura da pagina",
-          exportError
-        )
+      const shouldAttemptBrowserFallback =
+        format === "PDF" &&
+        pbiPageNames.length === 0 &&
+        preferNativePowerBiExport !== true
 
-        const errorMessage = isPowerBiFeatureNotAvailableError(exportError)
-          ? "Nao foi possivel gerar o PDF automaticamente neste ambiente. A captura da pagina falhou e o ExportTo nativo do Power BI nao esta disponivel para este relatorio."
-          : "Nao foi possivel gerar o PDF deste relatorio agora. Tente novamente."
+      if (shouldAttemptBrowserFallback) {
+        try {
+          console.error("ExportTo do Power BI falhou, tentando captura visual", exportError)
 
-        return jsonError(errorMessage, 500)
+          const pdfBuffer = await exportPowerBIReportPdf({
+            token,
+            workspaceId: workspace.pbi_workspace_id,
+            reportId: report.pbi_report_id,
+            reportName: report.name,
+            embedUrl: report.embed_url,
+            pdfProfile,
+          })
+
+          return new Response(pdfBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": "application/pdf",
+              "Content-Disposition": `inline; filename="${safeName}.pdf"`,
+              "Cache-Control": "no-store",
+            },
+          })
+        } catch (browserPdfError) {
+          if (isPowerBiEntityNotFoundError(browserPdfError)) {
+            await deactivateMissingReport(supabase, companyId, report.id)
+            return jsonError(getMissingReportMessage(), 404)
+          }
+
+          console.error(
+            "Captura visual do Power BI falhou apos erro no ExportTo",
+            browserPdfError
+          )
+
+          const errorMessage = isPowerBiFeatureNotAvailableError(exportError)
+            ? "Nao foi possivel gerar o PDF automaticamente neste ambiente. O ExportTo nativo do Power BI nao esta disponivel para este relatorio e a captura visual tambem falhou."
+            : "Nao foi possivel gerar o PDF deste relatorio agora. Tente novamente."
+
+          return jsonError(errorMessage, 500)
+        }
       }
 
       throw exportError
