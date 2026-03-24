@@ -361,6 +361,49 @@ function getFileNameFromUrl(url) {
   }
 }
 
+function looksLikePdf(buffer) {
+  return (
+    Buffer.isBuffer(buffer) &&
+    buffer.length >= 5 &&
+    buffer.subarray(0, 5).toString("ascii") === "%PDF-"
+  )
+}
+
+function readBufferPreview(buffer, length = 160) {
+  return buffer.subarray(0, Math.min(buffer.length, length)).toString("utf-8").trim()
+}
+
+function validateDocumentBuffer(buffer, fileName, mimeType) {
+  const normalizedFileName =
+    typeof fileName === "string" ? fileName.trim().toLowerCase() : ""
+  const normalizedMimeType =
+    typeof mimeType === "string" ? mimeType.trim().toLowerCase() : ""
+  const expectsPdf =
+    normalizedMimeType === "application/pdf" || normalizedFileName.endsWith(".pdf")
+
+  if (!expectsPdf || looksLikePdf(buffer)) {
+    return
+  }
+
+  const preview = readBufferPreview(buffer)
+
+  if (preview.startsWith("file://")) {
+    throw createValidationError(
+      "O arquivo recebido nao e um PDF real. O fluxo enviou um caminho temporario (file://...) em vez do binario do PDF."
+    )
+  }
+
+  if (/^<!doctype html/i.test(preview) || /^<html/i.test(preview)) {
+    throw createValidationError(
+      "O arquivo recebido nao e um PDF real. O fluxo enviou HTML em vez do binario do PDF."
+    )
+  }
+
+  throw createValidationError(
+    "O arquivo recebido nao e um PDF valido. Verifique no N8N se o node baixa o arquivo em binario e envia document_base64."
+  )
+}
+
 async function resolveDocumentPayload(input) {
   const base64Input =
     typeof input?.document_base64 === "string" ? input.document_base64.trim() : ""
@@ -423,6 +466,7 @@ async function resolveDocumentPayload(input) {
 
   fileName = fileName || "arquivo"
   mimeType = mimeType || inferMimeType(fileName)
+  validateDocumentBuffer(buffer, fileName, mimeType)
 
   return {
     buffer,
