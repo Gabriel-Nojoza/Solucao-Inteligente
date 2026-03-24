@@ -35,18 +35,6 @@ const requiredTrimmedString = z.preprocess((value) => {
   return trimmed.length > 0 ? trimmed : value
 }, z.string().min(1))
 
-const optionalPageNamesSchema = z.preprocess((value) => {
-  if (value === undefined) {
-    return undefined
-  }
-
-  if (value === null) {
-    return []
-  }
-
-  return Array.isArray(value) ? value : [value]
-}, z.array(z.string()).optional())
-
 const scheduleSchema = z.object({
   name: z.string().min(1),
 
@@ -54,7 +42,7 @@ const scheduleSchema = z.object({
 
   pbi_page_name: nullableTrimmedString,
 
-  pbi_page_names: optionalPageNamesSchema,
+  pbi_page_names: z.array(z.string().min(1)).optional(),
 
   dax_query: nullableTrimmedString,
 

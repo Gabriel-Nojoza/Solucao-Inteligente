@@ -18,6 +18,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
+import { matchesContactSearch } from "@/lib/contact-search"
 import { formatDateTimePtBr } from "@/lib/datetime"
 import { useBotContactSync } from "@/hooks/use-bot-contact-sync"
 import { Button } from "@/components/ui/button"
@@ -150,10 +151,7 @@ export default function ContactsPage() {
   }
 
   const filtered = (contacts ?? []).filter((contact) => {
-    const matchesSearch =
-      contact.name.toLowerCase().includes(search.toLowerCase()) ||
-      (contact.phone ?? "").includes(search)
-
+    const matchesSearch = matchesContactSearch(contact, search)
     const matchesType = typeFilter === "all" || contact.type === typeFilter
     return matchesSearch && matchesType
   })
@@ -418,7 +416,7 @@ export default function ContactsPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Buscar por nome ou telefone..."
+              placeholder="Buscar por nome, telefone ou ID..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"

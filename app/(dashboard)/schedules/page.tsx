@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { useBotContactSync } from "@/hooks/use-bot-contact-sync"
+import { getContactSearchDetail, matchesContactSearch } from "@/lib/contact-search"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -242,14 +243,7 @@ export default function SchedulesPage() {
   const formatOptions = POWERBI_FORMATS
 
   const filteredContacts = activeContacts.filter((contact) => {
-    const search = contactSearch.trim().toLowerCase()
-    if (!search) return true
-
-    return (
-      contact.name.toLowerCase().includes(search) ||
-      (contact.phone ?? "").toLowerCase().includes(search) ||
-      (contact.whatsapp_group_id ?? "").toLowerCase().includes(search)
-    )
+    return matchesContactSearch(contact, contactSearch)
   })
 
   const selectedReportPages = useMemo(
@@ -918,7 +912,7 @@ export default function SchedulesPage() {
                       <Input
                         value={contactSearch}
                         onChange={(e) => setContactSearch(e.target.value)}
-                        placeholder="Pesquisar contato ou grupo..."
+                        placeholder="Pesquisar nome, telefone ou ID..."
                         className="pl-9"
                       />
                     </div>
@@ -938,7 +932,14 @@ export default function SchedulesPage() {
                               checked={formContactIds.includes(contact.id)}
                               onCheckedChange={() => toggleContact(contact.id)}
                             />
-                            <span className="text-sm">{contact.name}</span>
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate text-sm">{contact.name}</span>
+                              {getContactSearchDetail(contact) ? (
+                                <span className="block truncate text-xs text-muted-foreground">
+                                  {getContactSearchDetail(contact)}
+                                </span>
+                              ) : null}
+                            </div>
                             <Badge variant="outline" className="ml-auto text-xs">
                               {contact.type === "group" ? "Grupo" : "Individual"}
                             </Badge>
