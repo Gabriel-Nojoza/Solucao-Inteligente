@@ -40,6 +40,7 @@ import {
 import { toast } from "sonner"
 import type { DispatchLog } from "@/lib/types"
 import { formatShortDateTimePtBr } from "@/lib/datetime"
+import { getDispatchLogDisplayStatus } from "@/lib/dispatch-log"
 
 const PAGE_SIZE = 20
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -66,53 +67,6 @@ function formatLogDate(log: DispatchLog) {
   }
 
   return formatShortDateTimePtBr(parsed)
-}
-
-const statusConfig: Record<
-  string,
-  {
-    label: string
-    variant: "default" | "secondary" | "destructive" | "outline"
-    className?: string
-  }
-> = {
-  pending: { label: "Em andamento", variant: "secondary" },
-  exporting: {
-    label: "Em andamento",
-    variant: "outline",
-    className: "border-chart-1/40 text-chart-1",
-  },
-  sending: {
-    label: "Em andamento",
-    variant: "outline",
-    className: "border-warning/40 text-warning",
-  },
-  delivered: {
-    label: "Enviado",
-    variant: "default",
-    className: "bg-success text-success-foreground",
-  },
-  failed: { label: "Nao enviado", variant: "destructive" },
-}
-
-function getDisplayStatus(log: DispatchLog) {
-  if (log.status === "delivered") {
-    return statusConfig.delivered
-  }
-
-  if (log.status === "failed" || !!log.error_message) {
-    return statusConfig.failed
-  }
-
-  if (log.status === "sending") {
-    return statusConfig.sending
-  }
-
-  if (log.status === "exporting") {
-    return statusConfig.exporting
-  }
-
-  return statusConfig.pending
 }
 
 export default function LogsPage() {
@@ -175,7 +129,7 @@ export default function LogsPage() {
           log.contact_name,
           log.contact_phone ?? "",
           log.export_format ?? "",
-          getDisplayStatus(log).label,
+          getDispatchLogDisplayStatus(log).label,
           log.error_message ?? "",
         ]
       })
@@ -238,7 +192,7 @@ export default function LogsPage() {
               <SelectItem value="exporting">Em andamento</SelectItem>
               <SelectItem value="sending">Em andamento</SelectItem>
               <SelectItem value="delivered">Enviado</SelectItem>
-              <SelectItem value="failed">Nao enviado</SelectItem>
+              <SelectItem value="failed">Erro</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -282,7 +236,7 @@ export default function LogsPage() {
                   </TableHeader>
                   <TableBody>
                     {logs.map((log) => {
-                      const status = getDisplayStatus(log)
+                      const status = getDispatchLogDisplayStatus(log)
                       return (
                         <TableRow key={log.id}>
                           <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
