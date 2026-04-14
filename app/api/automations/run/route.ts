@@ -1,0 +1,583 @@
+import { NextResponse } from "next/server"
+import { createServiceClient as createClient } from "@/lib/supabase/server"
+import { getAccessToken, executeDAXQuery } from "@/lib/powerbi"
+import { getCatalogMap, getExecutionTarget } from "@/lib/automation-catalog"
+import { buildCsvContent, buildHtmlReport, buildTextReport } from "@/lib/report-export"
+import { BRAND_LOGO_PATH } from "@/lib/branding"
+import { buildDAXQuery } from "@/lib/dax-builder"
+import { resolveRequestCompanyContext } from "@/lib/n8n-auth"
+import { normalizeContactForResponse } from "@/lib/contact-compat"
+import { executeWithQueryFallback } from "@/lib/query-execution-fallback"
+import { normalizeFilters } from "@/lib/query-filters"
+import { getRequestContext } from "@/lib/tenant"
+import {
+  getStoredAutomationById,
+  isMissingAutomationRelationError,
+  listContactsByIds,
+  touchStoredAutomationLastRunAt,
+} from "@/lib/automation-storage"
+import type { QueryFilter, SelectedColumn, SelectedMeasure } from "@/lib/types"
+import {
+  buildDispatchTargets,
+  buildN8nCallbackHeaders,
+  buildN8nEndpointUrls,
+  normalizeN8nSettings,
+} from "@/lib/n8n-webhook"
+import {
+  getWorkspaceAccessScope,
+  isDatasetAllowed,
+  isWorkspaceAllowed,
+} from "@/lib/workspace-access"
+
+type ContactRecord = {
+  id: string
+  name: string
+  phone: string | null
+  type?: string | null
+  whatsapp_group_id?: string | null
+  is_active?: boolean | null
+}
+
+type ScheduleContext = {
+  id: string
+  name: string
+  cron_expression: string | null
+  is_active: boolean | null
+}
+
+function getDispatchLogTarget(contact: ContactRecord) {
+  return contact.phone || contact.whatsapp_group_id || contact.name || "destino-desconhecido"
+}
+
+function applyTemplate(template: string | null | undefined, values: Record<string, string | number>): string {
+  const source = template?.trim() || "Segue o relatorio {name}."
+  return source.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ""))
+}
+
+function normalizeSelectedColumns(input: unknown): SelectedColumn[] {
+  if (!Array.isArray(input)) return []
+
+  return input.flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const record = item as Record<string, unknown>
+    const tableName = typeof record.tableName === "string" ? record.tableName.trim() : ""
+    const columnName = typeof record.columnName === "string" ? record.columnName.trim() : ""
+    return tableName && columnName ? [{ tableName, columnName }] : []
+  })
+}
+
+function normalizeSelectedMeasures(input: unknown): SelectedMeasure[] {
+  if (!Array.isArray(input)) return []
+
+  return input.flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const record = item as Record<string, unknown>
+    const tableName = typeof record.tableName === "string" ? record.tableName.trim() : ""
+    const measureName = typeof record.measureName === "string" ? record.measureName.trim() : ""
+    return tableName && measureName ? [{ tableName, measureName }] : []
+  })
+}
+
+function buildSelectedItems(
+  selectedColumns: SelectedColumn[],
+  selectedMeasures: SelectedMeasure[]
+) {
+  return [
+    ...selectedColumns.map((column) => `${column.tableName}.${column.columnName}`),
+    ...selectedMeasures.map((measure) => measure.measureName),
+  ]
+}
+
+function getRequestOrigin(request: Request) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    request.headers.get("origin")?.trim() ||
+    new URL(request.url).origin
+  )
+}
+
+export async function POST(request: Request) {
+  try {
+    const requestCompanyContext = await resolveRequestCompanyContext(request, {
+      allowCallbackSecret: true,
+    })
+    const { companyId, source } = requestCompanyContext
+    const supabase = createClient()
+    const accessScope =
+      source === "auth"
+        ? await getWorkspaceAccessScope(supabase, await getRequestContext())
+        : null
+    const body = await request.json()
+    console.log("[automations/run] request received", {
+      requestUrl: request.url,
+      requestHost: request.headers.get("host")?.trim() || null,
+      requestOrigin: request.headers.get("origin")?.trim() || null,
+      automationId: typeof body?.automation_id === "string" ? body.automation_id : null,
+      scheduleId: typeof body?.schedule_id === "string" ? body.schedule_id : null,
+      exportFormat:
+        typeof body?.export_format === "string" ? body.export_format : null,
+      contactCount: Array.isArray(body?.contact_ids) ? body.contact_ids.length : 0,
+    })
+
+    const automationId = typeof body.automation_id === "string" ? body.automation_id : ""
+    const adHocDatasetId = typeof body.dataset_id === "string" ? body.dataset_id : ""
+    const adHocExecutionDatasetId =
+      typeof body.execution_dataset_id === "string" ? body.execution_dataset_id : ""
+    const adHocQuery = typeof body.dax_query === "string" ? body.dax_query : ""
+    const hasExportFormatOverride =
+      typeof body.export_format === "string" && body.export_format.trim().length > 0
+    const adHocExportFormat =
+      typeof body.export_format === "string" ? body.export_format : "csv"
+    const hasMessageOverride = Object.prototype.hasOwnProperty.call(body, "message")
+    const adHocMessage = typeof body.message === "string" ? body.message : null
+    const hasContactOverrides = Array.isArray(body.contact_ids)
+    const adHocContactIds = Array.isArray(body.contact_ids)
+      ? body.contact_ids.filter((value: unknown): value is string => typeof value === "string")
+      : []
+    const scheduleIdOverride =
+      typeof body.schedule_id === "string" && body.schedule_id.trim()
+        ? body.schedule_id
+        : null
+    const hasFilterOverrides = Object.prototype.hasOwnProperty.call(body, "filters")
+    const overrideFilters = normalizeFilters(body.filters)
+
+    let datasetId = ""
+    let query = ""
+    let exportFormat = adHocExportFormat
+    let messageTemplate: string | null = adHocMessage
+    let automationName = "Consulta Personalizada"
+    let contacts: ContactRecord[] = []
+    let selectedItems: string[] = []
+    let reportFilters: QueryFilter[] = []
+    let selectedColumnsForExecution: SelectedColumn[] = []
+    let selectedMeasuresForExecution: SelectedMeasure[] = []
+    let scheduleContext: ScheduleContext | null = null
+    const catalogs = await getCatalogMap(companyId)
+
+    if (scheduleIdOverride) {
+      const { data: schedule, error: scheduleError } = await supabase
+        .from("schedules")
+        .select("id, name, cron_expression, is_active")
+        .eq("company_id", companyId)
+        .eq("id", scheduleIdOverride)
+        .maybeSingle()
+
+      if (scheduleError) {
+        throw new Error(scheduleError.message)
+      }
+
+      scheduleContext = (schedule as ScheduleContext | null) ?? null
+    }
+
+    if (automationId) {
+      let automation: Record<string, unknown> | null = null
+      let usingStoredAutomation = false
+
+      const { data: dbAutomation, error: autoErr } = await supabase
+        .from("automations")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("id", automationId)
+        .single()
+
+      if (autoErr) {
+        if (!isMissingAutomationRelationError(autoErr)) {
+          throw new Error(autoErr.message)
+        }
+
+        const storedAutomation = await getStoredAutomationById(supabase, companyId, automationId)
+        if (!storedAutomation) {
+          return NextResponse.json({ error: "Automacao nao encontrada" }, { status: 404 })
+        }
+
+        automation = storedAutomation as unknown as Record<string, unknown>
+        usingStoredAutomation = true
+      } else if (!dbAutomation) {
+        return NextResponse.json({ error: "Automacao nao encontrada" }, { status: 404 })
+      } else {
+        automation = dbAutomation as Record<string, unknown>
+      }
+
+      datasetId = String(automation.dataset_id)
+
+      if (accessScope && !isDatasetAllowed(accessScope, datasetId)) {
+        return NextResponse.json(
+          { error: "Automacao nao permitida para este usuario." },
+          { status: 403 }
+        )
+      }
+
+      exportFormat = hasExportFormatOverride
+        ? adHocExportFormat
+        : String(automation.export_format || "csv")
+      messageTemplate = hasMessageOverride
+        ? adHocMessage
+        : automation.message_template
+          ? String(automation.message_template)
+          : null
+      automationName = String(automation.name || "Automacao")
+      const savedSelectedColumns = normalizeSelectedColumns(automation.selected_columns)
+      const savedSelectedMeasures = normalizeSelectedMeasures(automation.selected_measures)
+      const savedFilters = normalizeFilters(automation.filters)
+      const effectiveFilters = hasFilterOverrides ? overrideFilters : savedFilters
+      selectedColumnsForExecution = savedSelectedColumns
+      selectedMeasuresForExecution = savedSelectedMeasures
+      reportFilters = effectiveFilters
+      selectedItems = buildSelectedItems(savedSelectedColumns, savedSelectedMeasures)
+      const canRebuildQuery = savedSelectedColumns.length > 0 || savedSelectedMeasures.length > 0
+
+      if (!automation.dax_query && !canRebuildQuery) {
+        return NextResponse.json(
+          { error: "Automacao sem query DAX definida e sem campos suficientes para reconstruir a consulta" },
+          { status: 400 }
+        )
+      }
+
+      if (hasFilterOverrides || !automation.dax_query) {
+        query = buildDAXQuery({
+          columns: savedSelectedColumns,
+          measures: savedSelectedMeasures,
+          filters: effectiveFilters,
+        })
+        if (!query || query.startsWith("--")) {
+          return NextResponse.json(
+            { error: "Nao foi possivel reconstruir a query da automacao com os filtros informados" },
+            { status: 400 }
+          )
+        }
+      } else {
+        query = String(automation.dax_query)
+      }
+
+      const lastRunAt = new Date().toISOString()
+      if (usingStoredAutomation) {
+        await touchStoredAutomationLastRunAt(supabase, companyId, automationId, lastRunAt)
+      } else {
+        await supabase
+          .from("automations")
+          .update({ last_run_at: lastRunAt })
+          .eq("company_id", companyId)
+          .eq("id", automationId)
+      }
+
+      if (hasContactOverrides) {
+        if (adHocContactIds.length === 0) {
+          contacts = []
+        } else {
+          const { data: selectedContacts } = await supabase
+            .from("contacts")
+            .select("*")
+            .eq("company_id", companyId)
+            .in("id", adHocContactIds)
+            .eq("is_active", true)
+
+          contacts = (selectedContacts || []).map((contact) =>
+            normalizeContactForResponse(contact as ContactRecord)
+          ) as ContactRecord[]
+        }
+      } else {
+        if (usingStoredAutomation) {
+          contacts = (await listContactsByIds(
+            supabase,
+            companyId,
+            Array.isArray((automation as { contact_ids?: unknown[] }).contact_ids)
+              ? ((automation as { contact_ids?: unknown[] }).contact_ids as string[])
+              : []
+          )) as ContactRecord[]
+        } else {
+          const { data: contactLinks, error: contactLinksError } = await supabase
+            .from("automation_contacts")
+            .select("contacts(*)")
+            .eq("automation_id", automationId)
+
+          if (contactLinksError) {
+            if (!isMissingAutomationRelationError(contactLinksError)) {
+              throw new Error(contactLinksError.message)
+            }
+          } else {
+            contacts = (
+              contactLinks
+                ?.map((item: Record<string, unknown>) => item.contacts)
+                .filter(Boolean)
+                .map((contact) => normalizeContactForResponse(contact as ContactRecord)) || []
+            ) as ContactRecord[]
+          }
+        }
+      }
+    } else {
+      if (!adHocDatasetId || !adHocQuery) {
+        return NextResponse.json(
+          { error: "automation_id ou dataset_id + dax_query sao obrigatorios" },
+          { status: 400 }
+        )
+      }
+
+      if (accessScope && !isDatasetAllowed(accessScope, adHocDatasetId)) {
+        return NextResponse.json(
+          { error: "Dataset nao permitido para este usuario." },
+          { status: 403 }
+        )
+      }
+
+      const { data: report } = await supabase
+        .from("reports")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("dataset_id", adHocDatasetId)
+        .limit(1)
+        .maybeSingle()
+
+      if (!report && !catalogs[adHocDatasetId]) {
+        return NextResponse.json(
+          { error: "Dataset nao pertence a empresa do usuario" },
+          { status: 403 }
+        )
+      }
+
+      datasetId = adHocDatasetId
+      query = adHocQuery
+      reportFilters = overrideFilters
+      selectedColumnsForExecution = normalizeSelectedColumns(body.selected_columns)
+      selectedMeasuresForExecution = normalizeSelectedMeasures(body.selected_measures)
+      selectedItems = Array.isArray(body?.selectedItems)
+        ? body.selectedItems.filter((item: unknown): item is string => typeof item === "string")
+        : []
+
+      if (adHocContactIds.length > 0) {
+        const { data: selectedContacts } = await supabase
+          .from("contacts")
+          .select("*")
+          .eq("company_id", companyId)
+          .in("id", adHocContactIds)
+          .eq("is_active", true)
+
+        contacts = (selectedContacts || []).map((contact) =>
+          normalizeContactForResponse(contact as ContactRecord)
+        ) as ContactRecord[]
+      }
+    }
+
+    const executionTarget = getExecutionTarget(catalogs[datasetId], datasetId)
+    const executionDatasetId = adHocExecutionDatasetId || executionTarget.datasetId
+
+    if (accessScope && !isDatasetAllowed(accessScope, executionDatasetId)) {
+      return NextResponse.json(
+        { error: "Dataset auxiliar de execucao nao permitido para este usuario." },
+        { status: 403 }
+      )
+    }
+
+    const executionWorkspaceId = executionTarget.workspaceId || null
+    if (
+      accessScope &&
+      executionWorkspaceId &&
+      !isWorkspaceAllowed(accessScope, { pbiWorkspaceId: executionWorkspaceId })
+    ) {
+      return NextResponse.json(
+        { error: "Workspace auxiliar de execucao nao permitido para este usuario." },
+        { status: 403 }
+      )
+    }
+
+    const token = await getAccessToken()
+    const execution = await executeWithQueryFallback({
+      runQuery: (nextQuery) => executeDAXQuery(token, executionDatasetId, nextQuery),
+      query,
+      filters: reportFilters,
+      selectedColumns: selectedColumnsForExecution,
+      selectedMeasures: selectedMeasuresForExecution,
+    })
+    const result = execution.result
+    const rowCount = result.rows.length
+    const generatedAt = new Date()
+    const reportTitle = automationName
+    const csvContent = buildCsvContent(result)
+    const textReport = buildTextReport(result)
+    const htmlReport = buildHtmlReport({
+      title: reportTitle,
+      subtitle:
+        executionDatasetId === datasetId
+          ? `Dataset ${datasetId}`
+          : `Dataset origem ${datasetId} | Execucao ${executionDatasetId}`,
+      generatedAt,
+      selectedItems,
+      filters: execution.appliedFilters,
+      brandLogoUrl: new URL(BRAND_LOGO_PATH, request.url).toString(),
+      result,
+    })
+
+    if (contacts.length > 0) {
+      const { data: n8nSettings } = await supabase
+        .from("company_settings")
+        .select("value")
+        .eq("company_id", companyId)
+        .eq("key", "n8n")
+        .single()
+
+      const normalizedN8nSettings = normalizeN8nSettings(n8nSettings?.value)
+      const webhookUrl =
+        normalizedN8nSettings.webhookUrl || process.env.N8N_WEBHOOK_URL?.trim() || ""
+      const callbackSecret = normalizedN8nSettings.callbackSecret
+
+      const logEntries = contacts.map((contact) => ({
+        company_id: companyId,
+        schedule_id: scheduleIdOverride,
+        report_name: reportTitle,
+        contact_name: String(contact.name || ""),
+        contact_phone: getDispatchLogTarget(contact),
+        status: "pending",
+        export_format: exportFormat,
+      }))
+
+      const { data: logs, error: insertLogsError } = await supabase
+        .from("dispatch_logs")
+        .insert(logEntries)
+        .select("id")
+
+      if (insertLogsError) {
+        return NextResponse.json(
+          { error: `Nao foi possivel criar logs do disparo: ${insertLogsError.message}` },
+          { status: 500 }
+        )
+      }
+
+      if (!webhookUrl) {
+        const errMsg = "URL do webhook N8N nao configurada"
+        for (const log of logs ?? []) {
+          await supabase
+            .from("dispatch_logs")
+            .update({ status: "failed", error_message: errMsg, completed_at: new Date().toISOString() })
+            .eq("company_id", companyId)
+            .eq("id", log.id)
+        }
+        return NextResponse.json({ error: errMsg }, { status: 400 })
+      }
+
+      if (!callbackSecret) {
+        const errMsg = "Callback secret do N8N nao configurado"
+        for (const log of logs ?? []) {
+          await supabase
+            .from("dispatch_logs")
+            .update({ status: "failed", error_message: errMsg, completed_at: new Date().toISOString() })
+            .eq("company_id", companyId)
+            .eq("id", log.id)
+        }
+        return NextResponse.json({ error: errMsg }, { status: 400 })
+      }
+
+      for (const log of logs ?? []) {
+        await supabase
+          .from("dispatch_logs")
+          .update({ status: "sending" })
+          .eq("company_id", companyId)
+          .eq("id", log.id)
+      }
+
+      const appUrl = getRequestOrigin(request)
+      const message = applyTemplate(messageTemplate, {
+        name: reportTitle,
+        row_count: rowCount,
+        format: exportFormat,
+      })
+
+      let webhookErrorMessage: string | null = null
+
+      try {
+        const { callbackUrl, botSendUrl } = buildN8nEndpointUrls(appUrl)
+        const callbackHeaders = buildN8nCallbackHeaders(callbackSecret)
+        const dispatchTargets = buildDispatchTargets(
+          contacts,
+          logs?.map((log) => log.id) || []
+        )
+
+        console.log("[automations/run] forwarding payload to n8n", {
+          companyId,
+          appUrl,
+          webhookUrl,
+          callbackUrl,
+          botSendUrl,
+          scheduleId: scheduleContext?.id ?? scheduleIdOverride,
+          automationName: reportTitle,
+          exportFormat,
+          contactCount: contacts.length,
+          rowCount,
+        })
+
+        const webhookResponse = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schedule_id: scheduleContext?.id ?? scheduleIdOverride,
+            schedule_name: scheduleContext?.name ?? null,
+            cron_expression: scheduleContext?.cron_expression ?? null,
+            is_active: scheduleContext?.is_active ?? null,
+            automation_name: reportTitle,
+            dataset_id: datasetId,
+            execution_dataset_id: executionDatasetId,
+            export_format: exportFormat,
+            row_count: rowCount,
+            generated_at: generatedAt.toISOString(),
+            columns: result.columns,
+            rows: result.rows,
+            data_csv: csvContent,
+            report_text: textReport,
+            report_html: htmlReport,
+            contacts,
+            message,
+            dispatch_targets: dispatchTargets,
+            callback_url: callbackUrl,
+            callback_secret: callbackSecret,
+            callback_headers: callbackHeaders,
+            bot_send_url: botSendUrl,
+            bot_send_headers: callbackHeaders,
+            dispatch_log_ids: logs?.map((log) => log.id) || [],
+          }),
+        })
+        if (!webhookResponse.ok) {
+          const responseText = await webhookResponse.text().catch(() => "")
+          throw new Error(responseText || `Webhook N8N retornou ${webhookResponse.status}`)
+        }
+      } catch (error) {
+        webhookErrorMessage =
+          error instanceof Error ? error.message : "Erro ao enviar para o webhook N8N"
+
+        for (const log of logs ?? []) {
+          await supabase
+            .from("dispatch_logs")
+            .update({
+              status: "failed",
+              error_message: webhookErrorMessage,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("company_id", companyId)
+            .eq("id", log.id)
+        }
+      }
+
+      if (webhookErrorMessage) {
+        return NextResponse.json({ error: webhookErrorMessage }, { status: 502 })
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      rowCount,
+      result,
+      report: {
+        title: reportTitle,
+        generated_at: generatedAt.toISOString(),
+        export_format: exportFormat,
+        executed_dataset_id: executionDatasetId,
+        csv: csvContent,
+        text: textReport,
+        html: htmlReport,
+      },
+      contacts_notified: contacts.length,
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Erro desconhecido" },
+      { status: 500 }
+    )
+  }
+}
