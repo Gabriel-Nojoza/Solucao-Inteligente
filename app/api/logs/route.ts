@@ -3,6 +3,14 @@ import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext, isAuthContextError } from "@/lib/tenant"
 import { getAccessibleScheduleIds } from "@/lib/schedule-access"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
+import {
+  canAccessDispatchLog,
+  getCompanyScheduleIdSet,
+} from "@/lib/dispatch-log-visibility"
+
+type DispatchLogRow = {
+  schedule_id?: string | null
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,34 +33,48 @@ export async function GET(request: NextRequest) {
       ? await getAccessibleScheduleIds(supabase, companyId, scope)
       : []
 
-    if (hasRestrictedScope && accessibleScheduleIds.length === 0) {
-      return NextResponse.json({ data: [], count: 0 })
-    }
-
-    const buildQuery = (orderColumn: "created_at" | "id") => {
+    const buildQuery = (
+      orderColumn: "created_at" | "id",
+      paginated: boolean
+    ) => {
       let query = supabase
         .from("dispatch_logs")
-        .select("*", { count: "exact" })
+        .select("*", { count: paginated ? "exact" : undefined })
         .eq("company_id", companyId)
         .order(orderColumn, { ascending: false })
-        .range(offset, offset + limit - 1)
 
       if (status && status !== "all") {
         query = query.eq("status", status)
       }
 
-      if (hasRestrictedScope) {
+      if (paginated && hasRestrictedScope) {
         query = query.in("schedule_id", accessibleScheduleIds)
+      }
+
+      if (paginated) {
+        query = query.range(offset, offset + limit - 1)
       }
 
       return query
     }
 
-    let { data, error, count } = await buildQuery("created_at")
+    let data
+    let error
+    let count
+
+    if (!hasRestrictedScope) {
+      ;({ data, error, count } = await buildQuery("created_at", true))
+    } else {
+      ;({ data, error } = await buildQuery("created_at", false))
+    }
 
     // Fallback for projects where dispatch_logs has no created_at column.
     if (error?.code === "42703") {
-      ;({ data, error, count } = await buildQuery("id"))
+      if (!hasRestrictedScope) {
+        ;({ data, error, count } = await buildQuery("id", true))
+      } else {
+        ;({ data, error } = await buildQuery("id", false))
+      }
     }
 
     if (error) {
@@ -63,7 +85,20 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ data: data ?? [], count: count ?? 0 })
+    if (!hasRestrictedScope) {
+      return NextResponse.json({ data: data ?? [], count: count ?? 0 })
+    }
+
+    const currentScheduleIds = await getCompanyScheduleIdSet(supabase, companyId)
+    const accessibleScheduleIdSet = new Set(accessibleScheduleIds)
+    const filteredLogs = ((data ?? []) as DispatchLogRow[]).filter((log) =>
+      canAccessDispatchLog(log.schedule_id, accessibleScheduleIdSet, currentScheduleIds)
+    )
+
+    return NextResponse.json({
+      data: filteredLogs.slice(offset, offset + limit),
+      count: filteredLogs.length,
+    })
   } catch (error) {
     if (isAuthContextError(error)) {
       return NextResponse.json(

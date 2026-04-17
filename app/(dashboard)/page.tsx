@@ -6,6 +6,7 @@ import { StatsCards } from "@/components/dashboard/stats-cards"
 import { DispatchChart } from "@/components/dashboard/dispatch-chart"
 import { DispatchStatusPie } from "@/components/dashboard/dispatch-status-pie"
 import { RecentDispatches } from "@/components/dashboard/recent-dispatches"
+import { DispatchCalendar } from "@/components/dashboard/dispatch-calendar"
 import { Skeleton } from "@/components/ui/skeleton"
 
 type FetchError = Error & { status?: number }
@@ -91,6 +92,8 @@ export default function DashboardPage() {
         ) : (
           <RecentDispatches logs={logsData?.data ?? []} />
         )}
+
+        <DispatchCalendar />
       </div>
     </div>
   )

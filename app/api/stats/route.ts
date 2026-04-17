@@ -15,8 +15,13 @@ import {
   getDispatchLogEffectiveDate,
   getDispatchLogOutcome,
 } from "@/lib/dispatch-log"
+import {
+  canAccessDispatchLog,
+  getCompanyScheduleIdSet,
+} from "@/lib/dispatch-log-visibility"
 
 type DispatchLogStatsRecord = {
+  schedule_id?: string | null
   status?: string | null
   error_message?: string | null
   created_at?: string | null
@@ -79,21 +84,10 @@ export async function GET() {
 
              return query
            })()
-    const dispatchLogsQuery =
-      hasRestrictedScope && accessibleScheduleIds.length === 0
-        ? Promise.resolve({ data: [], error: null } as const)
-        : (() => {
-            let query = supabase
-              .from("dispatch_logs")
-              .select("*")
-              .eq("company_id", companyId)
-
-            if (hasRestrictedScope) {
-              query = query.in("schedule_id", accessibleScheduleIds)
-            }
-
-            return query
-          })()
+    const dispatchLogsQuery = supabase
+      .from("dispatch_logs")
+      .select("*")
+      .eq("company_id", companyId)
 
     const [reportsRes, contactsRes, dispatchLogsRes, settingsRes, botInstancesRes] =
       await Promise.all([
@@ -138,7 +132,16 @@ export async function GET() {
     const totalReports = reportsRes.count ?? 0
     const activeContacts = contactsRes.count ?? 0
 
-    const dispatchLogs = (dispatchLogsRes.data ?? []) as DispatchLogStatsRecord[]
+    let dispatchLogs = (dispatchLogsRes.data ?? []) as DispatchLogStatsRecord[]
+
+    if (hasRestrictedScope) {
+      const currentScheduleIds = await getCompanyScheduleIdSet(supabase, companyId)
+      const accessibleScheduleIdSet = new Set(accessibleScheduleIds)
+      dispatchLogs = dispatchLogs.filter((log) =>
+        canAccessDispatchLog(log.schedule_id, accessibleScheduleIdSet, currentScheduleIds)
+      )
+    }
+
     const logsWithDates = dispatchLogs.flatMap((log) => {
       const effectiveDate = getDispatchLogEffectiveDate(log)
       if (!effectiveDate) {
