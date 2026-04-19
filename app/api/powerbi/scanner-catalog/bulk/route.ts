@@ -10,10 +10,13 @@ import {
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await getRequestContext()
-    const { companyId } = context
-    const supabase = createClient()
-    const scope = await getWorkspaceAccessScope(supabase, context)
+    const catalogSecret = request.headers.get("x-catalog-secret")
+    const expectedSecret = process.env.CATALOG_SYNC_SECRET
+    const isInternalRequest =
+      !!catalogSecret &&
+      !!expectedSecret &&
+      catalogSecret === expectedSecret
+
     const body = await request.json()
     const workspaceId = String(body?.workspaceId ?? "").trim()
 
@@ -24,35 +27,61 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!isWorkspaceAllowed(scope, { pbiWorkspaceId: workspaceId })) {
-      return NextResponse.json(
-        { error: "Workspace nao permitido para este usuario" },
-        { status: 403 }
-      )
-    }
+    const supabase = createClient()
+    let companyId: string
 
-    if (scope.datasetRestricted) {
-      return NextResponse.json(
-        {
-          error:
-            "A importacao em lote do workspace nao esta disponivel quando o usuario possui acesso restrito por dataset.",
-        },
-        { status: 403 }
-      )
-    }
+    if (isInternalRequest) {
+      // Modo interno (n8n / cron): resolve company_id a partir do workspace
+      const { data: workspace } = await supabase
+        .from("workspaces")
+        .select("company_id")
+        .eq("pbi_workspace_id", workspaceId)
+        .single()
 
-    const { data: workspace } = await supabase
-      .from("workspaces")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("pbi_workspace_id", workspaceId)
-      .single()
+      if (!workspace?.company_id) {
+        return NextResponse.json(
+          { error: "Workspace nao encontrado ou sem empresa vinculada" },
+          { status: 404 }
+        )
+      }
 
-    if (!workspace) {
-      return NextResponse.json(
-        { error: "Workspace nao pertence a empresa do usuario" },
-        { status: 403 }
-      )
+      companyId = workspace.company_id
+    } else {
+      // Modo autenticado: valida sessao, permissoes e escopo do usuario
+      const context = await getRequestContext()
+      companyId = context.companyId
+      const scope = await getWorkspaceAccessScope(supabase, context)
+
+      if (!isWorkspaceAllowed(scope, { pbiWorkspaceId: workspaceId })) {
+        return NextResponse.json(
+          { error: "Workspace nao permitido para este usuario" },
+          { status: 403 }
+        )
+      }
+
+      if (scope.datasetRestricted) {
+        return NextResponse.json(
+          {
+            error:
+              "A importacao em lote do workspace nao esta disponivel quando o usuario possui acesso restrito por dataset.",
+          },
+          { status: 403 }
+        )
+      }
+
+      const { data: workspace } = await supabase
+        .from("workspaces")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("pbi_workspace_id", workspaceId)
+        .single()
+
+      if (!workspace) {
+        return NextResponse.json(
+          { error: "Workspace nao pertence a empresa do usuario" },
+          { status: 403 }
+        )
+      }
     }
 
     const token = await getAccessToken()
