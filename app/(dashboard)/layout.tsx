@@ -3,6 +3,7 @@ import { AppSidebar } from "@/components/dashboard/sidebar-nav"
 import { TabSessionGuard } from "@/components/auth/tab-session-guard"
 import { createClient } from "@/lib/supabase/server"
 import { PowerBIAutoSyncWatcher } from "@/components/powerbi/auto-sync-watcher"
+import { FloatingChatLauncher } from "@/components/chat/floating-chat-launcher"
 
 export default async function DashboardLayout({
   children,
@@ -35,7 +36,10 @@ export default async function DashboardLayout({
       <PowerBIAutoSyncWatcher />
       <SidebarProvider>
         <AppSidebar currentUser={currentUser} />
-        <SidebarInset>{children}</SidebarInset>
+        <SidebarInset>
+          {children}
+          <FloatingChatLauncher />
+        </SidebarInset>
       </SidebarProvider>
     </TabSessionGuard>
   )

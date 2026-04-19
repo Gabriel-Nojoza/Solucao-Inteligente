@@ -10,10 +10,13 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await getRequestContext()
-    const { companyId } = context
-    const supabase = createClient()
-    const scope = await getWorkspaceAccessScope(supabase, context)
+    const catalogSecret = request.headers.get("x-catalog-secret")
+    const expectedSecret = process.env.CATALOG_SYNC_SECRET
+    const isInternalRequest =
+      !!catalogSecret &&
+      !!expectedSecret &&
+      catalogSecret === expectedSecret
+
     const { searchParams } = new URL(request.url)
     const datasetId = searchParams.get("datasetId")?.trim()
 
@@ -24,11 +27,29 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!isDatasetAllowed(scope, datasetId)) {
-      return NextResponse.json(
-        { error: "Dataset nao permitido para este usuario." },
-        { status: 403 }
-      )
+    let companyId: string
+
+    if (isInternalRequest) {
+      const internalCompanyId = searchParams.get("companyId")?.trim()
+      if (!internalCompanyId) {
+        return NextResponse.json(
+          { error: "companyId obrigatorio para acesso interno" },
+          { status: 400 }
+        )
+      }
+      companyId = internalCompanyId
+    } else {
+      const context = await getRequestContext()
+      companyId = context.companyId
+      const supabase = createClient()
+      const scope = await getWorkspaceAccessScope(supabase, context)
+
+      if (!isDatasetAllowed(scope, datasetId)) {
+        return NextResponse.json(
+          { error: "Dataset nao permitido para este usuario." },
+          { status: 403 }
+        )
+      }
     }
 
     const catalogs = await getCatalogMap(companyId)

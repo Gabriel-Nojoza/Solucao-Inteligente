@@ -64,7 +64,7 @@ async function getUserSettingsSnapshot(
       .from("company_settings")
       .select("key, value")
       .eq("company_id", companyId)
-      .in("key", ["powerbi", "n8n"]),
+      .in("key", ["powerbi", "n8n", "chat_ia"]),
   ])
 
   if (companyErr) throw companyErr
@@ -78,6 +78,7 @@ async function getUserSettingsSnapshot(
     company_name: company?.name ?? "",
     powerbi: settingsMap.get("powerbi"),
     n8n: settingsMap.get("n8n"),
+    chat_ia: settingsMap.get("chat_ia"),
   }
 }
 
@@ -521,6 +522,7 @@ export async function PUT(request: Request) {
       company_name,
       powerbi,
       n8n,
+      chat_ia,
       selected_pbi_workspace_ids,
       selected_pbi_dataset_access,
       selected_pbi_dataset_ids,
@@ -646,6 +648,19 @@ export async function PUT(request: Request) {
               value: {
                 webhook_url: n8nWebhookUrl,
                 callback_secret: n8nCallbackSecret,
+                chat_webhook_url: String(n8n?.chat_webhook_url ?? "").trim(),
+              },
+              updated_at: new Date().toISOString(),
+            },
+            {
+              company_id: targetCompanyId,
+              key: "chat_ia",
+              value: {
+                enabled: chat_ia?.enabled === true,
+                workspace_id: String(chat_ia?.workspace_id ?? "").trim(),
+                dataset_id: String(chat_ia?.dataset_id ?? "").trim(),
+                dataset_name: String(chat_ia?.dataset_name ?? "").trim(),
+                webhook_url: String(chat_ia?.webhook_url ?? "").trim(),
               },
               updated_at: new Date().toISOString(),
             },

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import useSWR, { mutate } from "swr"
-import { Plus, Pencil, Trash2, Shield, User, Loader2, Eye, EyeOff, Database, AlertCircle } from "lucide-react"
+import { Plus, Pencil, Trash2, Shield, User, Loader2, Eye, EyeOff, Database, AlertCircle, Bot } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { formatDatePtBr } from "@/lib/datetime"
@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,14 @@ interface UserData {
   n8n?: {
     webhook_url?: string
     callback_secret?: string
+    chat_webhook_url?: string
+  }
+  chat_ia?: {
+    enabled?: boolean
+    workspace_id?: string
+    dataset_id?: string
+    dataset_name?: string
+    webhook_url?: string
   }
   workspace_access_configured?: boolean
   dataset_access_configured?: boolean
@@ -122,6 +131,12 @@ export default function UsersPage() {
   const [formPbiClientSecret, setFormPbiClientSecret] = useState("")
   const [formN8nWebhookUrl, setFormN8nWebhookUrl] = useState("")
   const [formN8nCallbackSecret, setFormN8nCallbackSecret] = useState("")
+  const [formN8nChatWebhookUrl, setFormN8nChatWebhookUrl] = useState("")
+  const [formChatIaEnabled, setFormChatIaEnabled] = useState(false)
+  const [formChatIaWorkspaceId, setFormChatIaWorkspaceId] = useState("")
+  const [formChatIaDatasetId, setFormChatIaDatasetId] = useState("")
+  const [formChatIaDatasetName, setFormChatIaDatasetName] = useState("")
+  const [formChatIaWebhookUrl, setFormChatIaWebhookUrl] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -162,6 +177,12 @@ export default function UsersPage() {
     setFormPbiClientSecret("")
     setFormN8nWebhookUrl("")
     setFormN8nCallbackSecret("")
+    setFormN8nChatWebhookUrl("")
+    setFormChatIaEnabled(false)
+    setFormChatIaWorkspaceId("")
+    setFormChatIaDatasetId("")
+    setFormChatIaDatasetName("")
+    setFormChatIaWebhookUrl("")
     setLoadingEditDetails(false)
     setPowerbiPreview(null)
       setPowerbiPreviewError(null)
@@ -207,6 +228,12 @@ export default function UsersPage() {
       setFormPbiClientSecret(details.powerbi?.client_secret || "")
       setFormN8nWebhookUrl(details.n8n?.webhook_url || "")
       setFormN8nCallbackSecret(details.n8n?.callback_secret || "")
+      setFormN8nChatWebhookUrl(details.n8n?.chat_webhook_url || "")
+      setFormChatIaEnabled(details.chat_ia?.enabled ?? false)
+      setFormChatIaWorkspaceId(details.chat_ia?.workspace_id ?? "")
+      setFormChatIaDatasetId(details.chat_ia?.dataset_id ?? "")
+      setFormChatIaDatasetName(details.chat_ia?.dataset_name ?? "")
+      setFormChatIaWebhookUrl(details.chat_ia?.webhook_url ?? "")
       setWorkspaceOptions(details.available_workspaces || [])
       setSelectedPbiWorkspaceIds(details.selected_pbi_workspace_ids || [])
       setSelectedPbiDatasetIds(details.selected_pbi_dataset_ids || [])
@@ -397,6 +424,17 @@ export default function UsersPage() {
             ? {
                 webhook_url: formN8nWebhookUrl,
                 callback_secret: formN8nCallbackSecret,
+                chat_webhook_url: formN8nChatWebhookUrl,
+              }
+            : undefined,
+        chat_ia:
+          formRole === "client"
+            ? {
+                enabled: formChatIaEnabled,
+                workspace_id: formChatIaWorkspaceId,
+                dataset_id: formChatIaDatasetId,
+                dataset_name: formChatIaDatasetName,
+                webhook_url: formChatIaWebhookUrl,
               }
             : undefined,
         selected_pbi_workspace_ids:
@@ -941,7 +979,121 @@ export default function UsersPage() {
                           placeholder="Segredo usado pelo n8n para callbacks e envio"
                         />
                       </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Chat IA — Webhook URL</Label>
+                        <Input
+                          value={formN8nChatWebhookUrl}
+                          onChange={(e) => setFormN8nChatWebhookUrl(e.target.value)}
+                          placeholder="https://n8n.dominio.com/webhook/dashpro-chat"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Deixe vazio para usar OpenAI diretamente via OPENAI_API_KEY.
+                        </p>
+                      </div>
                     </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/60 p-3 md:col-span-2">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Bot className="size-4 text-primary" />
+                        <p className="text-sm font-medium">Chat IA</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="chat-ia-enabled" className="text-xs text-muted-foreground">
+                          {formChatIaEnabled ? "Ativado" : "Desativado"}
+                        </Label>
+                        <Switch
+                          id="chat-ia-enabled"
+                          checked={formChatIaEnabled}
+                          onCheckedChange={setFormChatIaEnabled}
+                        />
+                      </div>
+                    </div>
+
+                    {formChatIaEnabled && (
+                      <div className="flex flex-col gap-3">
+                        <p className="text-xs text-muted-foreground">
+                          Selecione o workspace e dataset padrao que o cliente vera ao abrir o chat.
+                        </p>
+
+                        <div className="flex flex-col gap-2">
+                          <Label>Workspace</Label>
+                          {workspaceOptions.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              Valide as credenciais do Power BI para carregar os workspaces.
+                            </p>
+                          ) : (
+                            <Select
+                              value={formChatIaWorkspaceId}
+                              onValueChange={(v) => {
+                                setFormChatIaWorkspaceId(v)
+                                setFormChatIaDatasetId("")
+                                setFormChatIaDatasetName("")
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione o workspace" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {workspaceOptions.map((ws) => (
+                                  <SelectItem key={ws.id} value={ws.id}>
+                                    {ws.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+
+                        {formChatIaWorkspaceId && (
+                          <div className="flex flex-col gap-2">
+                            <Label>Dataset</Label>
+                            {(() => {
+                              const ws = workspaceOptions.find((w) => w.id === formChatIaWorkspaceId)
+                              const datasets = Array.isArray(ws?.datasets) ? ws.datasets : []
+                              return datasets.length === 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Nenhum dataset encontrado neste workspace.
+                                </p>
+                              ) : (
+                                <Select
+                                  value={formChatIaDatasetId}
+                                  onValueChange={(v) => {
+                                    const ds = datasets.find((d) => d.id === v)
+                                    setFormChatIaDatasetId(v)
+                                    setFormChatIaDatasetName(ds?.name ?? "")
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Selecione o dataset" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {datasets.map((ds) => (
+                                      <SelectItem key={ds.id} value={ds.id}>
+                                        {ds.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )
+                            })()}
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-2">
+                          <Label>Webhook URL especifico (opcional)</Label>
+                          <Input
+                            value={formChatIaWebhookUrl}
+                            onChange={(e) => setFormChatIaWebhookUrl(e.target.value)}
+                            placeholder="Deixe vazio para usar o webhook do N8N ou OpenAI"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Sobrescreve o webhook do N8N para este cliente. Deixe vazio para usar o padrao.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}

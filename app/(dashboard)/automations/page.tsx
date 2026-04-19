@@ -683,7 +683,7 @@ export default function AutomationsPage() {
             onClick={() => setActiveTab("builder")}
           >
             <Database className="size-3" />
-            <span className="hidden sm:inline">Query Builder</span>
+            <span className="hidden sm:inline">Construtor de Query</span>
             <span className="sm:hidden">Builder</span>
           </Button>
 

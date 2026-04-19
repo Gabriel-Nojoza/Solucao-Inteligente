@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:turbo": "next dev",
     "dev:all": "concurrently -n APP,BOT -c blue,green \"pnpm dev\" \"pnpm --dir services/whatsapp-bot dev\"",
     "build": "next build",
     "start": "next start",

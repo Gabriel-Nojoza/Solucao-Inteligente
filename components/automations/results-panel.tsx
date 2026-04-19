@@ -171,7 +171,7 @@ export function ResultsPanel({
               disabled={!daxQuery || daxQuery.startsWith("--")}
             >
               <Copy className="size-3" />
-              COPY
+              COPIAR
             </Button>
           </div>
         </div>
@@ -276,7 +276,7 @@ export function ResultsPanel({
           <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground">
             <Terminal className="mb-2 size-10 opacity-30" />
             <p className="text-xs font-medium uppercase tracking-wider">
-              No Data / Waiting Execution
+              Aguardando execucao
             </p>
           </div>
         )}

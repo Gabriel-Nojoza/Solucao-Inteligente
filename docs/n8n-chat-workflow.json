@@ -1,0 +1,194 @@
+{
+  "name": "DashPro - Chat IA Power BI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dashpro-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Receber Pergunta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "dashpro-chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrai e valida os dados da requisição\nconst body = $input.first().json.body || $input.first().json;\n\nconst question = (body.question || '').trim();\nconst metadata = body.metadata || { tables: [], columns: [], measures: [] };\nconst conversationHistory = Array.isArray(body.conversationHistory) ? body.conversationHistory : [];\nconst todayDate = body.todayDate || new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\nif (!question) {\n  throw new Error('Pergunta não pode ser vazia');\n}\n\n// Constrói o schema do dataset para o prompt\nconst schemaLines = [];\nconst tables = (metadata.tables || []).filter(t => !t.isHidden);\nconst columns = (metadata.columns || []).filter(c => !c.isHidden);\nconst measures = (metadata.measures || []).filter(m => !m.isHidden);\n\n// Junta tabelas explícitas + tabelas implícitas de colunas/medidas\nconst allTableNames = new Set([\n  ...tables.map(t => t.name),\n  ...columns.map(c => c.tableName),\n  ...measures.map(m => m.tableName)\n]);\n\nfor (const tableName of allTableNames) {\n  const cols = columns\n    .filter(c => c.tableName === tableName)\n    .map(c => `      - ${c.columnName} (${c.dataType})`);\n  const meas = measures\n    .filter(m => m.tableName === tableName)\n    .map(m => `      - [${m.measureName}]`);\n\n  schemaLines.push(`  Tabela: '${tableName}'`);\n  if (cols.length > 0) {\n    schemaLines.push('    Colunas:');\n    schemaLines.push(...cols);\n  }\n  if (meas.length > 0) {\n    schemaLines.push('    Medidas:');\n    schemaLines.push(...meas);\n  }\n}\n\nconst schemaContext = schemaLines.join('\\n') || '(Nenhum schema disponível)';\n\n// Monta as mensagens para OpenAI\nconst systemPrompt = `Você é um especialista em Power BI e DAX. Seu papel é interpretar perguntas em linguagem natural e gerar consultas DAX válidas.\n\nDATA DE HOJE: ${todayDate}\n\n=== SCHEMA DO DATASET ===\n${schemaContext}\n=== FIM DO SCHEMA ===\n\nREGRAS OBRIGATÓRIAS:\n1. Use APENAS tabelas, colunas e medidas que existem no schema acima.\n2. Formato de coluna: 'NomeDaTabela'[NomeDaColuna]\n3. Formato de medida: [NomeDaMedida]\n4. Para filtros de data, use TODAY(), DATE(ano, mes, dia) ou DATEVALUE().\n5. Sempre envolva medidas com COALESCE([Medida], 0).\n6. Para totais: EVALUATE ROW(\"Nome\", COALESCE(CALCULATE([Medida]), 0))\n7. Para agrupamentos: EVALUATE TOPN(100, SUMMARIZECOLUMNS(...), [Medida], DESC)\n8. Para listagens: EVALUATE TOPN(100, SELECTCOLUMNS('Tabela', ...), ...)\n9. Confidence: high=pergunta clara; medium=interpretação razoável; low=ambíguo.\n\nRETORNE APENAS JSON PURO (sem markdown, sem backticks):\n{\n  \"selectedColumns\": [{\"tableName\": \"string\", \"columnName\": \"string\"}],\n  \"selectedMeasures\": [{\"tableName\": \"string\", \"measureName\": \"string\"}],\n  \"filters\": [{\"tableName\": \"string\", \"columnName\": \"string\", \"operator\": \"eq|neq|gt|lt|gte|lte|contains|startswith\", \"value\": \"string\", \"valueTo\": \"\", \"dataType\": \"string\"}],\n  \"daxQuery\": \"EVALUATE ...\",\n  \"explanation\": \"Explicação em português\",\n  \"confidence\": \"high|medium|low\"\n}`;\n\nconst messages = [\n  { role: 'system', content: systemPrompt },\n  // Inclui últimas 6 mensagens do histórico\n  ...conversationHistory.slice(-6).map(m => ({ role: m.role, content: m.content })),\n  { role: 'user', content: question }\n];\n\nreturn {\n  question,\n  messages,\n  metadata,\n  todayDate,\n  hasSchema: allTableNames.size > 0\n};"
+      },
+      "id": "prepare-prompt",
+      "name": "Preparar Prompt e Contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "apiKey",
+        "resource": "chat",
+        "operation": "complete",
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list"
+        },
+        "messages": {
+          "values": "={{ $json.messages }}"
+        },
+        "simplifyOutput": true,
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 1500,
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "openai-generate",
+      "name": "OpenAI - Gerar Query DAX",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.7,
+      "position": [680, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credential-id",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Valida e parseia a resposta da OpenAI\nconst rawResponse = $input.first().json.content || $input.first().json.message?.content || '';\nconst metadataNode = $('Preparar Prompt e Contexto').first().json;\nconst metadata = metadataNode.metadata || { columns: [], measures: [] };\n\nlet plan;\ntry {\n  const cleaned = rawResponse\n    .trim()\n    .replace(/^```(?:json)?\\n?/i, '')\n    .replace(/\\n?```$/i, '')\n    .trim();\n  plan = JSON.parse(cleaned);\n} catch (e) {\n  return {\n    valid: false,\n    error: 'Resposta da IA não é JSON válido: ' + e.message,\n    rawResponse\n  };\n}\n\nif (!plan.daxQuery || !String(plan.daxQuery).trim().toUpperCase().startsWith('EVALUATE')) {\n  return {\n    valid: false,\n    error: 'Query DAX inválida: deve começar com EVALUATE',\n    rawResponse\n  };\n}\n\n// Validação de colunas/medidas contra o schema\nconst columnSet = new Set(\n  (metadata.columns || []).map(c => `${c.tableName}::${c.columnName}`)\n);\nconst measureSet = new Set(\n  (metadata.measures || []).map(m => m.measureName)\n);\n\nconst errors = [];\n\nfor (const col of (plan.selectedColumns || [])) {\n  if (col.tableName && col.columnName && !columnSet.has(`${col.tableName}::${col.columnName}`)) {\n    errors.push(`Coluna inexistente: '${col.tableName}'[${col.columnName}]`);\n  }\n}\n\nfor (const meas of (plan.selectedMeasures || [])) {\n  if (meas.measureName && !measureSet.has(meas.measureName)) {\n    errors.push(`Medida inexistente: [${meas.measureName}]`);\n  }\n}\n\nif (errors.length > 0 && metadata.columns?.length > 0) {\n  return {\n    valid: false,\n    error: errors.join('; '),\n    plan,\n    rawResponse\n  };\n}\n\nreturn {\n  valid: true,\n  plan,\n  rawResponse\n};"
+      },
+      "id": "validate-plan",
+      "name": "Validar Plano de Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-validity",
+      "name": "Query Válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Query válida - formata resposta de sucesso\nconst validationResult = $input.first().json;\nconst plan = validationResult.plan;\n\nreturn {\n  success: true,\n  selectedColumns: plan.selectedColumns || [],\n  selectedMeasures: plan.selectedMeasures || [],\n  filters: plan.filters || [],\n  daxQuery: plan.daxQuery,\n  explanation: plan.explanation || 'Consulta gerada com sucesso.',\n  confidence: plan.confidence || 'medium'\n};"
+      },
+      "id": "format-success",
+      "name": "Formatar Resposta de Sucesso",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Query inválida - retorna erro com detalhes\nconst validationResult = $input.first().json;\n\nreturn {\n  success: false,\n  error: validationResult.error || 'Não foi possível gerar uma query válida',\n  explanation: `Não consegui interpretar sua pergunta com precisão. Erro: ${validationResult.error}`,\n  confidence: 'low',\n  daxQuery: validationResult.plan?.daxQuery || null,\n  selectedColumns: [],\n  selectedMeasures: [],\n  filters: []\n};"
+      },
+      "id": "format-error",
+      "name": "Formatar Resposta de Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-webhook",
+      "name": "Responder ao Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1560, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Receber Pergunta": {
+      "main": [
+        [{ "node": "Preparar Prompt e Contexto", "type": "main", "index": 0 }]
+      ]
+    },
+    "Preparar Prompt e Contexto": {
+      "main": [
+        [{ "node": "OpenAI - Gerar Query DAX", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI - Gerar Query DAX": {
+      "main": [
+        [{ "node": "Validar Plano de Query", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validar Plano de Query": {
+      "main": [
+        [{ "node": "Query Válida?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Query Válida?": {
+      "main": [
+        [{ "node": "Formatar Resposta de Sucesso", "type": "main", "index": 0 }],
+        [{ "node": "Formatar Resposta de Erro", "type": "main", "index": 0 }]
+      ]
+    },
+    "Formatar Resposta de Sucesso": {
+      "main": [
+        [{ "node": "Responder ao Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Formatar Resposta de Erro": {
+      "main": [
+        [{ "node": "Responder ao Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    { "createdAt": "2024-01-01T00:00:00.000Z", "updatedAt": "2024-01-01T00:00:00.000Z", "id": "dashpro-chat", "name": "DashPro Chat IA" }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

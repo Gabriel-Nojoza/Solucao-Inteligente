@@ -9,7 +9,6 @@ import {
   Users,
   Clock,
   ScrollText,
-  Workflow,
   Moon,
   Sun,
   LogOut,

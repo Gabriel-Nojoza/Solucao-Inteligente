@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   Users,
+  Settings,
   Moon,
   Sun,
   LogOut,
@@ -35,6 +36,7 @@ import { clearTabSessionMarker } from "@/lib/supabase/tab-session"
 const adminNav = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { title: "Usuarios", href: "/admin/users", icon: Users },
+  { title: "Configuracoes", href: "/admin/settings", icon: Settings },
 ]
 
 type AdminSidebarProps = {
