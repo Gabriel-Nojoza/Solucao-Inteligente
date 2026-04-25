@@ -21,7 +21,7 @@ function escapeHtml(value: string) {
 export function sanitizeFileName(value: string) {
   return value
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-zA-Z0-9-_ ]/g, "")
     .trim()
     .replace(/\s+/g, "-");
@@ -398,7 +398,6 @@ function buildPowerBICaptureHtml(input: {
 
           await syncFrameToActivePage()
 
-          // Scroll through the page to trigger lazy rendering of rows in tall reports
           if (frameNode) {
             const frameHeight = frameNode.offsetHeight
             if (frameHeight > 2000) {
@@ -592,11 +591,9 @@ function getPowerBiPdfPreset(profile: PowerBiPdfProfile) {
   if (profile === "mobile") {
     return {
       viewportWidth,
-      // Altura inicial suficiente para o Power BI renderizar todo o conteúdo
       viewportHeight,
       deviceScaleFactor,
       pageWidthMm: 120,
-      // undefined => autoGrowPageHeight calcula a altura real do conteúdo
       pageHeightMm: undefined,
       pageMarginMm: 0,
     };
@@ -604,11 +601,9 @@ function getPowerBiPdfPreset(profile: PowerBiPdfProfile) {
 
   return {
     viewportWidth,
-    // Altura inicial suficiente para relatórios longos como JA_Geral
     viewportHeight,
     deviceScaleFactor,
     pageWidthMm: 120,
-    // undefined => autoGrowPageHeight calcula a altura real do conteúdo
     pageHeightMm: undefined,
     pageMarginMm: 0,
   };
@@ -710,11 +705,10 @@ export async function exportPowerBIReportDocument(input: {
       }),
       contentType: "application/pdf",
       extension: "pdf",
-    } satisfies PowerBiExportedDocument
-
+    } satisfies PowerBiExportedDocument;
   }
 
-  const screenshotPayloads: Buffer[] = []
+  const screenshotPayloads: Buffer[] = [];
 
   for (const pageName of selectedPageNames) {
     const html = buildPowerBICaptureHtml({
@@ -732,7 +726,6 @@ export async function exportPowerBIReportDocument(input: {
       deviceScaleFactor: preset.deviceScaleFactor,
       screenshotScale: 1,
       forceExpandScrollable: false,
-      // Captura por segmentos de scroll para relatórios muito longos
       scrollableSegmentationMode: "segments-only",
     });
 
@@ -743,7 +736,6 @@ export async function exportPowerBIReportDocument(input: {
     buffer: await renderScreenshotPayloadsToPdf(screenshotPayloads, {
       pdfTimeoutMs: 180000,
       pageWidthMm: preset.pageWidthMm,
-      // pageHeightMm omitido: autoGrowPageHeight calcula a altura exata de cada página
       pageMarginMm: preset.pageMarginMm,
       autoGrowPageHeight: true,
       maxPageHeightMm: 80000,

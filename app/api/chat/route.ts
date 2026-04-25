@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import { getAccessToken, getDatasetMetadata, listDatasets, executeDAXQuery } from "@/lib/powerbi"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
+import {
+  buildDisabledExpiredChatIASettingsValue,
+  normalizeChatIASettings,
+} from "@/lib/chat-ia-config"
 import { getRequestContext } from "@/lib/tenant"
 import { getWorkspaceAccessScope, isDatasetAllowed, isWorkspaceAllowed } from "@/lib/workspace-access"
 import { getCatalogMap } from "@/lib/automation-catalog"
@@ -130,27 +134,26 @@ async function callN8nChatWebhook(
 
 // ─── load n8n settings ────────────────────────────────────────────────────────
 
-async function getChatWebhookUrl(companyId: string): Promise<string | null> {
+async function getChatWebhookUrl(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  preferredWebhookUrl = ""
+): Promise<string | null> {
   try {
-    const supabase = createClient()
-
-    const { data: rows } = await supabase
-      .from("company_settings")
-      .select("key, value")
-      .eq("company_id", companyId)
-      .in("key", ["chat_ia", "n8n"])
-
-    const map = new Map(
-      (rows ?? []).map((r) => [r.key, r.value as Record<string, unknown>])
-    )
-
-    // Prioridade: chat_ia.webhook_url → n8n.chat_webhook_url
-    const chatIa = map.get("chat_ia")
-    if (typeof chatIa?.webhook_url === "string" && chatIa.webhook_url.trim()) {
-      return chatIa.webhook_url.trim()
+    if (preferredWebhookUrl) {
+      return preferredWebhookUrl
     }
 
-    const n8n = map.get("n8n")
+    const { data: row } = await supabase
+      .from("company_settings")
+      .select("value")
+      .eq("company_id", companyId)
+      .eq("key", "n8n")
+      .maybeSingle()
+
+    const n8n = row?.value as Record<string, unknown> | null
+
+    // Usa o webhook de chat configurado na chave n8n quando nao houver sobrescrita no chat_ia
     if (typeof n8n?.chat_webhook_url === "string" && n8n.chat_webhook_url.trim()) {
       return n8n.chat_webhook_url.trim()
     }
@@ -274,6 +277,50 @@ export async function POST(request: Request) {
     const body = (await request.json()) as ChatRequest
     const { question, datasetId, workspaceId, conversationHistory = [] } = body
 
+    const { data: chatSettingsRow } = await supabase
+      .from("company_settings")
+      .select("value")
+      .eq("company_id", companyId)
+      .eq("key", "chat_ia")
+      .maybeSingle()
+
+    const chatSettings = normalizeChatIASettings(chatSettingsRow?.value)
+    const chatIAIsManaged =
+      chatSettings.enabled ||
+      !!chatSettings.workspaceId ||
+      !!chatSettings.datasetId ||
+      !!chatSettings.webhookUrl ||
+      chatSettings.trialDays !== null ||
+      !!chatSettings.trialEndsAt
+
+    if (chatSettings.isExpired && chatSettings.enabled) {
+      await supabase
+        .from("company_settings")
+        .update({
+          value: buildDisabledExpiredChatIASettingsValue(chatSettingsRow?.value),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("company_id", companyId)
+        .eq("key", "chat_ia")
+    }
+
+    if (chatIAIsManaged && !chatSettings.effectiveEnabled) {
+      const answer = chatSettings.isExpired
+        ? "O periodo de teste do Chat IA expirou. Fale com o administrador para renovar o acesso."
+        : "O Chat IA esta desativado para esta empresa."
+
+      return NextResponse.json<ChatApiResponse>(
+        {
+          answer,
+          data: null,
+          daxQuery: null,
+          confidence: "low",
+          error: chatSettings.isExpired ? "Teste do Chat IA expirado" : "Chat IA desativado",
+        },
+        { status: 403 }
+      )
+    }
+
     if (!question?.trim()) {
       return NextResponse.json<ChatApiResponse>(
         { answer: "Por favor, faça uma pergunta.", data: null, daxQuery: null, confidence: "low" },
@@ -353,7 +400,11 @@ export async function POST(request: Request) {
     const messages = buildConversationMessages(systemPrompt, conversationHistory, question)
 
     // ── Verificar se n8n chat webhook está configurado ──
-    const n8nWebhookUrl = await getChatWebhookUrl(companyId)
+    const n8nWebhookUrl = await getChatWebhookUrl(
+      supabase,
+      companyId,
+      chatSettings.webhookUrl
+    )
 
     // ── Gerar plano de query (com retry) ──
     const plan = await generateQueryPlanWithRetry(

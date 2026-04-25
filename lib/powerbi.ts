@@ -4,6 +4,13 @@ import { getRequestContext } from "@/lib/tenant"
 
 const PBI_API_BASE = "https://api.powerbi.com/v1.0/myorg"
 
+type EmbedTokenCacheEntry = {
+  token: string
+  expiresAt: number
+}
+
+const embedTokenCache = new Map<string, EmbedTokenCacheEntry>()
+
 type ParsedPowerBiError = {
   code: string | null
   message: string
@@ -245,6 +252,14 @@ export async function generateReportEmbedToken(
   workspaceId: string,
   reportId: string
 ) {
+  const cacheKey = `${workspaceId}:${reportId}`
+  const SAFETY_MARGIN_MS = 5 * 60 * 1000
+
+  const cached = embedTokenCache.get(cacheKey)
+  if (cached && cached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return cached.token
+  }
+
   const response = await fetch(
     `${PBI_API_BASE}/groups/${workspaceId}/reports/${reportId}/GenerateToken`,
     {
@@ -264,12 +279,18 @@ export async function generateReportEmbedToken(
     await throwPowerBiApiError("Falha ao gerar token de exibicao do Power BI", response)
   }
 
-  const data = (await response.json()) as { token?: string | null }
+  const data = (await response.json()) as { token?: string | null; expiration?: string | null }
   const embedToken = typeof data.token === "string" ? data.token.trim() : ""
 
   if (!embedToken) {
     throw new Error("Power BI nao retornou token de exibicao para o relatorio")
   }
+
+  const expiresAt = data.expiration
+    ? Date.parse(data.expiration)
+    : Date.now() + 60 * 60 * 1000
+
+  embedTokenCache.set(cacheKey, { token: embedToken, expiresAt })
 
   return embedToken
 }

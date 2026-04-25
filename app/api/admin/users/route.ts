@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import {
+  buildChatIASettingsValue,
+  buildDisabledExpiredChatIASettingsValue,
+  normalizeChatIASettings,
+} from "@/lib/chat-ia-config"
 import { requireAdminContext } from "@/lib/tenant"
 import { listDatasets, listReports, listWorkspaces } from "@/lib/powerbi"
 import {
@@ -73,6 +78,24 @@ async function getUserSettingsSnapshot(
   const settingsMap = new Map(
     (settingsRows ?? []).map((row) => [row.key, row.value as Record<string, unknown>])
   )
+
+  const rawChatIA = settingsMap.get("chat_ia")
+  const chatIAConfig = normalizeChatIASettings(rawChatIA)
+
+  if (chatIAConfig.isExpired && chatIAConfig.enabled) {
+    const disabledChatIA = buildDisabledExpiredChatIASettingsValue(rawChatIA)
+
+    await supabase
+      .from("company_settings")
+      .update({
+        value: disabledChatIA,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("company_id", companyId)
+      .eq("key", "chat_ia")
+
+    settingsMap.set("chat_ia", disabledChatIA)
+  }
 
   return {
     company_name: company?.name ?? "",
@@ -295,7 +318,7 @@ export async function POST(request: Request) {
     const context = await requireAdminContext()
     const supabase = getAdminClient()
     const body = await request.json()
-    const { email, password, name, role, company_name, powerbi, n8n } = body
+    const { email, password, name, role, company_name, powerbi, n8n, chat_ia } = body
     const normalizedEmail = String(email ?? "").trim().toLowerCase()
     const normalizedPassword = String(password ?? "").trim()
     const normalizedName = String(name ?? "").trim()
@@ -383,6 +406,7 @@ export async function POST(request: Request) {
               value: {
                 webhook_url: n8nWebhookUrl,
                 callback_secret: n8nCallbackSecret,
+                chat_webhook_url: String(n8n?.chat_webhook_url ?? "").trim(),
               },
               updated_at: new Date().toISOString(),
             },
@@ -390,6 +414,12 @@ export async function POST(request: Request) {
               company_id: targetCompanyId,
               key: "general",
               value: { app_name: companyName, timezone: "America/Sao_Paulo" },
+              updated_at: new Date().toISOString(),
+            },
+            {
+              company_id: targetCompanyId,
+              key: "chat_ia",
+              value: buildChatIASettingsValue(chat_ia),
               updated_at: new Date().toISOString(),
             },
           ],
@@ -628,6 +658,13 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: message }, { status: 400 })
       }
 
+      const { data: existingChatIA } = await supabase
+        .from("company_settings")
+        .select("value")
+        .eq("company_id", targetCompanyId)
+        .eq("key", "chat_ia")
+        .maybeSingle()
+
       const { error: settingsErr } = await supabase
         .from("company_settings")
         .upsert(
@@ -655,13 +692,7 @@ export async function PUT(request: Request) {
             {
               company_id: targetCompanyId,
               key: "chat_ia",
-              value: {
-                enabled: chat_ia?.enabled === true,
-                workspace_id: String(chat_ia?.workspace_id ?? "").trim(),
-                dataset_id: String(chat_ia?.dataset_id ?? "").trim(),
-                dataset_name: String(chat_ia?.dataset_name ?? "").trim(),
-                webhook_url: String(chat_ia?.webhook_url ?? "").trim(),
-              },
+              value: buildChatIASettingsValue(chat_ia, existingChatIA?.value),
               updated_at: new Date().toISOString(),
             },
           ],
