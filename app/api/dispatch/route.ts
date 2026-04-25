@@ -29,6 +29,12 @@ import { getWorkspaceAccessScope } from "@/lib/workspace-access"
 import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
 import { getCompanyWhatsAppBotInstance } from "@/lib/whatsapp-bot-instances"
 
+const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function getDispatchLogTarget(contact: {
   phone?: string | null
   whatsapp_group_id?: string | null
@@ -435,6 +441,7 @@ export async function POST(request: NextRequest) {
 
     if (directPdfTargets.length > 0) {
       const pbiToken = await getAccessToken(companyId)
+      let exportCount = 0
 
       for (const [contactIndex, contact] of normalizedContacts.entries()) {
         for (const [reportIndex, target] of directPdfTargets.entries()) {
@@ -472,7 +479,10 @@ export async function POST(request: NextRequest) {
                 pageName,
                 pageIndex,
               })
-
+              if (exportCount > 0) {
+                  await sleep(EXPORT_DELAY_MS)
+                }
+                exportCount++
               const exportedFile = await exportPowerBIReportDocument({
                 token: pbiToken,
                 workspaceId: pbiWorkspaceId,
@@ -522,7 +532,7 @@ export async function POST(request: NextRequest) {
               selectedPageNames,
               pageName: target.config.pbi_page_name,
             })
-
+            
             const exportedFile = await exportPowerBIReportDocument({
               token: pbiToken,
               workspaceId: pbiWorkspaceId,
