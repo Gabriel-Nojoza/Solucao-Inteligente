@@ -10,6 +10,7 @@ type EmbedTokenCacheEntry = {
 }
 
 const embedTokenCache = new Map<string, EmbedTokenCacheEntry>()
+const accessTokenCache = new Map<string, EmbedTokenCacheEntry>()
 
 type ParsedPowerBiError = {
   code: string | null
@@ -164,6 +165,14 @@ export async function getAccessToken(companyId?: string): Promise<string> {
     )
   }
 
+  const cacheKey = `${config.tenant_id}:${config.client_id}`
+  const SAFETY_MARGIN_MS = 5 * 60 * 1000
+
+  const cached = accessTokenCache.get(cacheKey)
+  if (cached && cached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return cached.token
+  }
+
   const tokenUrl = `https://login.microsoftonline.com/${config.tenant_id}/oauth2/v2.0/token`
 
   const body = new URLSearchParams({
@@ -185,7 +194,13 @@ export async function getAccessToken(companyId?: string): Promise<string> {
   }
 
   const json = await res.json()
-  return json.access_token
+  const accessToken = String(json.access_token ?? "")
+  const expiresIn = typeof json.expires_in === "number" ? json.expires_in : 3600
+  const expiresAt = Date.now() + expiresIn * 1000
+
+  accessTokenCache.set(cacheKey, { token: accessToken, expiresAt })
+
+  return accessToken
 }
 
 export async function listWorkspaces(token: string) {
