@@ -2,6 +2,7 @@
 
 import useSWR from "swr"
 import Link from "next/link"
+import { useState } from "react"
 import {
   Users,
   Settings,
@@ -16,6 +17,8 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  ArrowRightLeft,
+  Loader2,
 } from "lucide-react"
 import {
   BarChart,
@@ -34,6 +37,23 @@ import { PageHeader } from "@/components/dashboard/page-header"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { CompanyStatItem } from "@/app/api/admin/company-stats/route"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -151,6 +171,53 @@ export default function AdminDashboardPage() {
   const recentUsers: AdminUser[] = Array.isArray(usersRaw) ? usersRaw.slice(0, 6) : []
   const companies: CompanyStatItem[] = Array.isArray(companyStats) ? companyStats : []
 
+  // Estado do modal de transferência
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferSource, setTransferSource] = useState("")
+  const [transferTarget, setTransferTarget] = useState("")
+  const [transferLoading, setTransferLoading] = useState(false)
+  const [transferResult, setTransferResult] = useState<{
+    success?: boolean
+    message?: string
+    copiedWorkspaces?: number
+    copiedReports?: number
+  } | null>(null)
+
+  async function handleTransfer() {
+    if (!transferSource || !transferTarget) return
+    setTransferLoading(true)
+    setTransferResult(null)
+    try {
+      const res = await fetch("/api/admin/transfer-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceCompanyId: transferSource, targetCompanyId: transferTarget }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setTransferResult({ success: false, message: data.error ?? "Erro ao transferir" })
+      } else {
+        setTransferResult({
+          success: true,
+          message: `Transferencia concluida: ${data.copiedWorkspaces} workspace(s) e ${data.copiedReports} relatorio(s) copiados para "${data.targetName}".`,
+          copiedWorkspaces: data.copiedWorkspaces,
+          copiedReports: data.copiedReports,
+        })
+      }
+    } catch {
+      setTransferResult({ success: false, message: "Erro de conexao. Tente novamente." })
+    } finally {
+      setTransferLoading(false)
+    }
+  }
+
+  function openTransfer() {
+    setTransferSource("")
+    setTransferTarget("")
+    setTransferResult(null)
+    setTransferOpen(true)
+  }
+
   // Dados para o grafico de barras (relatorios por empresa)
   const reportBarData = companies.map((c, i) => ({
     name: c.companyName.length > 14 ? c.companyName.slice(0, 14) + "…" : c.companyName,
@@ -203,12 +270,18 @@ export default function AdminDashboardPage() {
         title="Painel Administrativo"
         description="Gerencie usuarios e configuracoes do sistema"
         action={
-          <Button asChild size="sm">
-            <Link href="/admin/users">
-              <UserPlus className="mr-2 size-4" />
-              Novo Usuario
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={openTransfer}>
+              <ArrowRightLeft className="mr-2 size-4" />
+              Transferir Relatorios
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/admin/users">
+                <UserPlus className="mr-2 size-4" />
+                Novo Usuario
+              </Link>
+            </Button>
+          </div>
         }
       />
 
@@ -544,6 +617,90 @@ export default function AdminDashboardPage() {
         </div>
 
       </div>
+
+      {/* Modal de transferência de relatórios */}
+      <Dialog open={transferOpen} onOpenChange={(open) => { setTransferOpen(open); if (!open) setTransferResult(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="size-4" />
+              Transferir Relatorios
+            </DialogTitle>
+            <DialogDescription>
+              Copia os workspaces e relatorios de uma empresa para outra. Nao remove os dados da origem.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label>Empresa de origem</Label>
+              <Select value={transferSource} onValueChange={(v) => { setTransferSource(v); setTransferResult(null) }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a empresa de origem" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((c) => (
+                    <SelectItem key={c.companyId} value={c.companyId} disabled={c.companyId === transferTarget}>
+                      {c.companyName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-center">
+              <ArrowRightLeft className="size-4 text-muted-foreground" />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <Label>Empresa de destino</Label>
+              <Select value={transferTarget} onValueChange={(v) => { setTransferTarget(v); setTransferResult(null) }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a empresa de destino" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((c) => (
+                    <SelectItem key={c.companyId} value={c.companyId} disabled={c.companyId === transferSource}>
+                      {c.companyName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {transferResult && (
+              <Alert variant={transferResult.success ? "default" : "destructive"}>
+                <AlertDescription className="text-xs">{transferResult.message}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setTransferOpen(false)} disabled={transferLoading}>
+              {transferResult?.success ? "Fechar" : "Cancelar"}
+            </Button>
+            {!transferResult?.success && (
+              <Button
+                onClick={handleTransfer}
+                disabled={!transferSource || !transferTarget || transferLoading}
+              >
+                {transferLoading ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Transferindo...
+                  </>
+                ) : (
+                  <>
+                    <ArrowRightLeft className="mr-2 size-4" />
+                    Transferir
+                  </>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }
