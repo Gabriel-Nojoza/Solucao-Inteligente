@@ -645,10 +645,26 @@ export async function exportPowerBIReportDocument(input: {
   pdfProfile?: PowerBiPdfProfile;
   autoUsePngForLargeReports?: boolean;
 }) {
+  const embedUrl =
+    typeof input.embedUrl === "string" ? input.embedUrl.trim() : "";
+
+  if (!embedUrl) {
+    throw new Error(
+      "Relatorio sem embed_url salvo. Sincronize novamente os relatorios do Power BI.",
+    );
+  }
+
+  const embedToken = await generateReportEmbedToken(
+    input.token,
+    input.workspaceId,
+    input.reportId,
+  );
+
+  const preset = getPowerBiPdfPreset(input.pdfProfile ?? "desktop");
   const normalizedPageNames = Array.isArray(input.pageNames)
     ? [
         ...new Set(
-          input.pageNames.map((p) => p.trim()).filter(Boolean),
+          input.pageNames.map((pageName) => pageName.trim()).filter(Boolean),
         ),
       ]
     : [];
@@ -660,17 +676,70 @@ export async function exportPowerBIReportDocument(input: {
         ? [input.pageName.trim()]
         : [];
 
-  const buffer = await exportFileFromPowerBi({
-    token: input.token,
-    workspaceId: input.workspaceId,
-    reportId: input.reportId,
-    format: "PDF",
-    pageNames: selectedPageNames,
-    pageName: selectedPageNames[0] ?? null,
-  });
+  if (selectedPageNames.length <= 1) {
+    const html = buildPowerBICaptureHtml({
+      reportName: input.reportName,
+      reportId: input.reportId,
+      embedUrl,
+      embedToken,
+      pageName: selectedPageNames[0] ?? null,
+    });
+
+    const screenshotPayload = await renderHtmlToPng(html, {
+      timeoutMs: 180000,
+      captureWidth: preset.viewportWidth,
+      captureHeight: preset.viewportHeight,
+      deviceScaleFactor: preset.deviceScaleFactor,
+      screenshotScale: 1,
+      forceExpandScrollable: false,
+      scrollableSegmentationMode: "segments-only",
+    });
+
+    return {
+      buffer: await renderScreenshotPayloadsToPdf([screenshotPayload], {
+        pdfTimeoutMs: 180000,
+        pageWidthMm: preset.pageWidthMm,
+        pageMarginMm: preset.pageMarginMm,
+        autoGrowPageHeight: true,
+        maxPageHeightMm: 80000,
+      }),
+      contentType: "application/pdf",
+      extension: "pdf",
+    } satisfies PowerBiExportedDocument;
+  }
+
+  const screenshotPayloads: Buffer[] = [];
+
+  for (const pageName of selectedPageNames) {
+    const html = buildPowerBICaptureHtml({
+      reportName: `${input.reportName} - ${pageName}`,
+      reportId: input.reportId,
+      embedUrl,
+      embedToken,
+      pageName,
+    });
+
+    const screenshotPayload = await renderHtmlToPng(html, {
+      timeoutMs: 180000,
+      captureWidth: preset.viewportWidth,
+      captureHeight: preset.viewportHeight,
+      deviceScaleFactor: preset.deviceScaleFactor,
+      screenshotScale: 1,
+      forceExpandScrollable: false,
+      scrollableSegmentationMode: "segments-only",
+    });
+
+    screenshotPayloads.push(screenshotPayload);
+  }
 
   return {
-    buffer,
+    buffer: await renderScreenshotPayloadsToPdf(screenshotPayloads, {
+      pdfTimeoutMs: 180000,
+      pageWidthMm: preset.pageWidthMm,
+      pageMarginMm: preset.pageMarginMm,
+      autoGrowPageHeight: true,
+      maxPageHeightMm: 80000,
+    }),
     contentType: "application/pdf",
     extension: "pdf",
   } satisfies PowerBiExportedDocument;
