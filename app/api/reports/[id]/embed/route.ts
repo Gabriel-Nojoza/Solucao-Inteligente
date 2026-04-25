@@ -82,7 +82,8 @@ export async function GET(
     const embedToken = await generateReportEmbedToken(
       token,
       workspace.pbi_workspace_id,
-      report.pbi_report_id
+      report.pbi_report_id,
+      report.dataset_id
     )
 
     return NextResponse.json({

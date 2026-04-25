@@ -265,14 +265,30 @@ export async function listReportPages(
 export async function generateReportEmbedToken(
   token: string,
   workspaceId: string,
-  reportId: string
+  reportId: string,
+  datasetId?: string | null
 ) {
-  const cacheKey = `${workspaceId}:${reportId}`
+  const cacheKey = `${workspaceId}:${reportId}:${datasetId ?? ""}`
   const SAFETY_MARGIN_MS = 5 * 60 * 1000
 
   const cached = embedTokenCache.get(cacheKey)
   if (cached && cached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
     return cached.token
+  }
+
+  const body: Record<string, unknown> = {
+    accessLevel: "View",
+    allowSaveAs: false,
+  }
+
+  if (datasetId) {
+    body.identities = [
+      {
+        username: "report-viewer",
+        datasets: [datasetId],
+        roles: [],
+      },
+    ]
   }
 
   const response = await fetch(
@@ -283,10 +299,7 @@ export async function generateReportEmbedToken(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        accessLevel: "View",
-        allowSaveAs: false,
-      }),
+      body: JSON.stringify(body),
     }
   )
 
