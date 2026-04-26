@@ -151,41 +151,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Verificar limite mensal de relatorios
-  const startOfMonth = new Date()
-  startOfMonth.setDate(1)
-  startOfMonth.setHours(0, 0, 0, 0)
-
-  const [{ data: limitsRow }, { count: monthCount }] = await Promise.all([
-    supabase
-      .from("company_settings")
-      .select("value")
-      .eq("company_id", companyId)
-      .eq("key", "usage_limits")
-      .maybeSingle(),
-    supabase
-      .from("dispatch_logs")
-      .select("*", { count: "exact", head: true })
-      .eq("company_id", companyId)
-      .gte("created_at", startOfMonth.toISOString()),
-  ])
-
-  const reportLimit =
-    limitsRow?.value && typeof (limitsRow.value as Record<string, unknown>).report_limit === "number"
-      ? (limitsRow.value as Record<string, unknown>).report_limit as number
-      : null
-
-  if (reportLimit !== null && (monthCount ?? 0) >= reportLimit) {
-    return NextResponse.json(
-      {
-        error: `Limite mensal de relatorios atingido (${reportLimit} envios). Entre em contato para ampliar seu plano.`,
-        limitReached: true,
-        limit: reportLimit,
-        used: monthCount ?? 0,
-      },
-      { status: 429 }
-    )
-  }
 
   const { data: schedule } = await supabase
     .from("schedules")

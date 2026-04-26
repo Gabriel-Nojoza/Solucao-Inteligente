@@ -19,8 +19,13 @@ export type CompanyStatItem = {
   deliveredDispatches: number
   failedDispatches: number
   successRate: number
+  deliveredThisMonth: number
+  failedThisMonth: number
   reportLimit: number | null
   reportLimitPercent: number | null
+  reportExcessPrice: number | null
+  reportOverage: number
+  reportOverageCharge: number | null
   chatEnabled: boolean
   chatTrialDays: number | null
   chatTrialEndsAt: string | null
@@ -28,6 +33,9 @@ export type CompanyStatItem = {
   chatLimit: number | null
   chatUsageThisMonth: number
   chatLimitPercent: number | null
+  chatExcessPrice: number | null
+  chatOverage: number
+  chatOverageCharge: number | null
 }
 
 export type DailyDispatchPoint = {
@@ -124,22 +132,39 @@ export async function GET() {
       const completed = delivered + failed
       const successRate = completed > 0 ? Math.round((delivered / completed) * 100) : 0
 
+      const deliveredThisMonth = logsThisMonth.filter((l) => l.status === "delivered").length
+      const failedThisMonth = logsThisMonth.filter(
+        (l) => l.status === "failed" || (l.completed_at && l.status !== "delivered")
+      ).length
+
       const chat = chatMap.get(company.id)
       const limits = limitsMap.get(company.id)
 
       const reportLimit = typeof limits?.report_limit === "number" ? limits.report_limit : null
       const chatLimit = typeof limits?.chat_limit === "number" ? limits.chat_limit : null
+      const reportExcessPrice = typeof limits?.report_excess_price === "number" ? limits.report_excess_price : null
+      const chatExcessPrice = typeof limits?.chat_excess_price === "number" ? limits.chat_excess_price : null
 
       const dispatchesThisMonth = logsThisMonth.length
       const reportLimitPercent =
         reportLimit !== null && reportLimit > 0
           ? Math.min(Math.round((dispatchesThisMonth / reportLimit) * 100), 100)
           : null
+      const reportOverage = reportLimit !== null ? Math.max(0, dispatchesThisMonth - reportLimit) : 0
+      const reportOverageCharge =
+        reportOverage > 0 && reportExcessPrice !== null
+          ? Math.round(reportOverage * reportExcessPrice * 100) / 100
+          : null
 
       const chatUsageThisMonth = chatUsageMap.get(company.id) ?? 0
       const chatLimitPercent =
         chatLimit !== null && chatLimit > 0
           ? Math.min(Math.round((chatUsageThisMonth / chatLimit) * 100), 100)
+          : null
+      const chatOverage = chatLimit !== null ? Math.max(0, chatUsageThisMonth - chatLimit) : 0
+      const chatOverageCharge =
+        chatOverage > 0 && chatExcessPrice !== null
+          ? Math.round(chatOverage * chatExcessPrice * 100) / 100
           : null
 
       return {
@@ -148,11 +173,16 @@ export async function GET() {
         totalDispatches: companyLogs.length,
         dispatches30d: companyLogs.length,
         dispatchesThisMonth,
+        deliveredThisMonth,
+        failedThisMonth,
         deliveredDispatches: delivered,
         failedDispatches: failed,
         successRate,
         reportLimit,
         reportLimitPercent,
+        reportExcessPrice,
+        reportOverage,
+        reportOverageCharge,
         chatEnabled: chat?.enabled === true,
         chatTrialDays: typeof chat?.trial_days === "number" ? chat.trial_days : null,
         chatTrialEndsAt: typeof chat?.trial_ends_at === "string" ? chat.trial_ends_at : null,
@@ -163,6 +193,9 @@ export async function GET() {
         chatLimit,
         chatUsageThisMonth,
         chatLimitPercent,
+        chatExcessPrice,
+        chatOverage,
+        chatOverageCharge,
       }
     })
 

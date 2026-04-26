@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 import { createServiceClient } from "@/lib/supabase/server"
-import { getAccessToken } from "@/lib/powerbi"
+import { generateReportEmbedToken, getAccessToken } from "@/lib/powerbi"
 
 type PageProps = {
   params: Promise<{ id: string }>
@@ -72,11 +72,11 @@ export default async function ReportPrintPage({
   }
 
   const token = await getAccessToken(companyId)
-  const embedToken = await fetchEmbedToken({
+  const embedToken = await generateReportEmbedToken(
     token,
-    workspaceId: workspace.pbi_workspace_id,
-    reportId: report.pbi_report_id,
-  })
+    workspace.pbi_workspace_id,
+    report.pbi_report_id
+  )
 
   return (
     <html lang="pt-BR">
@@ -368,44 +368,4 @@ export default async function ReportPrintPage({
       </body>
     </html>
   )
-}
-
-async function fetchEmbedToken(input: {
-  token: string
-  workspaceId: string
-  reportId: string
-}) {
-  const url =
-    "https://api.powerbi.com/v1.0/myorg/groups/" +
-    input.workspaceId +
-    "/reports/" +
-    input.reportId +
-    "/GenerateToken"
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + input.token,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      accessLevel: "View",
-      allowSaveAs: false,
-    }),
-    cache: "no-store",
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error("Falha ao gerar embed token: " + errorText)
-  }
-
-  const data = (await response.json()) as { token?: string | null }
-  const embedToken = typeof data.token === "string" ? data.token.trim() : ""
-
-  if (!embedToken) {
-    throw new Error("Power BI nao retornou token de exibicao.")
-  }
-
-  return embedToken
 }

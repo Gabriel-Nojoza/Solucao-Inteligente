@@ -55,7 +55,10 @@ export async function GET() {
 
     const chartStart = new Date(todayStart.getTime() - 6 * 24 * 60 * 60 * 1000)
 
-    const thirtyDaysAgo = new Date(todayStart.getTime() - 29 * 24 * 60 * 60 * 1000)
+    // Inicio do mes atual no fuso Brasil (UTC-3)
+    const brazilNow = new Date(now.getTime() - BRAZIL_OFFSET_MS)
+    const startOfMonthUTC = new Date(Date.UTC(brazilNow.getUTCFullYear(), brazilNow.getUTCMonth(), 1))
+    const thirtyDaysAgo = new Date(startOfMonthUTC.getTime() + BRAZIL_OFFSET_MS)
     const hasRestrictedScope =
       workspaceScope.workspaceRestricted || workspaceScope.datasetRestricted
     const accessibleScheduleIds = hasRestrictedScope
@@ -88,6 +91,7 @@ export async function GET() {
       .from("dispatch_logs")
       .select("*")
       .eq("company_id", companyId)
+      .gte("created_at", thirtyDaysAgo.toISOString())
 
     const [reportsRes, contactsRes, dispatchLogsRes, settingsRes, botInstancesRes] =
       await Promise.all([

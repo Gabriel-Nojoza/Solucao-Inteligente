@@ -61,29 +61,35 @@ export function FloatingChatLauncher() {
           isOpen && "scale-95 opacity-80"
         )}
       >
-        <div className="relative h-[156px] w-[156px]">
-          <Image
-            src="/brand/icone-logo.png"
-            alt="SIL Chat IA"
-            fill
-            sizes="186px"
-            className="object-contain"
-            priority
-          />
+        <div className="flex h-16 w-16 items-center justify-center">
+          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-14 w-14 drop-shadow-lg">
+            <rect x="4" y="14" width="10" height="28" rx="3" fill="#FACC15">
+              <animate attributeName="height" values="28;20;28" dur="1.6s" repeatCount="indefinite" />
+              <animate attributeName="y" values="14;22;14" dur="1.6s" repeatCount="indefinite" />
+            </rect>
+            <rect x="19" y="24" width="10" height="18" rx="3" fill="#F97316">
+              <animate attributeName="height" values="18;28;18" dur="1.4s" repeatCount="indefinite" />
+              <animate attributeName="y" values="24;14;24" dur="1.4s" repeatCount="indefinite" />
+            </rect>
+            <rect x="34" y="8" width="10" height="34" rx="3" fill="#38BDF8">
+              <animate attributeName="height" values="34;22;34" dur="1.8s" repeatCount="indefinite" />
+              <animate attributeName="y" values="8;20;8" dur="1.8s" repeatCount="indefinite" />
+            </rect>
+          </svg>
         </div>
       </button>
 
       {/* Painel do chat */}
       <div
         className={cn(
-          "fixed bottom-[100px] right-5 z-[60] flex w-[min(calc(100vw-1.5rem),400px)] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_20px_60px_rgba(15,23,42,0.2)] ring-1 ring-slate-900/8 transition-all duration-300 sm:bottom-[108px] sm:right-6",
+          "fixed bottom-[100px] right-5 z-[60] flex w-[min(calc(100vw-1.5rem),400px)] flex-col overflow-hidden rounded-2xl bg-card shadow-[0_20px_60px_rgba(0,0,0,0.4)] ring-1 ring-border transition-all duration-300 sm:bottom-[108px] sm:right-6",
           isOpen
             ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
             : "pointer-events-none translate-y-3 scale-[0.97] opacity-0"
         )}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 bg-gradient-to-r from-[#0f172a] to-[#1e40af] px-4 py-3 text-white">
+        <div className="flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground">
           <div className="relative -my-3 h-20 w-20 shrink-0">
             <Image
               src="/brand/logo-sil.png"
@@ -95,13 +101,13 @@ export function FloatingChatLauncher() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold leading-tight">Chat IA</p>
-            <p className="truncate text-[11px] text-blue-200/80">{statusMessage.title}</p>
+            <p className="truncate text-[11px] text-primary-foreground/70">{statusMessage.title}</p>
           </div>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 rounded-full text-white/70 hover:bg-white/15 hover:text-white"
+            className="h-7 w-7 shrink-0 rounded-full text-primary-foreground/70 hover:bg-primary-foreground/15 hover:text-primary-foreground"
             onClick={() => setIsOpen(false)}
           >
             <X className="size-4" />
@@ -109,23 +115,23 @@ export function FloatingChatLauncher() {
         </div>
 
         {/* Corpo */}
-        <div className="h-[540px] bg-white">
+        <div className="h-[540px] bg-card">
           {isReady ? (
             <ChatInterface
               datasetId={config!.datasetId}
               workspaceId={config!.workspaceId}
               datasetName={config!.datasetName}
               compact
-              className="bg-white"
+              className="bg-card"
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <statusMessage.icon
                   className={cn("size-7", configLoading && "animate-spin")}
                 />
               </div>
-              <p className="text-sm font-medium text-slate-600">{statusMessage.title}</p>
+              <p className="text-sm font-medium text-foreground">{statusMessage.title}</p>
             </div>
           )}
         </div>

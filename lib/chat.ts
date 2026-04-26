@@ -47,6 +47,8 @@ export interface ChatMessage {
   daxQuery?: string | null
   confidence?: "high" | "medium" | "low" | null
   error?: string | null
+  warning?: string | null
+  chartType?: "bar" | "line" | "pie" | null
 }
 
 export interface ChatQueryPlan {
@@ -81,6 +83,8 @@ export interface ChatApiResponse {
   daxQuery: string | null
   confidence: "high" | "medium" | "low"
   error?: string
+  warning?: string
+  chartType?: "bar" | "line" | "pie" | null
 }
 
 export type DatasetMetadata = {

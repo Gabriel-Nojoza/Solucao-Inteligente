@@ -37,13 +37,13 @@ export function DispatchStatusPie({ data }: { data: StatusBreakdownItem[] }) {
       <CardHeader>
         <CardTitle className="text-base">Status dos Disparos</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Ultimos 30 dias com a mesma base da taxa de sucesso
+          Este mes com a mesma base da taxa de sucesso
         </p>
       </CardHeader>
       <CardContent className="flex h-[360px] flex-col justify-between gap-3">
         {total === 0 ? (
           <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border/80 bg-muted/10 text-center text-sm text-muted-foreground">
-            Nenhum envio encontrado nos ultimos 30 dias.
+            Nenhum envio encontrado este mes.
           </div>
         ) : (
           <>

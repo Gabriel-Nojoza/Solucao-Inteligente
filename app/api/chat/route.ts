@@ -61,7 +61,8 @@ function parseQueryPlan(raw: string): ChatQueryPlan | null {
 // ─── OpenAI direct call (fallback quando n8n não está configurado) ────────────
 
 async function callOpenAIDirect(
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  attempt = 0
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error("OPENAI_API_KEY não configurada")
@@ -80,6 +81,12 @@ async function callOpenAIDirect(
       response_format: { type: "json_object" },
     }),
   })
+
+  if (response.status === 429 && attempt < 3) {
+    const retryAfter = Number(response.headers.get("retry-after") ?? "") || (attempt + 1) * 2
+    await new Promise((r) => setTimeout(r, retryAfter * 1000))
+    return callOpenAIDirect(messages, attempt + 1)
+  }
 
   if (!response.ok) {
     const errText = await response.text().catch(() => "")
@@ -106,6 +113,7 @@ async function callN8nChatWebhook(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      chatInput: question,
       question,
       metadata,
       conversationHistory,
@@ -120,13 +128,18 @@ async function callN8nChatWebhook(
 
   const data = await response.json() as Record<string, unknown>
 
-  // Aceita tanto { daxQuery, ... } direto quanto { answer: "..." } com JSON embutido
-  if (typeof data.daxQuery === "string") {
-    return JSON.stringify(data)
+  // N8N AI Agent retorna { output: "..." }
+  if (typeof data.output === "string" && data.output.trim()) {
+    return data.output.trim()
   }
 
-  if (typeof data.answer === "string") {
-    return data.answer
+  if (typeof data.answer === "string" && data.answer.trim()) {
+    return data.answer.trim()
+  }
+
+  // Caso retorne DAX plan como JSON
+  if (typeof data.daxQuery === "string") {
+    return JSON.stringify(data)
   }
 
   return JSON.stringify(data)
@@ -274,8 +287,8 @@ export async function POST(request: Request) {
     const supabase = createClient()
     const scope = await getWorkspaceAccessScope(supabase, context)
 
-    const body = (await request.json()) as ChatRequest
-    const { question, datasetId, workspaceId, conversationHistory = [] } = body
+    const body = (await request.json()) as ChatRequest & { chartType?: string }
+    const { question, datasetId, workspaceId, conversationHistory = [], chartType } = body
 
     const { data: chatSettingsRow } = await supabase
       .from("company_settings")
@@ -319,46 +332,6 @@ export async function POST(request: Request) {
         },
         { status: 403 }
       )
-    }
-
-    // ── Verificar limite mensal de perguntas ──
-    {
-      const { data: limitsRow } = await supabase
-        .from("company_settings")
-        .select("value")
-        .eq("company_id", companyId)
-        .eq("key", "usage_limits")
-        .maybeSingle()
-
-      const chatLimit =
-        typeof (limitsRow?.value as Record<string, unknown> | null)?.chat_limit === "number"
-          ? (limitsRow!.value as Record<string, unknown>).chat_limit as number
-          : null
-
-      if (chatLimit !== null && chatLimit > 0) {
-        const startOfMonth = new Date()
-        startOfMonth.setDate(1)
-        startOfMonth.setHours(0, 0, 0, 0)
-
-        const { count } = await supabase
-          .from("chat_logs")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", companyId)
-          .gte("created_at", startOfMonth.toISOString())
-
-        if ((count ?? 0) >= chatLimit) {
-          return NextResponse.json<ChatApiResponse>(
-            {
-              answer: `Limite mensal de ${chatLimit} perguntas atingido. Fale com o administrador para aumentar o limite.`,
-              data: null,
-              daxQuery: null,
-              confidence: "low",
-              error: "Limite de perguntas atingido",
-            },
-            { status: 429 }
-          )
-        }
-      }
     }
 
     if (!question?.trim()) {
@@ -446,11 +419,62 @@ export async function POST(request: Request) {
       chatSettings.webhookUrl
     )
 
-    // ── Gerar plano de query (com retry) ──
+    // ── Fluxo N8N com pedido de gráfico: pede dados estruturados pelo próprio webhook ──
+    if (n8nWebhookUrl && chartType) {
+      const chartQuestion = `[CHART_REQUEST] Repita a última consulta e retorne APENAS um JSON no formato exato (sem markdown, sem texto): {"columns":[{"name":"NomeColuna","dataType":"String"}],"rows":[{"NomeColuna":"valor"}]}`
+      const resp = await fetch(n8nWebhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
+      })
+      if (resp.ok) {
+        const raw = await resp.json() as Record<string, unknown>
+        const rawText = (typeof raw.output === "string" ? raw.output : typeof raw.answer === "string" ? raw.answer : JSON.stringify(raw)).trim()
+        try {
+          const cleaned = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim()
+          const parsed = JSON.parse(cleaned) as { columns?: unknown[]; rows?: unknown[] }
+          if (Array.isArray(parsed.columns) && Array.isArray(parsed.rows) && parsed.rows.length > 0) {
+            const queryResult = {
+              columns: parsed.columns as Array<{ name: string; dataType: string }>,
+              rows: parsed.rows as Array<Record<string, unknown>>,
+            }
+            return NextResponse.json<ChatApiResponse>({
+              answer: "Aqui está o gráfico:",
+              data: queryResult,
+              daxQuery: null,
+              confidence: "high",
+              chartType: chartType as ChatApiResponse["chartType"],
+            })
+          }
+        } catch { /* fallthrough to OpenAI */ }
+      }
+    }
+
+    // ── Fluxo N8N normal: AI Agent retorna resposta em texto ──
+    if (n8nWebhookUrl && !chartType) {
+      try {
+        const answer = await callN8nChatWebhook(n8nWebhookUrl, question, metadata, conversationHistory, todayDate)
+
+        if (question.trim().split(/\s+/).length >= 2) {
+          await supabase.from("chat_logs").insert({ company_id: companyId })
+        }
+
+        return NextResponse.json<ChatApiResponse>({
+          answer,
+          data: null,
+          daxQuery: null,
+          confidence: "high",
+        })
+      } catch {
+        // N8N falhou — cai no fallback OpenAI abaixo
+      }
+    }
+
+    // ── Fluxo OpenAI direto: gera DAX, executa no Power BI ──
     const plan = await generateQueryPlanWithRetry(
       messages,
       metadata,
-      n8nWebhookUrl,
+      null,
       question,
       conversationHistory,
       todayDate
@@ -487,14 +511,55 @@ export async function POST(request: Request) {
       queryResult.rows
     )
 
-    // Registrar uso do chat para controle de limite
-    await supabase.from("chat_logs").insert({ company_id: companyId })
+    // Registrar uso do chat para controle de limite (minimo 2 palavras)
+    let warning: string | undefined
+    if (question.trim().split(/\s+/).length >= 2) {
+      await supabase.from("chat_logs").insert({ company_id: companyId })
+
+      // Verificar percentual de uso e emitir aviso
+      const { data: limitsRow } = await supabase
+        .from("company_settings")
+        .select("value")
+        .eq("company_id", companyId)
+        .eq("key", "usage_limits")
+        .maybeSingle()
+
+      const limits = limitsRow?.value as Record<string, unknown> | null
+      const chatLimit = typeof limits?.chat_limit === "number" ? limits.chat_limit : null
+      const chatExcessPrice = typeof limits?.chat_excess_price === "number" ? limits.chat_excess_price : null
+
+      if (chatLimit !== null && chatLimit > 0) {
+        const startOfMonth = new Date()
+        startOfMonth.setDate(1)
+        startOfMonth.setHours(0, 0, 0, 0)
+
+        const { count } = await supabase
+          .from("chat_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .gte("created_at", startOfMonth.toISOString())
+
+        const used = count ?? 0
+        const percent = Math.round((used / chatLimit) * 100)
+
+        if (percent >= 100) {
+          const overage = used - chatLimit
+          warning = chatExcessPrice !== null
+            ? `⚠️ Você ultrapassou seu limite de ${chatLimit} perguntas. Cada pergunta adicional custa R$ ${chatExcessPrice.toFixed(2).replace(".", ",")} (${overage} pergunta${overage !== 1 ? "s" : ""} excedente${overage !== 1 ? "s" : ""} até agora). Caso precise de mais, fale com o administrador.`
+            : `⚠️ Você ultrapassou seu limite de ${chatLimit} perguntas este mês. Caso precise de mais, fale com o administrador.`
+        } else if (percent >= 80) {
+          warning = `Você atingiu ${percent}% do seu limite de perguntas (${used}/${chatLimit}). Ao atingir 100%${chatExcessPrice !== null ? `, perguntas adicionais serão cobradas a R$ ${chatExcessPrice.toFixed(2).replace(".", ",")} cada` : ""}. Caso precise de mais, fale com o administrador.`
+        }
+      }
+    }
 
     return NextResponse.json<ChatApiResponse>({
       answer,
       data: queryResult,
       daxQuery: injectCustomMeasuresIntoDax(plan.daxQuery),
       confidence: plan.confidence,
+      warning,
+      chartType: chartType as ChatApiResponse["chartType"] ?? undefined,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido"

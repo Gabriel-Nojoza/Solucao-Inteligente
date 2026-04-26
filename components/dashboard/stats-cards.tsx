@@ -87,7 +87,7 @@ export function StatsCards({ data }: { data: StatsData }) {
         data.successRate === null
           ? ongoing30d > 0
             ? `${formatMetricValue(ongoing30d)} envio(s) ainda em andamento`
-            : "Sem envios finalizados nos ultimos 30 dias"
+            : "Sem envios finalizados este mes"
           : `${formatMetricValue(delivered30d)} enviados, ${formatMetricValue(failed30d)} com erro e ${formatMetricValue(ongoing30d)} em andamento`,
       footnote:
         data.successRate === null

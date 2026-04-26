@@ -3,10 +3,11 @@
 import useSWR, { mutate } from "swr"
 import Link from "next/link"
 import { useState } from "react"
+import { AdminFloatingChat } from "@/components/admin-floating-chat"
 import {
   Users, Settings, Activity, Shield, UserPlus, ChevronRight,
   BarChart3, Zap, FileText, MessageSquare, CheckCircle2, XCircle,
-  Clock, ArrowRightLeft, Loader2, Pencil, Save, X,
+  Clock, ArrowRightLeft, Loader2, Pencil, Save, X, Plus,
 } from "lucide-react"
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -78,18 +79,92 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   )
 }
 
-function PieCustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { percent: number } }> }) {
+function PieCustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; percent?: number; payload: { percent?: number } }> }) {
   if (!active || !payload?.length) return null
   const p = payload[0]
+  const percent = p.percent ?? p.payload?.percent
+  const percentLabel = typeof percent === "number" && isFinite(percent) ? `${Math.round(percent * 100)}%` : ""
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
       <p className="font-medium">{p.name}</p>
-      <p className="text-muted-foreground">{p.value} disparos ({Math.round(p.payload.percent * 100)}%)</p>
+      <p className="text-muted-foreground">{p.value} disparos{percentLabel ? ` (${percentLabel})` : ""}</p>
     </div>
   )
 }
 
-// Componente inline para editar limite
+function PriceEditor({ value, onSave, loading }: {
+  value: number | null
+  onSave: (val: number | null) => void
+  loading: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [input, setInput] = useState(value !== null ? value.toFixed(2) : "")
+
+  function handleSave() {
+    if (input.trim() === "") { onSave(null); setEditing(false); return }
+    const parsed = parseFloat(input.replace(",", "."))
+    if (isNaN(parsed) || parsed < 0) return
+    onSave(Math.round(parsed * 100) / 100)
+    setEditing(false)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") handleSave()
+    if (e.key === "Escape") setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1 justify-center">
+        <span className="text-xs text-muted-foreground">R$</span>
+        <Input
+          className="h-7 w-20 text-xs text-center px-1"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="0,00"
+          autoFocus
+        />
+        <button
+          onClick={handleSave}
+          disabled={loading}
+          className="flex items-center justify-center size-6 rounded bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30 transition-colors"
+        >
+          {loading ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="flex items-center justify-center size-6 rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="size-3" />
+        </button>
+      </div>
+    )
+  }
+
+  if (value !== null) {
+    return (
+      <button
+        onClick={() => { setInput(value.toFixed(2)); setEditing(true) }}
+        className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-muted/40 hover:bg-muted/70 text-xs font-medium transition-colors"
+      >
+        <span>R$ {value.toFixed(2).replace(".", ",")}</span>
+        <Pencil className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => { setInput(""); setEditing(true) }}
+      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+    >
+      <Plus className="size-3" />
+      <span>Definir</span>
+    </button>
+  )
+}
+
 function LimitEditor({ value, onSave, loading }: {
   value: number | null
   onSave: (val: number | null) => void
@@ -105,35 +180,60 @@ function LimitEditor({ value, onSave, loading }: {
     setEditing(false)
   }
 
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") handleSave()
+    if (e.key === "Escape") setEditing(false)
+  }
+
   if (editing) {
     return (
       <div className="flex items-center gap-1 justify-center">
         <Input
-          className="h-6 w-20 text-xs text-center px-1"
+          className="h-7 w-24 text-xs text-center px-1"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="Sem limite"
           type="number"
           min={0}
           autoFocus
         />
-        <button onClick={handleSave} disabled={loading} className="text-emerald-500 hover:text-emerald-400">
-          <Save className="size-3.5" />
+        <button
+          onClick={handleSave}
+          disabled={loading}
+          className="flex items-center justify-center size-6 rounded bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30 transition-colors"
+        >
+          {loading ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
         </button>
-        <button onClick={() => setEditing(false)} className="text-muted-foreground hover:text-foreground">
-          <X className="size-3.5" />
+        <button
+          onClick={() => setEditing(false)}
+          className="flex items-center justify-center size-6 rounded bg-muted text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="size-3" />
         </button>
       </div>
     )
   }
 
+  if (value !== null) {
+    return (
+      <button
+        onClick={() => { setInput(value.toString()); setEditing(true) }}
+        className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-muted/40 hover:bg-muted/70 text-xs font-medium transition-colors"
+      >
+        <span>{value.toLocaleString("pt-BR")}</span>
+        <Pencil className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+      </button>
+    )
+  }
+
   return (
     <button
-      onClick={() => { setInput(value?.toString() ?? ""); setEditing(true) }}
-      className="flex items-center gap-1 justify-center text-xs text-muted-foreground hover:text-foreground group"
+      onClick={() => { setInput(""); setEditing(true) }}
+      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
     >
-      <span>{value ?? "—"}</span>
-      <Pencil className="size-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Plus className="size-3" />
+      <span>Definir</span>
     </button>
   )
 }
@@ -183,13 +283,18 @@ export default function AdminDashboardPage() {
     }
   }
 
-  async function saveLimit(companyId: string, reportLimit: number | null, chatLimit: number | null) {
+  async function saveLimit(companyId: string, fields: {
+    reportLimit?: number | null
+    chatLimit?: number | null
+    reportExcessPrice?: number | null
+    chatExcessPrice?: number | null
+  }) {
     setSavingLimitFor(companyId)
     try {
       await fetch("/api/admin/company-limits", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyId, reportLimit, chatLimit }),
+        body: JSON.stringify({ companyId, ...fields }),
       })
       await mutate("/api/admin/company-stats")
     } finally {
@@ -205,8 +310,8 @@ export default function AdminDashboardPage() {
   }
 
   const pieTotalData = companies
-    .filter((c) => c.dispatches30d > 0)
-    .map((c, i) => ({ name: c.companyName, value: c.dispatches30d, color: CHART_COLORS[i % CHART_COLORS.length] }))
+    .filter((c) => c.dispatchesThisMonth > 0)
+    .map((c, i) => ({ name: c.companyName, value: c.dispatchesThisMonth, color: CHART_COLORS[i % CHART_COLORS.length] }))
 
   const chatBarData = companies
     .filter((c) => c.chatTrialDays !== null)
@@ -371,6 +476,51 @@ export default function AdminDashboardPage() {
           </Card>
         </div>
 
+        {/* Alerta de cobranca por excedente */}
+        {(() => {
+          const reportOverages = companies.filter(c => c.reportOverageCharge !== null)
+          const chatOverages = companies.filter(c => c.chatOverageCharge !== null)
+          const totalReport = reportOverages.reduce((s, c) => s + (c.reportOverageCharge ?? 0), 0)
+          const totalChat = chatOverages.reduce((s, c) => s + (c.chatOverageCharge ?? 0), 0)
+          const totalGeral = totalReport + totalChat
+          if (totalGeral === 0) return null
+          return (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-500">
+                  <span className="text-base font-bold">!</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-500">Excedente a cobrar este mês</p>
+                  <div className="mt-1.5 flex flex-wrap gap-x-6 gap-y-1">
+                    {reportOverages.map(c => (
+                      <span key={c.companyId} className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{c.companyName}</span>
+                        {" — "}+{c.reportOverage} relatórios
+                        {c.reportOverageCharge !== null && (
+                          <span className="ml-1 font-semibold text-amber-500">R$ {c.reportOverageCharge.toFixed(2).replace(".", ",")}</span>
+                        )}
+                      </span>
+                    ))}
+                    {chatOverages.map(c => (
+                      <span key={`chat-${c.companyId}`} className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">{c.companyName}</span>
+                        {" — "}+{c.chatOverage} perguntas
+                        {c.chatOverageCharge !== null && (
+                          <span className="ml-1 font-semibold text-amber-500">R$ {c.chatOverageCharge.toFixed(2).replace(".", ",")}</span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-sm font-bold text-amber-500">
+                    Total a cobrar: R$ {totalGeral.toFixed(2).replace(".", ",")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Relatorios por Empresa */}
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
@@ -400,38 +550,67 @@ export default function AdminDashboardPage() {
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Empresa</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Este Mês</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Limite/mês</th>
-                        <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground w-40">Uso</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">R$/excedente</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground w-36">Uso</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Excedente</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">A cobrar</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Taxa</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/50">
                       {companies.map((c) => {
-                        const isOverLimit = c.reportLimit !== null && c.dispatchesThisMonth >= c.reportLimit
+                        const isOverLimit = c.reportLimit !== null && c.dispatchesThisMonth > c.reportLimit
                         return (
                           <tr key={c.companyId} className="hover:bg-muted/30 transition-colors">
                             <td className="px-4 py-3 font-medium">{c.companyName}</td>
-                            <td className="px-4 py-3 text-center font-semibold">
-                              <span className={isOverLimit ? "text-red-500" : ""}>{c.dispatchesThisMonth}</span>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex flex-col items-center leading-tight gap-0.5">
+                                <span className={`font-bold text-sm ${isOverLimit ? "text-red-500" : ""}`}>{c.deliveredThisMonth + c.failedThisMonth}</span>
+                                <div className="flex items-center gap-1.5 text-xs">
+                                  <span className="text-emerald-500">{c.deliveredThisMonth}✓</span>
+                                  {c.failedThisMonth > 0 && <span className="text-red-400">{c.failedThisMonth} erros</span>}
+                                </div>
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-center">
                               <LimitEditor
                                 value={c.reportLimit}
                                 loading={savingLimitFor === c.companyId}
-                                onSave={(val) => {
-                                  const existing = companies.find(x => x.companyId === c.companyId)
-                                  saveLimit(c.companyId, val, existing?.chatLimit ?? null)
-                                }}
+                                onSave={(val) => saveLimit(c.companyId, { reportLimit: val })}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <PriceEditor
+                                value={c.reportExcessPrice}
+                                loading={savingLimitFor === c.companyId}
+                                onSave={(val) => saveLimit(c.companyId, { reportExcessPrice: val })}
                               />
                             </td>
                             <td className="px-4 py-3">
                               {c.reportLimit !== null ? (
-                                <Progress
-                                  value={c.reportLimitPercent ?? 0}
-                                  className={`h-1.5 ${isOverLimit ? "[&>div]:bg-red-500" : ""}`}
-                                />
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>{c.dispatchesThisMonth}/{c.reportLimit}</span>
+                                    <span>{Math.min(c.reportLimitPercent ?? 0, 100)}%</span>
+                                  </div>
+                                  <Progress
+                                    value={Math.min(c.reportLimitPercent ?? 0, 100)}
+                                    className={`h-1.5 ${isOverLimit ? "[&>div]:bg-red-500" : (c.reportLimitPercent ?? 0) >= 70 ? "[&>div]:bg-amber-500" : "[&>div]:bg-emerald-500"}`}
+                                  />
+                                </div>
                               ) : (
                                 <span className="text-xs text-muted-foreground">Sem limite</span>
                               )}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {c.reportOverage > 0
+                                ? <Badge variant="destructive" className="text-xs">+{c.reportOverage}</Badge>
+                                : <span className="text-xs text-muted-foreground">—</span>}
+                            </td>
+                            <td className="px-4 py-3 text-center font-medium">
+                              {c.reportOverageCharge !== null
+                                ? <span className="text-red-500 text-xs">R$ {c.reportOverageCharge.toFixed(2).replace(".", ",")}</span>
+                                : <span className="text-xs text-muted-foreground">—</span>}
                             </td>
                             <td className="px-4 py-3 text-center">
                               <Badge
@@ -445,6 +624,23 @@ export default function AdminDashboardPage() {
                         )
                       })}
                     </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-border bg-muted/40">
+                        <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">Total</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <div className="flex flex-col items-center leading-tight gap-0.5">
+                            <span className="font-bold text-sm">{companies.reduce((s, c) => s + c.deliveredThisMonth + c.failedThisMonth, 0)}</span>
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <span className="text-emerald-500">{companies.reduce((s, c) => s + c.deliveredThisMonth, 0)}✓</span>
+                              {companies.reduce((s, c) => s + c.failedThisMonth, 0) > 0 && (
+                                <span className="text-red-400">{companies.reduce((s, c) => s + c.failedThisMonth, 0)} erros</span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td colSpan={6} />
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}
@@ -455,7 +651,7 @@ export default function AdminDashboardPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Distribuicao de Disparos</CardTitle>
-              <CardDescription className="text-xs">Percentual por empresa (30 dias)</CardDescription>
+              <CardDescription className="text-xs">Percentual por empresa (este mes)</CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-center pb-4">
               {companyLoading ? (
@@ -509,13 +705,18 @@ export default function AdminDashboardPage() {
                           <span className="flex items-center justify-center gap-1"><Clock className="size-3" /> Trial</span>
                         </th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Limite Perguntas</th>
-                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Uso este mes</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">R$/excedente</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground w-36">Uso este mes</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Excedente</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">A cobrar</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Expiracao</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/50">
-                      {companies.map((c) => (
+                      {companies.map((c) => {
+                        const chatIsOver = c.chatLimit !== null && c.chatUsageThisMonth > c.chatLimit
+                        return (
                         <tr key={c.companyId} className="hover:bg-muted/30 transition-colors">
                           <td className="px-4 py-3 font-medium">{c.companyName}</td>
                           <td className="px-4 py-3 text-center">
@@ -530,27 +731,41 @@ export default function AdminDashboardPage() {
                             <LimitEditor
                               value={c.chatLimit}
                               loading={savingLimitFor === c.companyId}
-                              onSave={(val) => {
-                                const existing = companies.find(x => x.companyId === c.companyId)
-                                saveLimit(c.companyId, existing?.reportLimit ?? null, val)
-                              }}
+                              onSave={(val) => saveLimit(c.companyId, { chatLimit: val })}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <PriceEditor
+                              value={c.chatExcessPrice}
+                              loading={savingLimitFor === c.companyId}
+                              onSave={(val) => saveLimit(c.companyId, { chatExcessPrice: val })}
                             />
                           </td>
                           <td className="px-4 py-3 min-w-[120px]">
                             {c.chatLimit !== null ? (
                               <div className="space-y-1">
                                 <div className="flex justify-between text-xs text-muted-foreground">
-                                  <span>{c.chatUsageThisMonth}</span>
-                                  <span>{c.chatLimitPercent ?? 0}%</span>
+                                  <span>{c.chatUsageThisMonth}/{c.chatLimit}</span>
+                                  <span>{Math.min(c.chatLimitPercent ?? 0, 100)}%</span>
                                 </div>
                                 <Progress
-                                  value={c.chatLimitPercent ?? 0}
-                                  className={`h-1.5 ${(c.chatLimitPercent ?? 0) >= 90 ? "[&>div]:bg-red-500" : (c.chatLimitPercent ?? 0) >= 70 ? "[&>div]:bg-amber-500" : "[&>div]:bg-emerald-500"}`}
+                                  value={Math.min(c.chatLimitPercent ?? 0, 100)}
+                                  className={`h-1.5 ${chatIsOver ? "[&>div]:bg-red-500" : (c.chatLimitPercent ?? 0) >= 70 ? "[&>div]:bg-amber-500" : "[&>div]:bg-emerald-500"}`}
                                 />
                               </div>
                             ) : (
                               <span className="text-xs text-muted-foreground">{c.chatUsageThisMonth > 0 ? c.chatUsageThisMonth : "—"}</span>
                             )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {c.chatOverage > 0
+                              ? <Badge variant="destructive" className="text-xs">+{c.chatOverage}</Badge>
+                              : <span className="text-xs text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-center font-medium">
+                            {c.chatOverageCharge !== null
+                              ? <span className="text-red-500 text-xs">R$ {c.chatOverageCharge.toFixed(2).replace(".", ",")}</span>
+                              : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
                           <td className="px-4 py-3 text-center text-muted-foreground text-xs">
                             {formatDate(c.chatTrialEndsAt)}
@@ -565,7 +780,8 @@ export default function AdminDashboardPage() {
                                   : <Badge variant="secondary" className="text-xs">Desativado</Badge>}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -603,6 +819,9 @@ export default function AdminDashboardPage() {
         </div>
 
       </div>
+
+      {/* Chat flutuante admin */}
+      <AdminFloatingChat />
 
       {/* Modal de transferência */}
       <Dialog open={transferOpen} onOpenChange={(open) => { setTransferOpen(open); if (!open) setTransferResult(null) }}>
