@@ -247,18 +247,39 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Fluxo OpenAI direto: gera DAX, executa no Power BI ──
-    rawResponse = await callOpenAIDirect(messages)
+    // ── Fluxo OpenAI direto: gera DAX com retry em caso de erro ──
+    const currentMessages = [...messages]
+    let plan: ReturnType<typeof parseQueryPlan> = null
+    const maxAttempts = 2
 
-    const plan = parseQueryPlan(rawResponse)
-    if (!plan) {
-      throw new Error("Não foi possível gerar uma query válida.")
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      rawResponse = await callOpenAIDirect(currentMessages)
+      plan = parseQueryPlan(rawResponse)
+
+      if (!plan) {
+        if (attempt < maxAttempts) {
+          currentMessages.push({ role: "assistant", content: rawResponse })
+          currentMessages.push({ role: "user", content: "Erro: resposta não é um JSON válido com daxQuery. Retorne APENAS o JSON no formato especificado." })
+          continue
+        }
+        throw new Error("Não foi possível gerar uma query válida.")
+      }
+
+      const validation = validateQueryPlan(plan, metadata)
+      if (!validation.valid) {
+        if (attempt < maxAttempts) {
+          currentMessages.push({ role: "assistant", content: rawResponse })
+          currentMessages.push({ role: "user", content: `Corrija os erros e retorne o JSON corrigido: ${validation.errors.join("; ")}. Use APENAS tabelas/colunas/medidas do schema fornecido.` })
+          plan = null
+          continue
+        }
+        throw new Error(`Query inválida: ${validation.errors.join("; ")}`)
+      }
+
+      break
     }
 
-    const validation = validateQueryPlan(plan, metadata)
-    if (!validation.valid) {
-      throw new Error(`Query inválida: ${validation.errors.join("; ")}`)
-    }
+    if (!plan) throw new Error("Não foi possível gerar uma query válida.")
 
     const executableDax = injectCustomMeasuresIntoDax(plan.daxQuery)
     const rawResult = await executeDAXQuery(token, datasetId, executableDax)

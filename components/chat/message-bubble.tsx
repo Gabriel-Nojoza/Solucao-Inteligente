@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Bot, User, ChevronDown, ChevronUp, Copy, Check, AlertCircle, BarChart2, Table2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -9,6 +9,7 @@ import { DataTableResult } from "./data-table-result"
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LabelList,
 } from "recharts"
 
 const CHART_COLORS = ["#2563eb", "#f97316", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"]
@@ -31,53 +32,139 @@ function buildChartData(
   return { data, labelKey: "label", valueKey: "value", labelName: labelCol.name, valueName: valueCol.name }
 }
 
+function truncateLabel(label: string, max = 14) {
+  return label.length > max ? label.slice(0, max) + "…" : label
+}
+
+function fmtAxis(v: number) {
+  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
+  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(0)}K`
+  return v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })
+}
+
+function fmtFull(v: number) {
+  return v.toLocaleString("pt-BR", { maximumFractionDigits: 2 })
+}
+
 function ChatChart({ message }: { message: ChatMessage }) {
-  if (!message.data || message.data.rows.length === 0 || !message.chartType) return null
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(320)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const obs = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width
+      if (w) setContainerWidth(w)
+    })
+    obs.observe(el)
+    setContainerWidth(el.getBoundingClientRect().width || 320)
+    return () => obs.disconnect()
+  }, [])
+
+  if (!message.data || message.data.rows.length === 0 || !message.chartType) return (
+    <div ref={containerRef} style={{ width: "100%", minHeight: 1 }} />
+  )
 
   const { data, valueName } = buildChartData(message.data.columns, message.data.rows)
   if (data.length === 0) return null
 
-  const fmt = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 2 })
+  const isWide = containerWidth >= 600
+  const maxLabelLen = Math.max(...data.map((d) => String(d.label).length))
+  const bottomMargin = maxLabelLen > 10 ? 70 : 45
+  const labelMaxChars = isWide ? 26 : 14
+
+
+  const pieRadius = isWide ? 140 : 95
+  const barHeightPerItem = isWide ? 40 : 28
+  const yLabelWidth = isWide
+    ? Math.min(220, Math.max(120, maxLabelLen * 8))
+    : Math.min(140, Math.max(80, maxLabelLen * 6))
 
   if (message.chartType === "pie") {
+    const pieH = isWide ? 380 : 280
     return (
-      <ResponsiveContainer width="100%" height={260}>
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%" outerRadius={90} label={({ label, percent }) => `${label} (${(percent * 100).toFixed(0)}%)`} labelLine={false}>
-            {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-          </Pie>
-          <Tooltip formatter={(v: number) => fmt(v)} />
-        </PieChart>
-      </ResponsiveContainer>
+      <div ref={containerRef} style={{ width: "100%" }}>
+        <ResponsiveContainer width="100%" height={pieH}>
+          <PieChart>
+            <Pie data={data} dataKey="value" nameKey="label" cx="50%" cy="50%"
+              outerRadius={pieRadius}
+              label={({ name, percent }) => isWide ? `${truncateLabel(String(name), 20)} ${(percent * 100).toFixed(0)}%` : `${(percent * 100).toFixed(0)}%`}
+              labelLine={true}
+            >
+              {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            </Pie>
+            <Tooltip formatter={(v: number) => [fmtFull(v), valueName]} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
     )
   }
 
   if (message.chartType === "line") {
+    const lineH = isWide ? Math.max(300, data.length * 28) : Math.max(220, data.length * 22)
     return (
-      <ResponsiveContainer width="100%" height={220}>
-        <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 40 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-          <XAxis dataKey="label" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
-          <YAxis tick={{ fontSize: 10 }} tickFormatter={fmt} width={60} />
-          <Tooltip formatter={(v: number) => [fmt(v), valueName]} />
-          <Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={{ r: 3 }} />
-        </LineChart>
-      </ResponsiveContainer>
+      <div ref={containerRef} style={{ width: "100%" }}>
+        <ResponsiveContainer width="100%" height={lineH}>
+          <LineChart data={data} margin={{ top: 8, right: 24, left: 0, bottom: isWide ? 60 : bottomMargin }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="label" tick={{ fontSize: isWide ? 11 : 10 }}
+              tickFormatter={(v) => truncateLabel(String(v), labelMaxChars)}
+              angle={-35} textAnchor="end" interval={0} />
+            <YAxis tick={{ fontSize: isWide ? 11 : 10 }} tickFormatter={fmtAxis} width={60} />
+            <Tooltip formatter={(v: number) => [fmtFull(v), valueName]} labelFormatter={(l) => String(l)} />
+            <Line type="monotone" dataKey="value" stroke={CHART_COLORS[0]} strokeWidth={2} dot={{ r: isWide ? 4 : 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     )
   }
 
+  // Barras horizontais (sempre para múltiplos itens — melhor para nomes longos)
+  if (data.length > 4) {
+    const chartHeight = data.length * barHeightPerItem + (isWide ? 40 : 20)
+    return (
+      <div ref={containerRef} style={{ width: "100%" }}>
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <BarChart data={data} layout="vertical"
+            margin={{ top: 4, right: isWide ? 64 : 48, left: 0, bottom: 4 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+            <XAxis type="number" tick={{ fontSize: isWide ? 11 : 10 }} tickFormatter={fmtAxis} />
+            <YAxis type="category" dataKey="label" tick={{ fontSize: isWide ? 12 : 10 }}
+              tickFormatter={(v) => truncateLabel(String(v), isWide ? 28 : 18)}
+              width={yLabelWidth}
+            />
+            <Tooltip formatter={(v: number) => [fmtFull(v), valueName]} labelFormatter={(l) => String(l)} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={isWide ? 32 : 22}>
+              {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+              <LabelList dataKey="value" position="right" formatter={fmtAxis}
+                style={{ fontSize: isWide ? 11 : 9, fill: "#64748b" }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  // Barras verticais para poucos itens
+  const barV_H = isWide ? 320 : 240
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 40 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-        <XAxis dataKey="label" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
-        <YAxis tick={{ fontSize: 10 }} tickFormatter={fmt} width={60} />
-        <Tooltip formatter={(v: number) => [fmt(v), valueName]} />
-        <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-          {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <div ref={containerRef} style={{ width: "100%" }}>
+      <ResponsiveContainer width="100%" height={barV_H}>
+        <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: isWide ? 60 : bottomMargin }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="label" tick={{ fontSize: isWide ? 12 : 10 }}
+            tickFormatter={(v) => truncateLabel(String(v), labelMaxChars)}
+            angle={-30} textAnchor="end" interval={0} />
+          <YAxis tick={{ fontSize: isWide ? 11 : 10 }} tickFormatter={fmtAxis} width={60} />
+          <Tooltip formatter={(v: number) => [fmtFull(v), valueName]} labelFormatter={(l) => String(l)} />
+          <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={isWide ? 64 : 48}>
+            {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 

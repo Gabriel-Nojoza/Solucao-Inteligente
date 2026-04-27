@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import Image from "next/image"
 import useSWR from "swr"
-import { Send, Loader2, Trash2, X, Building2 } from "lucide-react"
+import { Send, Loader2, Trash2, X, Building2, Maximize2, Minimize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -41,6 +41,7 @@ function makeGreeting(companyName: string): ChatMessage {
 
 export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const { data: companiesData } = useSWR<{ companies: CompanyStatItem[] }>(
     "/api/admin/company-stats",
@@ -295,14 +296,17 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
       {/* Painel */}
       <div
         className={cn(
-          "fixed bottom-[100px] right-5 z-[60] flex w-[min(calc(100vw-1.5rem),400px)] flex-col rounded-2xl bg-card shadow-[0_20px_60px_rgba(0,0,0,0.4)] ring-1 ring-border transition-all duration-300 sm:bottom-[108px] sm:right-6",
+          "fixed z-[60] flex flex-col bg-card shadow-[0_20px_60px_rgba(0,0,0,0.4)] ring-1 ring-border transition-all duration-300",
+          isFullscreen
+            ? "inset-0 rounded-none"
+            : "bottom-[100px] right-5 w-[min(calc(100vw-1.5rem),400px)] rounded-2xl sm:bottom-[108px] sm:right-6",
           isOpen
             ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
             : "pointer-events-none translate-y-3 scale-[0.97] opacity-0"
         )}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground rounded-t-2xl overflow-hidden">
+        <div className={cn("flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground overflow-hidden", !isFullscreen && "rounded-t-2xl")}>
           <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/10 p-2">
             <Image
               src="/brand/logo-sil.png"
@@ -322,7 +326,15 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
           <Button
             type="button" variant="ghost" size="icon"
             className="h-7 w-7 shrink-0 rounded-full text-primary-foreground/70 hover:bg-primary-foreground/15 hover:text-primary-foreground"
-            onClick={() => setIsOpen(false)}
+            onClick={() => setIsFullscreen((prev) => !prev)}
+            aria-label={isFullscreen ? "Minimizar" : "Ampliar"}
+          >
+            {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </Button>
+          <Button
+            type="button" variant="ghost" size="icon"
+            className="h-7 w-7 shrink-0 rounded-full text-primary-foreground/70 hover:bg-primary-foreground/15 hover:text-primary-foreground"
+            onClick={() => { setIsOpen(false); setIsFullscreen(false) }}
           >
             <X className="size-4" />
           </Button>
@@ -369,7 +381,7 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
         </div>
 
         {/* Mensagens */}
-        <div className="h-[380px] overflow-y-auto bg-card px-4 py-4 space-y-4">
+        <div className={cn("overflow-y-auto bg-card px-4 py-4 space-y-4", isFullscreen ? "flex-1" : "h-[380px]")}>
           {!isReady ? (
             <div className="flex h-full items-center justify-center text-center">
               <div className="space-y-2">
@@ -397,7 +409,7 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
         </div>
 
         {/* Input */}
-        <div className="border-t border-border bg-muted/50 px-4 py-3 rounded-b-2xl">
+        <div className={cn("border-t border-border bg-muted/50 px-4 py-3", !isFullscreen && "rounded-b-2xl")}>
           {isReady && messages.filter((m) => m.id !== "greeting").length > 0 && (
             <div className="mb-2 flex justify-end">
               <Button

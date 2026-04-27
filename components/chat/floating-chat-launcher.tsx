@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import Image from "next/image"
 import useSWR from "swr"
-import { AlertCircle, Bot, Loader2, X } from "lucide-react"
+import { AlertCircle, Bot, Loader2, X, Maximize2, Minimize2 } from "lucide-react"
 import { usePathname } from "next/navigation"
 import { ChatInterface } from "@/components/chat/chat-interface"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ const fetcher = async (url: string) => {
 export function FloatingChatLauncher() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const { data: config, isLoading: configLoading } = useSWR<ChatIAConfig>(
     "/api/chat/config",
@@ -82,14 +83,17 @@ export function FloatingChatLauncher() {
       {/* Painel do chat */}
       <div
         className={cn(
-          "fixed bottom-[100px] right-5 z-[60] flex w-[min(calc(100vw-1.5rem),400px)] flex-col overflow-hidden rounded-2xl bg-card shadow-[0_20px_60px_rgba(0,0,0,0.4)] ring-1 ring-border transition-all duration-300 sm:bottom-[108px] sm:right-6",
+          "fixed z-[60] flex flex-col bg-card shadow-[0_20px_60px_rgba(0,0,0,0.4)] ring-1 ring-border transition-all duration-300",
+          isFullscreen
+            ? "inset-0 rounded-none"
+            : "bottom-[100px] right-5 w-[min(calc(100vw-1.5rem),400px)] rounded-2xl sm:bottom-[108px] sm:right-6",
           isOpen
             ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
             : "pointer-events-none translate-y-3 scale-[0.97] opacity-0"
         )}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground">
+        <div className={cn("flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground", !isFullscreen && "rounded-t-2xl")}>
           <div className="relative -my-3 h-20 w-20 shrink-0">
             <Image
               src="/brand/logo-sil.png"
@@ -108,21 +112,31 @@ export function FloatingChatLauncher() {
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0 rounded-full text-primary-foreground/70 hover:bg-primary-foreground/15 hover:text-primary-foreground"
-            onClick={() => setIsOpen(false)}
+            onClick={() => setIsFullscreen((prev) => !prev)}
+            aria-label={isFullscreen ? "Minimizar" : "Ampliar"}
+          >
+            {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 rounded-full text-primary-foreground/70 hover:bg-primary-foreground/15 hover:text-primary-foreground"
+            onClick={() => { setIsOpen(false); setIsFullscreen(false) }}
           >
             <X className="size-4" />
           </Button>
         </div>
 
         {/* Corpo */}
-        <div className="h-[540px] bg-card">
+        <div className={cn("bg-card", isFullscreen ? "flex-1 overflow-hidden" : "h-[540px]")}>
           {isReady ? (
             <ChatInterface
               datasetId={config!.datasetId}
               workspaceId={config!.workspaceId}
               datasetName={config!.datasetName}
               compact
-              className="bg-card"
+              className="h-full bg-card"
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
