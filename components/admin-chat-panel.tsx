@@ -42,11 +42,12 @@ interface CompanyDatasetsResponse {
   defaultDatasetId: string | null
 }
 
-function makeGreeting(companyName: string): ChatMessage {
+function makeGreeting(companyName: string, datasetName?: string): ChatMessage {
+  const label = datasetName || companyName
   return {
     id: "greeting",
     role: "assistant",
-    content: `Olá! Consultando dados da empresa **${companyName}**.\nFaça perguntas sobre os dados desta empresa.`,
+    content: `Olá! Consultando dados de **${label}**.\nFaça perguntas sobre os dados desta empresa.`,
     timestamp: new Date().toISOString(),
   }
 }
@@ -72,6 +73,7 @@ export function AdminChatPanel({ companies }: AdminChatPanelProps) {
   const datasets: DatasetOption[] = selectedWorkspaceId ? (datasetsByWorkspace[selectedWorkspaceId] ?? []) : []
 
   const selectedCompany = companies.find((c) => c.companyId === selectedCompanyId)
+  const selectedDatasetName = datasets.find((d) => d.datasetId === selectedDatasetId)?.name
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -108,7 +110,8 @@ export function AdminChatPanel({ companies }: AdminChatPanelProps) {
 
       if (defaultDatasetId) {
         const companyName = selectedCompany?.companyName ?? "empresa"
-        setMessages([makeGreeting(companyName)])
+        const dsName = workspaceDatasets.find((d) => d.datasetId === defaultDatasetId)?.name
+        setMessages([makeGreeting(companyName, dsName)])
       }
 
       return
@@ -126,7 +129,8 @@ export function AdminChatPanel({ companies }: AdminChatPanelProps) {
 
       if (defaultDatasetId) {
         const companyName = selectedCompany?.companyName ?? "empresa"
-        setMessages([makeGreeting(companyName)])
+        const dsName = nextDatasets.find((d) => d.datasetId === defaultDatasetId)?.name
+        setMessages([makeGreeting(companyName, dsName)])
       }
     }
   }, [datasetsData, selectedCompany, selectedCompanyId, selectedDatasetId, selectedWorkspaceId])
@@ -150,8 +154,7 @@ export function AdminChatPanel({ companies }: AdminChatPanelProps) {
     const ds = datasets.find((d) => d.datasetId === value)
     setSelectedDatasetId(value)
     const companyName = selectedCompany?.companyName ?? "empresa"
-    setMessages([makeGreeting(companyName)])
-    void ds
+    setMessages([makeGreeting(companyName, ds?.name)])
   }
 
   function detectChartType(q: string): "bar" | "line" | "pie" | null {
@@ -298,7 +301,7 @@ export function AdminChatPanel({ companies }: AdminChatPanelProps) {
             variant="ghost"
             size="sm"
             className="ml-auto h-7 gap-1 text-xs text-muted-foreground"
-            onClick={() => setMessages(selectedCompany ? [makeGreeting(selectedCompany.companyName)] : [])}
+            onClick={() => setMessages(selectedCompany ? [makeGreeting(selectedCompany.companyName, selectedDatasetName)] : [])}
           >
             <Trash2 className="size-3" />
             Limpar

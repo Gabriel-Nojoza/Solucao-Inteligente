@@ -30,11 +30,12 @@ interface CompanyDatasetsResponse {
   defaultDatasetId: string | null
 }
 
-function makeGreeting(companyName: string): ChatMessage {
+function makeGreeting(companyName: string, datasetName?: string): ChatMessage {
+  const label = datasetName || companyName
   return {
     id: "greeting",
     role: "assistant",
-    content: `Olá! Consultando dados de **${companyName}**.\nComo posso ajudar?`,
+    content: `Olá! Consultando dados de **${label}**.\nComo posso ajudar?`,
     timestamp: new Date().toISOString(),
   }
 }
@@ -67,6 +68,7 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
   const datasetsByWorkspace: Record<string, DatasetOption[]> = datasetsData?.datasetsByWorkspace ?? {}
   const datasets: DatasetOption[] = selectedWorkspaceId ? (datasetsByWorkspace[selectedWorkspaceId] ?? []) : []
   const selectedCompany = companies.find((c) => c.companyId === selectedCompanyId)
+  const selectedDatasetName = datasets.find((d) => d.datasetId === selectedDatasetId)?.name
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -103,7 +105,8 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
 
       if (defaultDatasetId) {
         const companyName = selectedCompany?.companyName ?? "empresa"
-        setMessages([makeGreeting(companyName)])
+        const dsName = workspaceDatasets.find((d) => d.datasetId === defaultDatasetId)?.name
+        setMessages([makeGreeting(companyName, dsName)])
       }
 
       return
@@ -121,7 +124,8 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
 
       if (defaultDatasetId) {
         const companyName = selectedCompany?.companyName ?? "empresa"
-        setMessages([makeGreeting(companyName)])
+        const dsName = nextDatasets.find((d) => d.datasetId === defaultDatasetId)?.name
+        setMessages([makeGreeting(companyName, dsName)])
       }
     }
   }, [datasetsData, selectedCompany, selectedCompanyId, selectedDatasetId, selectedWorkspaceId])
@@ -142,9 +146,10 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
   }
 
   function handleDatasetChange(value: string) {
+    const ds = datasets.find((d) => d.datasetId === value)
     setSelectedDatasetId(value)
     const companyName = selectedCompany?.companyName ?? "empresa"
-    setMessages([makeGreeting(companyName)])
+    setMessages([makeGreeting(companyName, ds?.name)])
   }
 
   function detectChartType(q: string): "bar" | "line" | "pie" | null {
@@ -415,7 +420,7 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
               <Button
                 variant="ghost" size="sm"
                 className="h-6 gap-1 text-[10px] text-muted-foreground hover:text-foreground"
-                onClick={() => setMessages([makeGreeting(selectedCompany?.companyName ?? "empresa")])}
+                onClick={() => setMessages([makeGreeting(selectedCompany?.companyName ?? "empresa", selectedDatasetName)])}
               >
                 <Trash2 className="size-3" /> Limpar
               </Button>

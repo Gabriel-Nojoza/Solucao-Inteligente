@@ -341,6 +341,43 @@ export async function POST(request: Request) {
       )
     }
 
+    // ── Verificar limite mensal de perguntas ──
+    const { data: limitsRow } = await supabase
+      .from("company_settings")
+      .select("value")
+      .eq("company_id", companyId)
+      .eq("key", "usage_limits")
+      .maybeSingle()
+
+    const limitsValue = limitsRow?.value as Record<string, unknown> | null
+    const chatLimit = typeof limitsValue?.chat_limit === "number" ? limitsValue.chat_limit : null
+
+    if (chatLimit !== null && chatLimit > 0) {
+      const startOfMonth = new Date()
+      startOfMonth.setDate(1)
+      startOfMonth.setHours(0, 0, 0, 0)
+
+      const { count } = await supabase
+        .from("chat_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .gte("created_at", startOfMonth.toISOString())
+
+      const used = count ?? 0
+      if (used >= chatLimit) {
+        return NextResponse.json<ChatApiResponse>(
+          {
+            answer: `⚠️ Limite mensal de ${chatLimit} perguntas atingido (${used} utilizadas). Fale com o administrador para aumentar o limite.`,
+            data: null,
+            daxQuery: null,
+            confidence: "low",
+            error: "Limite de perguntas atingido",
+          },
+          { status: 429 }
+        )
+      }
+    }
+
     if (!datasetId || !workspaceId) {
       return NextResponse.json<ChatApiResponse>(
         { answer: "Selecione um workspace e dataset antes de fazer perguntas.", data: null, daxQuery: null, confidence: "low" },

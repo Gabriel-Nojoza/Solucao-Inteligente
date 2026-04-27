@@ -176,6 +176,41 @@ export async function POST(request: NextRequest) {
     schedule.bot_instance_id = resolvedBotInstance.id
   }
 
+  // ── Verificar limite mensal de relatórios ──
+  const { data: limitsRow } = await supabase
+    .from("company_settings")
+    .select("value")
+    .eq("company_id", companyId)
+    .eq("key", "usage_limits")
+    .maybeSingle()
+
+  const limitsValue = limitsRow?.value as Record<string, unknown> | null
+  const reportLimit = typeof limitsValue?.report_limit === "number" ? limitsValue.report_limit : null
+
+  if (reportLimit !== null && reportLimit > 0) {
+    const startOfMonth = new Date()
+    startOfMonth.setDate(1)
+    startOfMonth.setHours(0, 0, 0, 0)
+
+    const { count: usedThisMonth } = await supabase
+      .from("dispatch_logs")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .in("status", ["delivered", "failed"])
+      .gte("created_at", startOfMonth.toISOString())
+
+    const used = usedThisMonth ?? 0
+    if (used >= reportLimit) {
+      return NextResponse.json(
+        {
+          error: `Limite mensal de ${reportLimit} relatórios atingido (${used} enviados). Fale com o administrador para aumentar o limite.`,
+          limitReached: true,
+        },
+        { status: 429 }
+      )
+    }
+  }
+
   const scheduleReportConfigs = resolveScheduleReportConfigs(schedule)
   const primaryScheduleReportConfig = getPrimaryScheduleReportConfig(scheduleReportConfigs)
 
