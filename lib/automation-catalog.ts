@@ -17,6 +17,14 @@ export type CatalogEntry = {
 
 export type CatalogMap = Record<string, CatalogEntry>
 
+type CatalogCacheEntry = {
+  value: CatalogMap
+  expiresAt: number
+}
+
+const CATALOG_CACHE_TTL_MS = 60 * 1000
+const catalogMapCache = new Map<string, CatalogCacheEntry>()
+
 function buildCatalogEntry(
   current: CatalogEntry | undefined,
   entry: Partial<CatalogEntry> & { updated_at: string }
@@ -61,6 +69,11 @@ async function persistCatalogMap(companyId: string, catalogs: CatalogMap) {
     )
 
   if (error) throw new Error(error.message)
+
+  catalogMapCache.set(companyId, {
+    value: catalogs,
+    expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
+  })
 }
 
 export function isValidCatalog(catalog: unknown): catalog is CatalogPayload {
@@ -74,6 +87,11 @@ export function isValidCatalog(catalog: unknown): catalog is CatalogPayload {
 }
 
 export async function getCatalogMap(companyId: string) {
+  const cached = catalogMapCache.get(companyId)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
+
   const supabase = createClient()
   const { data, error } = await supabase
     .from("company_settings")
@@ -89,7 +107,13 @@ export async function getCatalogMap(companyId: string) {
     return {} as CatalogMap
   }
 
-  return raw as CatalogMap
+  const catalogs = raw as CatalogMap
+  catalogMapCache.set(companyId, {
+    value: catalogs,
+    expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
+  })
+
+  return catalogs
 }
 
 export async function saveCatalogEntry(

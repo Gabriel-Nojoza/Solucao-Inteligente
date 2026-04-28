@@ -7,7 +7,7 @@ import {
 } from "@/lib/chat-ia-config"
 import { getRequestContext } from "@/lib/tenant"
 import { getWorkspaceAccessScope, isDatasetAllowed, isWorkspaceAllowed } from "@/lib/workspace-access"
-import { getCatalogMap } from "@/lib/automation-catalog"
+import { getCatalogMap, type CatalogEntry } from "@/lib/automation-catalog"
 import {
   buildChatSystemPrompt,
   buildConversationMessages,
@@ -182,13 +182,12 @@ async function getChatWebhookUrl(
 async function loadEffectiveMetadata(
   token: string,
   datasetId: string,
-  companyId: string
+  companyId: string,
+  catalogEntry?: CatalogEntry | null
 ): Promise<DatasetMetadata> {
   // Tenta catálogo fixo primeiro (scanner API)
   try {
-    const { getCatalogMap } = await import("@/lib/automation-catalog")
-    const catalogs = await getCatalogMap(companyId)
-    const entry = catalogs[datasetId]
+    const entry = catalogEntry ?? (await getCatalogMap(companyId))[datasetId]
 
     if (
       entry?.catalog &&
@@ -290,14 +289,18 @@ export async function POST(request: Request) {
     const body = (await request.json()) as ChatRequest & { chartType?: string }
     const { question, datasetId, workspaceId, conversationHistory = [], chartType } = body
 
-    const { data: chatSettingsRow } = await supabase
+    const { data: settingsRows } = await supabase
       .from("company_settings")
-      .select("value")
+      .select("key, value")
       .eq("company_id", companyId)
-      .eq("key", "chat_ia")
-      .maybeSingle()
+      .in("key", ["chat_ia", "usage_limits", "n8n"])
 
-    const chatSettings = normalizeChatIASettings(chatSettingsRow?.value)
+    const settingsMap = new Map(
+      (settingsRows ?? []).map((row) => [row.key, row.value as Record<string, unknown> | null])
+    )
+
+    const chatSettingsRaw = settingsMap.get("chat_ia")
+    const chatSettings = normalizeChatIASettings(chatSettingsRaw)
     const chatIAIsManaged =
       chatSettings.enabled ||
       !!chatSettings.workspaceId ||
@@ -310,7 +313,7 @@ export async function POST(request: Request) {
       await supabase
         .from("company_settings")
         .update({
-          value: buildDisabledExpiredChatIASettingsValue(chatSettingsRow?.value),
+          value: buildDisabledExpiredChatIASettingsValue(chatSettingsRaw),
           updated_at: new Date().toISOString(),
         })
         .eq("company_id", companyId)
@@ -342,15 +345,15 @@ export async function POST(request: Request) {
     }
 
     // ── Verificar limite mensal de perguntas ──
-    const { data: limitsRow } = await supabase
-      .from("company_settings")
-      .select("value")
-      .eq("company_id", companyId)
-      .eq("key", "usage_limits")
-      .maybeSingle()
-
-    const limitsValue = limitsRow?.value as Record<string, unknown> | null
+    const limitsValue = settingsMap.get("usage_limits") as Record<string, unknown> | null
     const chatLimit = typeof limitsValue?.chat_limit === "number" ? limitsValue.chat_limit : null
+    const chatExcessPrice = typeof limitsValue?.chat_excess_price === "number" ? limitsValue.chat_excess_price : null
+    const n8nSettings = settingsMap.get("n8n") as Record<string, unknown> | null
+    const n8nWebhookUrl =
+      chatSettings.webhookUrl ||
+      (typeof n8nSettings?.chat_webhook_url === "string" && n8nSettings.chat_webhook_url.trim()
+        ? n8nSettings.chat_webhook_url.trim()
+        : null)
 
     if (chatLimit !== null && chatLimit > 0) {
       const startOfMonth = new Date()
@@ -405,19 +408,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Workspace não pertence à empresa" }, { status: 403 })
     }
 
-    const { data: report } = await supabase
-      .from("reports")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("dataset_id", datasetId)
-      .limit(1)
-      .maybeSingle()
+    const [{ data: report }, catalogs] = await Promise.all([
+      supabase
+        .from("reports")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("dataset_id", datasetId)
+        .limit(1)
+        .maybeSingle(),
+      getCatalogMap(companyId),
+    ])
 
-    const catalogs = await getCatalogMap(companyId)
     const catalogEntry = catalogs[datasetId]
+    let token: string | null = null
 
     if (!report && !catalogEntry) {
-      const token = await getAccessToken()
+      token = await getAccessToken()
       const datasets = await listDatasets(token, workspaceId)
       const datasetExists = datasets.some((d) => d.id === datasetId)
 
@@ -427,9 +433,9 @@ export async function POST(request: Request) {
     }
 
     // ── Carregar metadata ──
-    const token = await getAccessToken()
+    token = token ?? await getAccessToken()
     const metadata = withCustomChatMeasures(
-      await loadEffectiveMetadata(token, datasetId, companyId)
+      await loadEffectiveMetadata(token, datasetId, companyId, catalogEntry)
     )
 
     if (
@@ -450,12 +456,6 @@ export async function POST(request: Request) {
     const messages = buildConversationMessages(systemPrompt, conversationHistory, question)
 
     // ── Verificar se n8n chat webhook está configurado ──
-    const n8nWebhookUrl = await getChatWebhookUrl(
-      supabase,
-      companyId,
-      chatSettings.webhookUrl
-    )
-
     // ── Fluxo N8N com pedido de gráfico: pede dados estruturados pelo próprio webhook ──
     if (n8nWebhookUrl && chartType) {
       const chartQuestion = `[CHART_REQUEST] Repita a última consulta e retorne APENAS um JSON no formato exato (sem markdown, sem texto): {"columns":[{"name":"NomeColuna","dataType":"String"}],"rows":[{"NomeColuna":"valor"}]}`
@@ -552,18 +552,6 @@ export async function POST(request: Request) {
     let warning: string | undefined
     if (question.trim().split(/\s+/).length >= 2) {
       await supabase.from("chat_logs").insert({ company_id: companyId })
-
-      // Verificar percentual de uso e emitir aviso
-      const { data: limitsRow } = await supabase
-        .from("company_settings")
-        .select("value")
-        .eq("company_id", companyId)
-        .eq("key", "usage_limits")
-        .maybeSingle()
-
-      const limits = limitsRow?.value as Record<string, unknown> | null
-      const chatLimit = typeof limits?.chat_limit === "number" ? limits.chat_limit : null
-      const chatExcessPrice = typeof limits?.chat_excess_price === "number" ? limits.chat_excess_price : null
 
       if (chatLimit !== null && chatLimit > 0) {
         const startOfMonth = new Date()

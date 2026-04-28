@@ -9,8 +9,37 @@ type EmbedTokenCacheEntry = {
   expiresAt: number
 }
 
+type CachedValue<T> = {
+  value: T
+  expiresAt: number
+}
+
+type DatasetMetadataSnapshot = {
+  tables: Array<{ name: string; description: string; isHidden: boolean }>
+  columns: Array<{
+    tableName: string
+    columnName: string
+    dataType: string
+    isHidden: boolean
+    expression?: string
+  }>
+  measures: Array<{
+    tableName: string
+    measureName: string
+    expression: string
+    dataType?: string
+    isHidden: boolean
+  }>
+}
+
 const embedTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const accessTokenCache = new Map<string, EmbedTokenCacheEntry>()
+const powerBiConfigCache = new Map<string, CachedValue<PowerBIConfig>>()
+const datasetMetadataCache = new Map<string, CachedValue<DatasetMetadataSnapshot>>()
+const datasetMetadataRequestCache = new Map<string, Promise<DatasetMetadataSnapshot>>()
+
+const POWERBI_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000
+const DATASET_METADATA_CACHE_TTL_MS = 10 * 60 * 1000
 
 type ParsedPowerBiError = {
   code: string | null
@@ -138,6 +167,11 @@ async function getConfig(): Promise<PowerBIConfig> {
 }
 
 async function getConfigForCompany(companyId: string): Promise<PowerBIConfig> {
+  const cached = powerBiConfigCache.get(companyId)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
+
   const supabase = await createClient()
 
   const { data } = await supabase
@@ -151,7 +185,14 @@ async function getConfigForCompany(companyId: string): Promise<PowerBIConfig> {
     throw new Error("Configuracoes do Power BI nao encontradas")
   }
 
-  return data.value as unknown as PowerBIConfig
+  const config = data.value as unknown as PowerBIConfig
+
+  powerBiConfigCache.set(companyId, {
+    value: config,
+    expiresAt: Date.now() + POWERBI_CONFIG_CACHE_TTL_MS,
+  })
+
+  return config
 }
 
 export async function getAccessToken(companyId?: string): Promise<string> {
@@ -500,6 +541,17 @@ export async function executeDAXQuery(
 }
 
 export async function getDatasetMetadata(token: string, datasetId: string) {
+  const cached = datasetMetadataCache.get(datasetId)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
+  }
+
+  const pendingRequest = datasetMetadataRequestCache.get(datasetId)
+  if (pendingRequest) {
+    return pendingRequest
+  }
+
+  const request = (async () => {
   const [tablesResult, columnsResult, measuresResult] = await Promise.all([
     executeDAXQuery(token, datasetId, "EVALUATE INFO.VIEW.TABLES()"),
     executeDAXQuery(token, datasetId, "EVALUATE INFO.VIEW.COLUMNS()"),
@@ -562,7 +614,23 @@ export async function getDatasetMetadata(token: string, datasetId: string) {
       return true
     })
 
-  return { tables, columns, measures }
+    const metadata = { tables, columns, measures }
+
+    datasetMetadataCache.set(datasetId, {
+      value: metadata,
+      expiresAt: Date.now() + DATASET_METADATA_CACHE_TTL_MS,
+    })
+
+    return metadata
+  })()
+
+  datasetMetadataRequestCache.set(datasetId, request)
+
+  try {
+    return await request
+  } finally {
+    datasetMetadataRequestCache.delete(datasetId)
+  }
 }
 
 type WorkspaceScanStatus = "NotStarted" | "Running" | "Succeeded" | "Failed"
