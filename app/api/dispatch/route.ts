@@ -163,11 +163,11 @@ export async function POST(request: NextRequest) {
 
   if (dispatchSettingsRow?.value) {
     const dispatchConfig = normalizeDispatchSettings(dispatchSettingsRow.value)
-    if (!dispatchConfig.effectiveEnabled) {
-      const msg = dispatchConfig.isExpired
-        ? "O periodo de teste para envio de relatorios expirou. Entre em contato com o administrador."
-        : "O envio de relatorios esta desativado para esta conta. Entre em contato com o administrador."
-      return NextResponse.json({ error: msg }, { status: 403 })
+    if (dispatchConfig.enabled && dispatchConfig.isExpired) {
+      return NextResponse.json(
+        { error: "O periodo de teste para envio de relatorios expirou. Entre em contato com o administrador." },
+        { status: 403 }
+      )
     }
   }
 

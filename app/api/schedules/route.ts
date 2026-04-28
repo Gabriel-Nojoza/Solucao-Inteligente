@@ -150,7 +150,7 @@ async function checkDispatchExpiry(supabase: ReturnType<typeof createClient>, co
     .maybeSingle()
   if (!data?.value) return false
   const cfg = normalizeDispatchSettings(data.value)
-  return !cfg.effectiveEnabled
+  return cfg.enabled && cfg.isExpired
 }
 
 export async function GET() {
