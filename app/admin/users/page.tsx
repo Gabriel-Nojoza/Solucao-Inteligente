@@ -6,6 +6,7 @@ import { Plus, Pencil, Trash2, Shield, User, Loader2, Eye, EyeOff, Database, Ale
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { calculateChatIATrialEndsAt } from "@/lib/chat-ia-config"
+import { calculateDispatchTrialEndsAt } from "@/lib/dispatch-config"
 import { formatDatePtBr } from "@/lib/datetime"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -72,6 +73,12 @@ interface UserData {
     dataset_id?: string
     dataset_name?: string
     webhook_url?: string
+    trial_days?: number | null
+    trial_started_at?: string
+    trial_ends_at?: string
+  }
+  dispatch_settings?: {
+    enabled?: boolean
     trial_days?: number | null
     trial_started_at?: string
     trial_ends_at?: string
@@ -157,6 +164,9 @@ export default function UsersPage() {
   const [formChatIaWebhookUrl, setFormChatIaWebhookUrl] = useState("")
   const [formChatIaTrialDays, setFormChatIaTrialDays] = useState("")
   const [formChatIaTrialEndsAt, setFormChatIaTrialEndsAt] = useState("")
+  const [formDispatchEnabled, setFormDispatchEnabled] = useState(false)
+  const [formDispatchTrialDays, setFormDispatchTrialDays] = useState("")
+  const [formDispatchTrialEndsAt, setFormDispatchTrialEndsAt] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [showN8nCallbackSecret, setShowN8nCallbackSecret] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -185,6 +195,13 @@ export default function UsersPage() {
     !!formChatIaWebhookUrl ||
     !!formChatIaTrialDays.trim() ||
     !!formChatIaTrialEndsAt
+  const parsedDispatchTrialDays = formDispatchTrialDays.trim()
+    ? Number.parseInt(formDispatchTrialDays.trim(), 10)
+    : null
+  const dispatchTrialEndsAtLabel = formatDateTimePtBr(formDispatchTrialEndsAt)
+  const dispatchTrialExpired = formDispatchTrialEndsAt
+    ? Date.parse(formDispatchTrialEndsAt) <= Date.now()
+    : false
 
   function notifySuccess(message: string) {
     window.setTimeout(() => {
@@ -218,6 +235,9 @@ export default function UsersPage() {
     setFormChatIaWebhookUrl("")
     setFormChatIaTrialDays("")
     setFormChatIaTrialEndsAt("")
+    setFormDispatchEnabled(false)
+    setFormDispatchTrialDays("")
+    setFormDispatchTrialEndsAt("")
     setLoadingEditDetails(false)
     setShowPassword(false)
     setShowN8nCallbackSecret(false)
@@ -250,6 +270,9 @@ export default function UsersPage() {
     setFormChatIaWebhookUrl("")
     setFormChatIaTrialDays("")
     setFormChatIaTrialEndsAt("")
+    setFormDispatchEnabled(false)
+    setFormDispatchTrialDays("")
+    setFormDispatchTrialEndsAt("")
     setShowPassword(false)
     setShowN8nCallbackSecret(false)
     setPowerbiPreview(null)
@@ -285,6 +308,11 @@ export default function UsersPage() {
         details.chat_ia?.trial_days ? String(details.chat_ia.trial_days) : ""
       )
       setFormChatIaTrialEndsAt(details.chat_ia?.trial_ends_at ?? "")
+      setFormDispatchEnabled(details.dispatch_settings?.enabled ?? false)
+      setFormDispatchTrialDays(
+        details.dispatch_settings?.trial_days ? String(details.dispatch_settings.trial_days) : ""
+      )
+      setFormDispatchTrialEndsAt(details.dispatch_settings?.trial_ends_at ?? "")
       setWorkspaceOptions(details.available_workspaces || [])
       setSelectedPbiWorkspaceIds(details.selected_pbi_workspace_ids || [])
       setSelectedPbiDatasetIds(details.selected_pbi_dataset_ids || [])
@@ -446,6 +474,18 @@ export default function UsersPage() {
       notifyError("Dias de teste do Chat IA deve ser um numero inteiro maior que zero")
       return
     }
+    if (
+      formRole === "client" &&
+      formDispatchTrialDays.trim() &&
+      (
+        parsedDispatchTrialDays === null ||
+        !Number.isInteger(parsedDispatchTrialDays) ||
+        parsedDispatchTrialDays <= 0
+      )
+    ) {
+      notifyError("Dias de teste de Envios deve ser um numero inteiro maior que zero")
+      return
+    }
 
     setSaving(true)
     try {
@@ -497,6 +537,10 @@ export default function UsersPage() {
                 webhook_url: formChatIaWebhookUrl,
                 trial_days: formChatIaTrialDays.trim() || null,
               }
+            : undefined,
+        dispatch_settings:
+          formRole === "client"
+            ? { enabled: formDispatchEnabled, trial_days: formDispatchTrialDays.trim() || null }
             : undefined,
         selected_pbi_workspace_ids:
           formRole === "client" && workspaceOptions.length > 0
@@ -1163,6 +1207,79 @@ export default function UsersPage() {
                           </div>
                         )}
                       </div>
+                    )}
+                  </div>
+
+                  {/* Envio de Relatórios — Dias de Teste */}
+                  <div className="rounded-lg border border-border/60 p-3 md:col-span-2">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-sm font-medium">Envio de Relatorios</p>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="dispatch-enabled" className="text-xs text-muted-foreground">
+                          {formDispatchEnabled ? "Ativado" : "Desativado"}
+                        </Label>
+                        <Switch
+                          id="dispatch-enabled"
+                          checked={formDispatchEnabled}
+                          onCheckedChange={setFormDispatchEnabled}
+                        />
+                      </div>
+                    </div>
+                    {formDispatchEnabled && (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-2">
+                        <Label>Dias de teste (opcional)</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={formDispatchTrialDays}
+                          onChange={(e) => {
+                            const nextValue = e.target.value
+                            const nextTrialDays = nextValue.trim()
+                              ? Number.parseInt(nextValue.trim(), 10)
+                              : null
+                            setFormDispatchTrialDays(nextValue)
+                            setFormDispatchTrialEndsAt(
+                              nextTrialDays && Number.isInteger(nextTrialDays) && nextTrialDays > 0
+                                ? calculateDispatchTrialEndsAt(nextTrialDays)
+                                : ""
+                            )
+                          }}
+                          placeholder="Ex.: 30"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Deixe vazio para nao aplicar limite. Ao salvar, a data final sera calculada automaticamente.
+                        </p>
+                      </div>
+
+                      {(dispatchTrialEndsAtLabel || formDispatchTrialDays.trim()) && (
+                        <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {formDispatchTrialDays.trim() ? (
+                              <Badge variant="secondary" className="font-normal">
+                                {formDispatchTrialDays.trim()} dia(s) de teste
+                              </Badge>
+                            ) : null}
+                            {dispatchTrialEndsAtLabel ? (
+                              <Badge
+                                variant={dispatchTrialExpired ? "destructive" : "outline"}
+                                className="font-normal"
+                              >
+                                {dispatchTrialExpired ? "Teste expirado" : `Expira em ${dispatchTrialEndsAtLabel}`}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="font-normal">
+                                A data final sera gerada ao salvar
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-2 text-muted-foreground">
+                            Apos a data final, o cliente nao consegue acessar nem disparar relatorios.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                     )}
                   </div>
                 </>

@@ -14,6 +14,7 @@ import {
 } from "@/lib/schedule-report-configs"
 import { normalizeSchedulePageNames } from "@/lib/schedule-pages"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
+import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 import {
   getCompanyWhatsAppBotInstance,
   isMissingBotInstanceIdColumnError,
@@ -140,11 +141,31 @@ const scheduleUpdateSchema = baseScheduleSchema
   })
   .superRefine(validateScheduleReports)
 
+async function checkDispatchExpiry(supabase: ReturnType<typeof createClient>, companyId: string) {
+  const { data } = await supabase
+    .from("company_settings")
+    .select("value")
+    .eq("company_id", companyId)
+    .eq("key", "dispatch_settings")
+    .maybeSingle()
+  if (!data?.value) return false
+  const cfg = normalizeDispatchSettings(data.value)
+  return !cfg.effectiveEnabled
+}
+
 export async function GET() {
   try {
     const context = await getRequestContext()
     const { companyId } = context
     const supabase = createClient()
+
+    if (await checkDispatchExpiry(supabase, companyId)) {
+      return NextResponse.json(
+        { error: "O periodo de teste para envio de relatorios expirou." },
+        { status: 403 }
+      )
+    }
+
     const scope = await getWorkspaceAccessScope(supabase, context)
 
     if (scope.datasetRestricted && scope.datasetIds.length === 0) {
@@ -242,6 +263,14 @@ export async function POST(request: NextRequest) {
   const context = await getRequestContext()
   const { companyId } = context
   const supabase = createClient()
+
+  if (await checkDispatchExpiry(supabase, companyId)) {
+    return NextResponse.json(
+      { error: "O periodo de teste para envio de relatorios expirou." },
+      { status: 403 }
+    )
+  }
+
   const scope = await getWorkspaceAccessScope(supabase, context)
   const accessMaps = await getScheduleAccessMaps(supabase, companyId, scope)
   const body = await request.json()

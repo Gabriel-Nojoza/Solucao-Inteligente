@@ -26,6 +26,7 @@ import {
 } from "@/lib/powerbi-report-pdf"
 import { getAccessToken } from "@/lib/powerbi"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
+import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
 import { getCompanyWhatsAppBotInstance } from "@/lib/whatsapp-bot-instances"
 
@@ -151,6 +152,24 @@ export async function POST(request: NextRequest) {
     }
   }
 
+
+  // Verificar se o periodo de teste de disparos expirou
+  const { data: dispatchSettingsRow } = await supabase
+    .from("company_settings")
+    .select("value")
+    .eq("company_id", companyId)
+    .eq("key", "dispatch_settings")
+    .maybeSingle()
+
+  if (dispatchSettingsRow?.value) {
+    const dispatchConfig = normalizeDispatchSettings(dispatchSettingsRow.value)
+    if (!dispatchConfig.effectiveEnabled) {
+      const msg = dispatchConfig.isExpired
+        ? "O periodo de teste para envio de relatorios expirou. Entre em contato com o administrador."
+        : "O envio de relatorios esta desativado para esta conta. Entre em contato com o administrador."
+      return NextResponse.json({ error: msg }, { status: 403 })
+    }
+  }
 
   const { data: schedule } = await supabase
     .from("schedules")

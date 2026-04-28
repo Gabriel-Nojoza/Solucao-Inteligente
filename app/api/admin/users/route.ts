@@ -5,6 +5,10 @@ import {
   buildDisabledExpiredChatIASettingsValue,
   normalizeChatIASettings,
 } from "@/lib/chat-ia-config"
+import {
+  buildDispatchSettingsValue,
+  normalizeDispatchSettings,
+} from "@/lib/dispatch-config"
 import { requireAdminContext } from "@/lib/tenant"
 import { listDatasets, listReports, listWorkspaces } from "@/lib/powerbi"
 import {
@@ -69,7 +73,7 @@ async function getUserSettingsSnapshot(
       .from("company_settings")
       .select("key, value")
       .eq("company_id", companyId)
-      .in("key", ["powerbi", "n8n", "chat_ia"]),
+      .in("key", ["powerbi", "n8n", "chat_ia", "dispatch_settings"]),
   ])
 
   if (companyErr) throw companyErr
@@ -97,11 +101,15 @@ async function getUserSettingsSnapshot(
     settingsMap.set("chat_ia", disabledChatIA)
   }
 
+  const rawDispatch = settingsMap.get("dispatch_settings")
+  const dispatchConfig = normalizeDispatchSettings(rawDispatch)
+
   return {
     company_name: company?.name ?? "",
     powerbi: settingsMap.get("powerbi"),
     n8n: settingsMap.get("n8n"),
     chat_ia: settingsMap.get("chat_ia"),
+    dispatch_settings: rawDispatch ?? dispatchConfig,
   }
 }
 
@@ -318,7 +326,7 @@ export async function POST(request: Request) {
     const context = await requireAdminContext()
     const supabase = getAdminClient()
     const body = await request.json()
-    const { email, password, name, role, company_name, powerbi, n8n, chat_ia } = body
+    const { email, password, name, role, company_name, powerbi, n8n, chat_ia, dispatch_settings } = body
     const normalizedEmail = String(email ?? "").trim().toLowerCase()
     const normalizedPassword = String(password ?? "").trim()
     const normalizedName = String(name ?? "").trim()
@@ -420,6 +428,12 @@ export async function POST(request: Request) {
               company_id: targetCompanyId,
               key: "chat_ia",
               value: buildChatIASettingsValue(chat_ia),
+              updated_at: new Date().toISOString(),
+            },
+            {
+              company_id: targetCompanyId,
+              key: "dispatch_settings",
+              value: buildDispatchSettingsValue(dispatch_settings),
               updated_at: new Date().toISOString(),
             },
           ],
@@ -553,6 +567,7 @@ export async function PUT(request: Request) {
       powerbi,
       n8n,
       chat_ia,
+      dispatch_settings,
       selected_pbi_workspace_ids,
       selected_pbi_dataset_access,
       selected_pbi_dataset_ids,
@@ -658,12 +673,20 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: message }, { status: 400 })
       }
 
-      const { data: existingChatIA } = await supabase
-        .from("company_settings")
-        .select("value")
-        .eq("company_id", targetCompanyId)
-        .eq("key", "chat_ia")
-        .maybeSingle()
+      const [{ data: existingChatIA }, { data: existingDispatch }] = await Promise.all([
+        supabase
+          .from("company_settings")
+          .select("value")
+          .eq("company_id", targetCompanyId)
+          .eq("key", "chat_ia")
+          .maybeSingle(),
+        supabase
+          .from("company_settings")
+          .select("value")
+          .eq("company_id", targetCompanyId)
+          .eq("key", "dispatch_settings")
+          .maybeSingle(),
+      ])
 
       const { error: settingsErr } = await supabase
         .from("company_settings")
@@ -693,6 +716,12 @@ export async function PUT(request: Request) {
               company_id: targetCompanyId,
               key: "chat_ia",
               value: buildChatIASettingsValue(chat_ia, existingChatIA?.value),
+              updated_at: new Date().toISOString(),
+            },
+            {
+              company_id: targetCompanyId,
+              key: "dispatch_settings",
+              value: buildDispatchSettingsValue(dispatch_settings, existingDispatch?.value),
               updated_at: new Date().toISOString(),
             },
           ],
