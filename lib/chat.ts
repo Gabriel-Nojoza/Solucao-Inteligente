@@ -93,6 +93,65 @@ export type DatasetMetadata = {
   measures: DatasetMeasure[]
 }
 
+function collectWebhookText(value: unknown): string[] {
+  if (typeof value === "string") {
+    const text = value.trim()
+    return text ? [text] : []
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectWebhookText(item))
+  }
+
+  if (!value || typeof value !== "object") {
+    return []
+  }
+
+  const record = value as Record<string, unknown>
+  const directTextFields = ["content", "text", "message", "markdown", "value"]
+
+  for (const field of directTextFields) {
+    const text = collectWebhookText(record[field])
+    if (text.length > 0) {
+      return text
+    }
+  }
+
+  if (Array.isArray(record.items)) {
+    return record.items.flatMap((item) =>
+      collectWebhookText(item).map((line) =>
+        /^[-•*]\s/.test(line) ? line : `- ${line}`
+      )
+    )
+  }
+
+  if (Array.isArray(record.blocks)) {
+    return collectWebhookText(record.blocks)
+  }
+
+  return []
+}
+
+export function extractWebhookAnswer(payload: Record<string, unknown>): string {
+  const candidateFields = [
+    payload.output,
+    payload.answer,
+    payload.message,
+    payload.response,
+    payload.content,
+    payload.blocks,
+  ]
+
+  for (const candidate of candidateFields) {
+    const parts = collectWebhookText(candidate)
+    if (parts.length > 0) {
+      return parts.join("\n\n").trim()
+    }
+  }
+
+  return JSON.stringify(payload)
+}
+
 function normalizeMeasureName(value: string) {
   return value.trim().toLowerCase()
 }

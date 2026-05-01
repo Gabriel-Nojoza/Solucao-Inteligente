@@ -6,6 +6,7 @@ import { getCatalogMap } from "@/lib/automation-catalog"
 import {
   buildChatSystemPrompt,
   buildConversationMessages,
+  extractWebhookAnswer,
   injectCustomMeasuresIntoDax,
   validateQueryPlan,
   formatDataAnswer,
@@ -229,10 +230,7 @@ export async function POST(request: Request) {
 
         if (resp.ok) {
           const data = await resp.json() as Record<string, unknown>
-          const answer =
-            (typeof data.output === "string" && data.output.trim()) ||
-            (typeof data.answer === "string" && data.answer.trim()) ||
-            JSON.stringify(data)
+          const answer = extractWebhookAnswer(data)
 
           return NextResponse.json<ChatApiResponse>({
             answer,

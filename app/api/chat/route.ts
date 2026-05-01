@@ -11,6 +11,7 @@ import { getCatalogMap, type CatalogEntry } from "@/lib/automation-catalog"
 import {
   buildChatSystemPrompt,
   buildConversationMessages,
+  extractWebhookAnswer,
   injectCustomMeasuresIntoDax,
   validateQueryPlan,
   formatDataAnswer,
@@ -128,21 +129,12 @@ async function callN8nChatWebhook(
 
   const data = await response.json() as Record<string, unknown>
 
-  // N8N AI Agent retorna { output: "..." }
-  if (typeof data.output === "string" && data.output.trim()) {
-    return data.output.trim()
-  }
-
-  if (typeof data.answer === "string" && data.answer.trim()) {
-    return data.answer.trim()
-  }
-
   // Caso retorne DAX plan como JSON
   if (typeof data.daxQuery === "string") {
     return JSON.stringify(data)
   }
 
-  return JSON.stringify(data)
+  return extractWebhookAnswer(data)
 }
 
 // ─── load n8n settings ────────────────────────────────────────────────────────
