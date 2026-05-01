@@ -6,6 +6,7 @@ import { StatsCards } from "@/components/dashboard/stats-cards"
 import { DispatchChart } from "@/components/dashboard/dispatch-chart"
 import { DispatchStatusPie } from "@/components/dashboard/dispatch-status-pie"
 import { RecentDispatches } from "@/components/dashboard/recent-dispatches"
+import { UpcomingDispatches } from "@/components/dashboard/upcoming-dispatches"
 import { DispatchCalendar } from "@/components/dashboard/dispatch-calendar"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -87,10 +88,16 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {logsLoading ? (
-          <Skeleton className="h-[300px] rounded-xl" />
+        {logsLoading || statsLoading ? (
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Skeleton className="h-[300px] rounded-xl" />
+            <Skeleton className="h-[300px] rounded-xl" />
+          </div>
         ) : (
-          <RecentDispatches logs={logsData?.data ?? []} />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <RecentDispatches logs={logsData?.data ?? []} />
+            <UpcomingDispatches items={stats?.nextDispatches ?? []} />
+          </div>
         )}
 
         <DispatchCalendar />

@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { getRequestContext, isAuthContextError } from "@/lib/tenant"
-import { getAccessibleScheduleIds } from "@/lib/schedule-access"
+import {
+  getScheduleAccessMaps,
+  isScheduleAccessible,
+} from "@/lib/schedule-access"
 import { readWhatsAppBotRuntimeState } from "@/lib/whatsapp-bot"
 import {
   getWorkspaceAccessScope,
@@ -19,6 +22,8 @@ import {
   canAccessDispatchLog,
   getCompanyScheduleIdSet,
 } from "@/lib/dispatch-log-visibility"
+import { describeCronValue, getNextCronOccurrence } from "@/lib/schedule-cron"
+import { resolveScheduleReportConfigs } from "@/lib/schedule-report-configs"
 
 type DispatchLogStatsRecord = {
   schedule_id?: string | null
@@ -27,6 +32,48 @@ type DispatchLogStatsRecord = {
   created_at?: string | null
   started_at?: string | null
   completed_at?: string | null
+}
+
+type ActiveScheduleStatsRecord = {
+  id: string
+  name: string
+  report_id?: string | null
+  report_configs?: unknown
+  pbi_page_name?: string | null
+  pbi_page_names?: string[] | null
+  cron_expression?: string | null
+  export_format?: string | null
+  is_active?: boolean | null
+  last_run_at?: string | null
+}
+
+function formatNextRunLabel(date: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone,
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date)
+}
+
+function getScheduleReportLabel(
+  schedule: ActiveScheduleStatsRecord,
+  accessMaps: Awaited<ReturnType<typeof getScheduleAccessMaps>>
+) {
+  const reportNames = resolveScheduleReportConfigs(schedule)
+    .map((reportConfig) => {
+      return (
+        accessMaps.reportNames.get(reportConfig.report_id) ??
+        accessMaps.automationNames.get(reportConfig.report_id) ??
+        "Desconhecido"
+      )
+    })
+    .filter(Boolean)
+  const uniqueNames = [...new Set(reportNames)]
+  const primaryReportName = uniqueNames[0] ?? "Desconhecido"
+
+  return uniqueNames.length > 1
+    ? `${primaryReportName} +${uniqueNames.length - 1}`
+    : primaryReportName
 }
 
 // Brazil is UTC-3 (America/Sao_Paulo — no DST since 2019)
@@ -61,9 +108,6 @@ export async function GET() {
     const thirtyDaysAgo = new Date(startOfMonthUTC.getTime() + BRAZIL_OFFSET_MS)
     const hasRestrictedScope =
       workspaceScope.workspaceRestricted || workspaceScope.datasetRestricted
-    const accessibleScheduleIds = hasRestrictedScope
-      ? await getAccessibleScheduleIds(supabase, companyId, workspaceScope)
-      : []
 
     const reportsQuery =
       workspaceScope.workspaceRestricted && workspaceScope.workspaceIds.length === 0
@@ -92,8 +136,13 @@ export async function GET() {
       .select("*")
       .eq("company_id", companyId)
       .gte("created_at", thirtyDaysAgo.toISOString())
+    const schedulesQuery = supabase
+      .from("schedules")
+      .select("id, name, report_id, report_configs, pbi_page_name, pbi_page_names, cron_expression, export_format, is_active, last_run_at")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
 
-    const [reportsRes, contactsRes, dispatchLogsRes, settingsRes, botInstancesRes] =
+    const [reportsRes, contactsRes, dispatchLogsRes, settingsRes, botInstancesRes, schedulesRes] =
       await Promise.all([
         reportsQuery,
         supabase
@@ -106,7 +155,7 @@ export async function GET() {
           .from("company_settings")
           .select("key, value")
           .eq("company_id", companyId)
-          .in("key", ["powerbi", "n8n"]),
+          .in("key", ["powerbi", "n8n", "general"]),
         listCompanyWhatsAppBotInstances(supabase, companyId).catch((error) => {
           if (isMissingWhatsAppBotInstancesTableError(error)) {
             return null
@@ -114,10 +163,15 @@ export async function GET() {
 
           throw error
         }),
+        schedulesQuery,
       ])
 
     const queryError =
-      reportsRes.error ?? contactsRes.error ?? dispatchLogsRes.error ?? settingsRes.error
+      reportsRes.error ??
+      contactsRes.error ??
+      dispatchLogsRes.error ??
+      settingsRes.error ??
+      schedulesRes.error
 
     if (queryError) {
       throw new Error(queryError.message)
@@ -137,10 +191,22 @@ export async function GET() {
     const activeContacts = contactsRes.count ?? 0
 
     let dispatchLogs = (dispatchLogsRes.data ?? []) as DispatchLogStatsRecord[]
+    const activeSchedules = (schedulesRes.data ?? []) as ActiveScheduleStatsRecord[]
+    const accessMaps =
+      activeSchedules.length > 0
+        ? await getScheduleAccessMaps(supabase, companyId, workspaceScope)
+        : {
+            visibleTargetIds: new Set<string>(),
+            reportNames: new Map<string, string>(),
+            automationNames: new Map<string, string>(),
+          }
+    const visibleSchedules = activeSchedules.filter((schedule) =>
+      isScheduleAccessible(schedule, accessMaps)
+    )
 
     if (hasRestrictedScope) {
       const currentScheduleIds = await getCompanyScheduleIdSet(supabase, companyId)
-      const accessibleScheduleIdSet = new Set(accessibleScheduleIds)
+      const accessibleScheduleIdSet = new Set(visibleSchedules.map((schedule) => schedule.id))
       dispatchLogs = dispatchLogs.filter((log) =>
         canAccessDispatchLog(log.schedule_id, accessibleScheduleIdSet, currentScheduleIds)
       )
@@ -181,6 +247,11 @@ export async function GET() {
     )
     const powerbi = settingsMap.get("powerbi") as Record<string, unknown> | undefined
     const n8n = settingsMap.get("n8n") as Record<string, unknown> | undefined
+    const general = settingsMap.get("general") as Record<string, unknown> | undefined
+    const timeZone =
+      typeof general?.timezone === "string" && general.timezone.trim()
+        ? general.timezone.trim()
+        : "America/Sao_Paulo"
     const pbiConfigured = !!(powerbi?.client_id || process.env.PBI_CLIENT_ID)
     const n8nConfigured = !!(
       typeof n8n?.webhook_url === "string" &&
@@ -208,6 +279,33 @@ export async function GET() {
       })
     }
 
+    const nextDispatches = visibleSchedules
+      .flatMap((schedule) => {
+        const cronExpression = schedule.cron_expression?.trim()
+        if (!cronExpression) {
+          return []
+        }
+
+        const nextRun = getNextCronOccurrence(cronExpression, now, timeZone)
+        if (!nextRun) {
+          return []
+        }
+
+        return [
+          {
+            id: schedule.id,
+            scheduleName: schedule.name,
+            reportName: getScheduleReportLabel(schedule, accessMaps),
+            exportFormat: schedule.export_format ?? "-",
+            recurrence: describeCronValue(cronExpression).join(" • ") || cronExpression,
+            nextRunAt: nextRun.toISOString(),
+            nextRunLabel: formatNextRunLabel(nextRun, timeZone),
+          },
+        ]
+      })
+      .sort((left, right) => left.nextRunAt.localeCompare(right.nextRunAt))
+      .slice(0, 10)
+
     return NextResponse.json({
       totalReports,
       activeContacts,
@@ -228,6 +326,8 @@ export async function GET() {
         { key: "failed", label: "Erro", value: failedCount },
         { key: "ongoing", label: "Em andamento", value: ongoingCount },
       ],
+      timeZone,
+      nextDispatches,
     })
   } catch (error) {
     if (isAuthContextError(error)) {

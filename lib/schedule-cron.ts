@@ -176,6 +176,150 @@ function fieldMatches(
   return values.includes(value)
 }
 
+function listFieldValues(
+  expression: string,
+  min: number,
+  max: number,
+  field: "month" | "weekday" | "default" = "default"
+) {
+  const normalized = expression.trim()
+
+  if (normalized === "*") {
+    return Array.from({ length: max - min + 1 }, (_, index) => min + index)
+  }
+
+  const values = normalized
+    .split(",")
+    .flatMap((segment) => expandSegment(segment, min, max, field))
+
+  return [...new Set(values)].sort((a, b) => a - b)
+}
+
+function resolveLocalDateTime(
+  input: {
+    year: number
+    month: number
+    day: number
+    hour: number
+    minute: number
+  },
+  timeZone: string
+) {
+  let guess = new Date(
+    Date.UTC(input.year, input.month - 1, input.day, input.hour, input.minute, 0, 0)
+  )
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = getTimePartsInTimeZone(guess, timeZone)
+    const desiredUtc = Date.UTC(input.year, input.month - 1, input.day, input.hour, input.minute)
+    const currentUtc = Date.UTC(
+      current.year,
+      current.month - 1,
+      current.day,
+      current.hour,
+      current.minute
+    )
+    const diffMs = desiredUtc - currentUtc
+
+    if (diffMs === 0) {
+      if (
+        current.year === input.year &&
+        current.month === input.month &&
+        current.day === input.day &&
+        current.hour === input.hour &&
+        current.minute === input.minute
+      ) {
+        return guess
+      }
+
+      break
+    }
+
+    guess = new Date(guess.getTime() + diffMs)
+  }
+
+  const resolved = getTimePartsInTimeZone(guess, timeZone)
+  if (
+    resolved.year === input.year &&
+    resolved.month === input.month &&
+    resolved.day === input.day &&
+    resolved.hour === input.hour &&
+    resolved.minute === input.minute
+  ) {
+    return guess
+  }
+
+  return null
+}
+
+function getNextCronExpressionOccurrence(
+  cronExpression: string,
+  fromDate: Date,
+  timeZone: string,
+  maxDaysAhead: number
+) {
+  const parts = cronExpression.trim().split(/\s+/)
+  if (parts.length !== 5) {
+    return null
+  }
+
+  const [minuteExpr, hourExpr, dayExpr, monthExpr, weekdayExpr] = parts
+  const allowedMinutes = listFieldValues(minuteExpr, 0, 59)
+  const allowedHours = listFieldValues(hourExpr, 0, 23)
+
+  if (allowedMinutes.length === 0 || allowedHours.length === 0) {
+    return null
+  }
+
+  const startLocal = getTimePartsInTimeZone(fromDate, timeZone)
+  const localStartDate = new Date(
+    Date.UTC(startLocal.year, startLocal.month - 1, startLocal.day, 0, 0, 0, 0)
+  )
+
+  for (let dayOffset = 0; dayOffset <= maxDaysAhead; dayOffset++) {
+    const localDate = new Date(localStartDate.getTime() + dayOffset * 24 * 60 * 60 * 1000)
+    const year = localDate.getUTCFullYear()
+    const month = localDate.getUTCMonth() + 1
+    const day = localDate.getUTCDate()
+    const weekday = localDate.getUTCDay()
+
+    if (
+      !fieldMatches(monthExpr, month, 1, 12, "month") ||
+      !fieldMatches(dayExpr, day, 1, 31) ||
+      !fieldMatches(weekdayExpr, weekday, 0, 6, "weekday")
+    ) {
+      continue
+    }
+
+    for (const hour of allowedHours) {
+      if (dayOffset === 0 && hour < startLocal.hour) {
+        continue
+      }
+
+      for (const minute of allowedMinutes) {
+        if (dayOffset === 0 && hour === startLocal.hour && minute <= startLocal.minute) {
+          continue
+        }
+
+        const candidate = resolveLocalDateTime(
+          { year, month, day, hour, minute },
+          timeZone
+        )
+
+        if (!candidate || candidate <= fromDate) {
+          continue
+        }
+
+        if (matchesCronExpression(cronExpression, candidate, timeZone)) {
+          return candidate
+        }
+      }
+    }
+  }
+
+  return null
+}
+
 export function isValidCronExpression(cronExpression: string) {
   return cronExpression.trim().split(/\s+/).length === 5
 }
@@ -215,6 +359,35 @@ export function matchesCronValue(
   const expressions = splitCronExpressions(cronValue)
 
   return expressions.some((expression) => matchesCronExpression(expression, date, timeZone))
+}
+
+export function getNextCronOccurrence(
+  cronValue: string,
+  fromDate: Date,
+  timeZone: string,
+  maxDaysAhead = 400
+) {
+  const expressions = splitCronExpressions(cronValue)
+  let nextOccurrence: Date | null = null
+
+  for (const expression of expressions) {
+    const candidate = getNextCronExpressionOccurrence(
+      expression,
+      fromDate,
+      timeZone,
+      maxDaysAhead
+    )
+
+    if (!candidate) {
+      continue
+    }
+
+    if (!nextOccurrence || candidate.getTime() < nextOccurrence.getTime()) {
+      nextOccurrence = candidate
+    }
+  }
+
+  return nextOccurrence
 }
 
 export function extractHoursFromCronValue(cronValue: string) {
