@@ -33,6 +33,15 @@ function getTodayDate(): string {
   })
 }
 
+function buildChatSessionId(input: {
+  userId: string
+  companyId: string
+  workspaceId: string
+  datasetId: string
+}) {
+  return `${input.userId}:${input.companyId}:${input.workspaceId}:${input.datasetId}`
+}
+
 function parseQueryPlan(raw: string): ChatQueryPlan | null {
   try {
     // remove possíveis blocos markdown
@@ -108,12 +117,14 @@ async function callN8nChatWebhook(
   question: string,
   metadata: DatasetMetadata,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
-  todayDate: string
+  todayDate: string,
+  sessionId: string
 ): Promise<string> {
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      sessionId,
       chatInput: question,
       question,
       metadata,
@@ -217,6 +228,7 @@ async function generateQueryPlanWithRetry(
   question: string,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
   todayDate: string,
+  sessionId: string,
   maxAttempts = 2
 ): Promise<ChatQueryPlan> {
   let lastError = ""
@@ -226,7 +238,7 @@ async function generateQueryPlanWithRetry(
     let rawResponse: string
 
     if (n8nWebhookUrl) {
-      rawResponse = await callN8nChatWebhook(n8nWebhookUrl, question, metadata, conversationHistory, todayDate)
+      rawResponse = await callN8nChatWebhook(n8nWebhookUrl, question, metadata, conversationHistory, todayDate, sessionId)
     } else {
       rawResponse = await callOpenAIDirect(currentMessages)
     }
@@ -274,7 +286,7 @@ async function generateQueryPlanWithRetry(
 export async function POST(request: Request) {
   try {
     const context = await getRequestContext()
-    const { companyId } = context
+    const { companyId, userId } = context
     const supabase = createClient()
     const scope = await getWorkspaceAccessScope(supabase, context)
 
@@ -380,6 +392,8 @@ export async function POST(request: Request) {
       )
     }
 
+    const sessionId = buildChatSessionId({ userId, companyId, workspaceId, datasetId })
+
     // ── Validar permissões ──
     if (!isWorkspaceAllowed(scope, { pbiWorkspaceId: workspaceId })) {
       return NextResponse.json({ error: "Workspace não permitido" }, { status: 403 })
@@ -454,7 +468,7 @@ export async function POST(request: Request) {
       const resp = await fetch(n8nWebhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
+        body: JSON.stringify({ sessionId, chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
       })
       if (resp.ok) {
         const raw = await resp.json() as Record<string, unknown>
@@ -482,7 +496,7 @@ export async function POST(request: Request) {
     // ── Fluxo N8N normal: AI Agent retorna resposta em texto ──
     if (n8nWebhookUrl && !chartType) {
       try {
-        const answer = await callN8nChatWebhook(n8nWebhookUrl, question, metadata, conversationHistory, todayDate)
+        const answer = await callN8nChatWebhook(n8nWebhookUrl, question, metadata, conversationHistory, todayDate, sessionId)
 
         if (question.trim().split(/\s+/).length >= 2) {
           await supabase.from("chat_logs").insert({ company_id: companyId })
@@ -506,7 +520,8 @@ export async function POST(request: Request) {
       null,
       question,
       conversationHistory,
-      todayDate
+      todayDate,
+      sessionId
     )
 
     // ── Executar DAX ──

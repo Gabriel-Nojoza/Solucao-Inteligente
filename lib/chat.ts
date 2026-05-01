@@ -96,7 +96,19 @@ export type DatasetMetadata = {
 function collectWebhookText(value: unknown): string[] {
   if (typeof value === "string") {
     const text = value.trim()
-    return text ? [text] : []
+    if (!text) {
+      return []
+    }
+
+    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+      try {
+        return collectWebhookText(JSON.parse(text))
+      } catch {
+        // fall through to treat as plain text
+      }
+    }
+
+    return [text]
   }
 
   if (Array.isArray(value)) {

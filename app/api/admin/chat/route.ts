@@ -34,6 +34,15 @@ function getTodayDate(): string {
   })
 }
 
+function buildChatSessionId(input: {
+  userId: string
+  companyId: string
+  workspaceId: string
+  datasetId: string
+}) {
+  return `admin:${input.userId}:${input.companyId}:${input.workspaceId}:${input.datasetId}`
+}
+
 function parseQueryPlan(raw: string): ChatQueryPlan | null {
   try {
     const cleaned = raw.trim().replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim()
@@ -104,7 +113,7 @@ async function loadMetadata(token: string, datasetId: string, companyId: string)
 
 export async function POST(request: Request) {
   try {
-    await requireAdminContext()
+    const adminContext = await requireAdminContext()
     const supabase = getAdminClient()
 
     const body = (await request.json()) as ChatRequest & { companyId: string; chartType?: string }
@@ -130,6 +139,13 @@ export async function POST(request: Request) {
         { status: 400 }
       )
     }
+
+    const sessionId = buildChatSessionId({
+      userId: adminContext.userId,
+      companyId,
+      workspaceId,
+      datasetId,
+    })
 
     // Valida que o workspace/dataset pertence à empresa selecionada
     const { data: workspace } = await supabase
@@ -194,7 +210,7 @@ export async function POST(request: Request) {
       const resp = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
+        body: JSON.stringify({ sessionId, chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
       })
       if (resp.ok) {
         const raw = await resp.json() as Record<string, unknown>
@@ -225,7 +241,7 @@ export async function POST(request: Request) {
         const resp = await fetch(webhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatInput: question, question, metadata, conversationHistory, todayDate }),
+          body: JSON.stringify({ sessionId, chatInput: question, question, metadata, conversationHistory, todayDate }),
         })
 
         if (resp.ok) {
