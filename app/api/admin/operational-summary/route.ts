@@ -133,6 +133,7 @@ function formatHalfHourWindowLabel(start: Date) {
     date.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "America/Sao_Paulo",
     })
 
   return `${formatTime(start)} - ${formatTime(end)}`
@@ -142,6 +143,7 @@ function formatTimeLabel(date: Date) {
   return date.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
   })
 }
 
