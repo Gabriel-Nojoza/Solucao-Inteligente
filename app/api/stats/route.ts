@@ -72,7 +72,7 @@ type ScheduleDispatchSummary = {
   windows: ScheduleWindowSummary[]
 }
 
-const OPERATION_START_HOUR = 7
+const OPERATION_START_HOUR = 6
 const OPERATION_END_HOUR = 19
 
 function formatNextRunLabel(date: Date, timeZone: string) {
@@ -344,14 +344,18 @@ function buildScheduleDispatchSummary(
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const context = await getRequestContext()
     const { companyId } = context
     const supabase = createClient()
     const workspaceScope = await getWorkspaceAccessScope(supabase, context)
 
-    const now = new Date()
+    const { searchParams } = new URL(request.url)
+    const dateParam = searchParams.get("date")?.trim() ?? ""
+    const now = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? new Date(`${dateParam}T12:00:00-03:00`)
+      : new Date()
     const todayStart = getBrazilDayStart(now)
     const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000)
 

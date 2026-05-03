@@ -36,7 +36,7 @@ export default async function DashboardLayout({
       <PowerBIAutoSyncWatcher />
       <SidebarProvider>
         <AppSidebar currentUser={currentUser} />
-        <SidebarInset>
+        <SidebarInset className="min-w-0 overflow-x-hidden">
           {children}
           <FloatingChatLauncher />
         </SidebarInset>

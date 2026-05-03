@@ -253,11 +253,6 @@ export default function AdminOperationalSummaryPage() {
         <Button variant="outline" size="icon" onClick={() => changeDate(1)} disabled={isAtMaxDate}>
           <ChevronRight className="size-4" />
         </Button>
-        {!isToday && (
-          <Button variant="ghost" size="sm" onClick={() => setSelectedDate(todayDateString())}>
-            Hoje
-          </Button>
-        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-4 p-4 sm:gap-6 sm:p-6">
