@@ -7,7 +7,7 @@ import { AlertCircle, Bot, Loader2, X, Maximize2, Minimize2 } from "lucide-react
 import { usePathname } from "next/navigation"
 import { ChatInterface } from "@/components/chat/chat-interface"
 import { Button } from "@/components/ui/button"
-import { BRAND_LOGO_PATH } from "@/lib/branding"
+import { BRAND_CHAT_LOGO_PATH } from "@/lib/branding"
 import { cn } from "@/lib/utils"
 import type { ChatIAConfig } from "@/app/api/chat/config/route"
 
@@ -97,7 +97,7 @@ export function FloatingChatLauncher() {
         <div className={cn("flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground", !isFullscreen && "rounded-t-2xl")}>
           <div className="relative -my-3 h-20 w-20 shrink-0">
             <Image
-              src={BRAND_LOGO_PATH}
+              src={BRAND_CHAT_LOGO_PATH}
               alt="SIL"
               fill
               sizes="80px"

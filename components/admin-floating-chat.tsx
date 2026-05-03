@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select"
 import { MessageBubble } from "@/components/chat/message-bubble"
 import { createId } from "@/lib/id"
-import { BRAND_LOGO_PATH } from "@/lib/branding"
+import { BRAND_CHAT_LOGO_PATH } from "@/lib/branding"
 import { cn } from "@/lib/utils"
 import type { ChatMessage, ChatApiResponse } from "@/lib/chat"
 import type { CompanyStatItem } from "@/app/api/admin/company-stats/route"
@@ -348,7 +348,7 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
         <div className={cn("flex items-center gap-3 bg-primary px-4 py-3 text-primary-foreground overflow-hidden", !isFullscreen && "rounded-t-2xl")}>
           <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/10 p-2">
             <Image
-              src={BRAND_LOGO_PATH}
+              src={BRAND_CHAT_LOGO_PATH}
               alt="SIL"
               width={52}
               height={52}
