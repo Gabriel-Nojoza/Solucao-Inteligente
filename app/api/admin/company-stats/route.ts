@@ -50,8 +50,30 @@ export type CompanyStatsResponse = {
   dailyChart: DailyDispatchPoint[]
 }
 
-export async function GET() {
+type CompanyLogMetric = {
+  totalDispatches: number
+  dispatchesThisMonth: number
+  deliveredDispatches: number
+  failedDispatches: number
+  deliveredThisMonth: number
+  failedThisMonth: number
+}
+
+function createEmptyMetric(): CompanyLogMetric {
+  return {
+    totalDispatches: 0,
+    dispatchesThisMonth: 0,
+    deliveredDispatches: 0,
+    failedDispatches: 0,
+    deliveredThisMonth: 0,
+    failedThisMonth: 0,
+  }
+}
+
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url)
+    const lite = searchParams.get("lite") === "1"
     const context = await requireAdminContext()
     const supabase = getAdminClient()
 
@@ -88,54 +110,100 @@ export async function GET() {
       .in("company_id", companyIds)
       .gte("created_at", since30d.toISOString())
 
-    // Busca perguntas do chat este mes
-    const { data: chatLogsThisMonth } = await supabase
-      .from("chat_logs")
-      .select("company_id")
-      .in("company_id", companyIds)
-      .gte("created_at", startOfMonth.toISOString())
-
-    const chatUsageMap = new Map<string, number>()
-    for (const row of chatLogsThisMonth ?? []) {
-      if (!row.company_id) continue
-      chatUsageMap.set(row.company_id, (chatUsageMap.get(row.company_id) ?? 0) + 1)
+    const companyMetrics = new Map<string, CompanyLogMetric>()
+    for (const companyId of companyIds) {
+      companyMetrics.set(companyId, createEmptyMetric())
     }
 
-    // Busca configuracoes: chat_ia + usage_limits
-    const { data: settingsRows } = await supabase
-      .from("company_settings")
-      .select("company_id, key, value")
-      .in("company_id", companyIds)
-      .in("key", ["chat_ia", "usage_limits"])
+    const dailyMap = lite
+      ? null
+      : new Map<string, { total: number; delivered: number; failed: number }>()
 
+    if (dailyMap) {
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(now)
+        d.setDate(d.getDate() - i)
+        const key = d.toISOString().slice(0, 10)
+        dailyMap.set(key, { total: 0, delivered: 0, failed: 0 })
+      }
+    }
+
+    for (const log of logs ?? []) {
+      if (!log.company_id) continue
+      const metrics = companyMetrics.get(log.company_id) ?? createEmptyMetric()
+      companyMetrics.set(log.company_id, metrics)
+
+      metrics.totalDispatches += 1
+
+      const isThisMonth =
+        Boolean(log.created_at) && new Date(log.created_at as string) >= startOfMonth
+      const isDelivered = log.status === "delivered"
+      const isFailed =
+        log.status === "failed" || Boolean(log.completed_at && log.status !== "delivered")
+
+      if (isThisMonth) {
+        metrics.dispatchesThisMonth += 1
+      }
+
+      if (isDelivered) {
+        metrics.deliveredDispatches += 1
+        if (isThisMonth) {
+          metrics.deliveredThisMonth += 1
+        }
+      } else if (isFailed) {
+        metrics.failedDispatches += 1
+        if (isThisMonth) {
+          metrics.failedThisMonth += 1
+        }
+      }
+
+      if (dailyMap && log.created_at) {
+        const key = new Date(log.created_at).toISOString().slice(0, 10)
+        const entry = dailyMap.get(key)
+        if (!entry) continue
+        entry.total += 1
+        if (isDelivered) entry.delivered += 1
+        else if (log.status === "failed") entry.failed += 1
+      }
+    }
+
+    const chatUsageMap = new Map<string, number>()
     const chatMap = new Map<string, Record<string, unknown>>()
     const limitsMap = new Map<string, Record<string, unknown>>()
 
-    for (const row of settingsRows ?? []) {
-      if (!row.company_id || !row.value) continue
-      if (row.key === "chat_ia") chatMap.set(row.company_id, row.value as Record<string, unknown>)
-      if (row.key === "usage_limits") limitsMap.set(row.company_id, row.value as Record<string, unknown>)
+    if (!lite) {
+      // Busca perguntas do chat este mes
+      const { data: chatLogsThisMonth } = await supabase
+        .from("chat_logs")
+        .select("company_id")
+        .in("company_id", companyIds)
+        .gte("created_at", startOfMonth.toISOString())
+
+      for (const row of chatLogsThisMonth ?? []) {
+        if (!row.company_id) continue
+        chatUsageMap.set(row.company_id, (chatUsageMap.get(row.company_id) ?? 0) + 1)
+      }
+
+      // Busca configuracoes: chat_ia + usage_limits
+      const { data: settingsRows } = await supabase
+        .from("company_settings")
+        .select("company_id, key, value")
+        .in("company_id", companyIds)
+        .in("key", ["chat_ia", "usage_limits"])
+
+      for (const row of settingsRows ?? []) {
+        if (!row.company_id || !row.value) continue
+        if (row.key === "chat_ia") chatMap.set(row.company_id, row.value as Record<string, unknown>)
+        if (row.key === "usage_limits") limitsMap.set(row.company_id, row.value as Record<string, unknown>)
+      }
     }
 
-    // Monta stats por empresa
     const companyStats: CompanyStatItem[] = companies.map((company) => {
-      const companyLogs = (logs ?? []).filter((l) => l.company_id === company.id)
-
-      const logsThisMonth = companyLogs.filter(
-        (l) => l.created_at && new Date(l.created_at) >= startOfMonth
-      )
-
-      const delivered = companyLogs.filter((l) => l.status === "delivered").length
-      const failed = companyLogs.filter(
-        (l) => l.status === "failed" || (l.completed_at && l.status !== "delivered")
-      ).length
+      const metrics = companyMetrics.get(company.id) ?? createEmptyMetric()
+      const delivered = metrics.deliveredDispatches
+      const failed = metrics.failedDispatches
       const completed = delivered + failed
       const successRate = completed > 0 ? Math.round((delivered / completed) * 100) : 0
-
-      const deliveredThisMonth = logsThisMonth.filter((l) => l.status === "delivered").length
-      const failedThisMonth = logsThisMonth.filter(
-        (l) => l.status === "failed" || (l.completed_at && l.status !== "delivered")
-      ).length
 
       const chat = chatMap.get(company.id)
       const limits = limitsMap.get(company.id)
@@ -145,7 +213,7 @@ export async function GET() {
       const reportExcessPrice = typeof limits?.report_excess_price === "number" ? limits.report_excess_price : null
       const chatExcessPrice = typeof limits?.chat_excess_price === "number" ? limits.chat_excess_price : null
 
-      const dispatchesThisMonth = logsThisMonth.length
+      const dispatchesThisMonth = metrics.dispatchesThisMonth
       const reportLimitPercent =
         reportLimit !== null && reportLimit > 0
           ? Math.min(Math.round((dispatchesThisMonth / reportLimit) * 100), 100)
@@ -170,11 +238,11 @@ export async function GET() {
       return {
         companyId: company.id,
         companyName: company.name ?? "Empresa sem nome",
-        totalDispatches: companyLogs.length,
-        dispatches30d: companyLogs.length,
+        totalDispatches: metrics.totalDispatches,
+        dispatches30d: metrics.totalDispatches,
         dispatchesThisMonth,
-        deliveredThisMonth,
-        failedThisMonth,
+        deliveredThisMonth: metrics.deliveredThisMonth,
+        failedThisMonth: metrics.failedThisMonth,
         deliveredDispatches: delivered,
         failedDispatches: failed,
         successRate,
@@ -199,32 +267,14 @@ export async function GET() {
       }
     })
 
-    // Monta grafico diario (ultimos 30 dias, todos as empresas somados)
-    const dailyMap = new Map<string, { total: number; delivered: number; failed: number }>()
-
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - i)
-      const key = d.toISOString().slice(0, 10)
-      dailyMap.set(key, { total: 0, delivered: 0, failed: 0 })
-    }
-
-    for (const log of logs ?? []) {
-      if (!log.created_at) continue
-      const key = new Date(log.created_at).toISOString().slice(0, 10)
-      const entry = dailyMap.get(key)
-      if (!entry) continue
-      entry.total++
-      if (log.status === "delivered") entry.delivered++
-      else if (log.status === "failed") entry.failed++
-    }
-
-    const dailyChart: DailyDispatchPoint[] = Array.from(dailyMap.entries()).map(([date, v]) => ({
-      date: new Date(date + "T12:00:00Z").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-      total: v.total,
-      delivered: v.delivered,
-      failed: v.failed,
-    }))
+    const dailyChart: DailyDispatchPoint[] = dailyMap
+      ? Array.from(dailyMap.entries()).map(([date, v]) => ({
+          date: new Date(date + "T12:00:00Z").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+          total: v.total,
+          delivered: v.delivered,
+          failed: v.failed,
+        }))
+      : []
 
     return NextResponse.json({ companies: companyStats, dailyChart } satisfies CompanyStatsResponse)
   } catch (error) {

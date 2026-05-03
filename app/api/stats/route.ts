@@ -22,7 +22,7 @@ import {
   canAccessDispatchLog,
   getCompanyScheduleIdSet,
 } from "@/lib/dispatch-log-visibility"
-import { describeCronValue, getNextCronOccurrence } from "@/lib/schedule-cron"
+import { describeCronValue, getNextCronOccurrence, matchesCronValue } from "@/lib/schedule-cron"
 import { resolveScheduleReportConfigs } from "@/lib/schedule-report-configs"
 
 type DispatchLogStatsRecord = {
@@ -47,12 +47,93 @@ type ActiveScheduleStatsRecord = {
   last_run_at?: string | null
 }
 
+type ScheduleWindowSummary = {
+  start: string
+  label: string
+  scheduled: number
+  pending: number
+  ongoing: number
+  delivered: number
+  failed: number
+}
+
+type ScheduleDispatchSummary = {
+  range: {
+    start: string
+    end: string
+  }
+  totals: {
+    scheduled: number
+    pending: number
+    ongoing: number
+    delivered: number
+    failed: number
+  }
+  windows: ScheduleWindowSummary[]
+}
+
+const OPERATION_START_HOUR = 7
+const OPERATION_END_HOUR = 19
+
 function formatNextRunLabel(date: Date, timeZone: string) {
   return new Intl.DateTimeFormat("pt-BR", {
     timeZone,
     dateStyle: "short",
     timeStyle: "short",
   }).format(date)
+}
+
+function formatHalfHourWindowLabel(start: Date) {
+  const end = new Date(start.getTime() + 30 * 60 * 1000)
+  const formatTime = (date: Date) =>
+    date.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+
+  return `${formatTime(start)} - ${formatTime(end)}`
+}
+
+function formatTimeLabel(date: Date) {
+  return date.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function floorToHalfHour(date: Date) {
+  const copy = new Date(date)
+  copy.setMinutes(copy.getMinutes() < 30 ? 0 : 30, 0, 0)
+  return copy
+}
+
+function ceilToHalfHour(date: Date) {
+  const floored = floorToHalfHour(date)
+  if (floored.getTime() === date.getTime()) {
+    return floored
+  }
+
+  return new Date(floored.getTime() + 30 * 60 * 1000)
+}
+
+function buildOperationalWindows(start: Date, end: Date) {
+  const windows: ScheduleWindowSummary[] = []
+
+  for (let cursor = new Date(start); cursor < end; cursor = new Date(cursor.getTime() + 30 * 60 * 1000)) {
+    const windowStart = new Date(cursor)
+
+    windows.push({
+      start: windowStart.toISOString(),
+      label: formatHalfHourWindowLabel(windowStart),
+      scheduled: 0,
+      pending: 0,
+      ongoing: 0,
+      delivered: 0,
+      failed: 0,
+    })
+  }
+
+  return windows
 }
 
 function getScheduleReportLabel(
@@ -87,6 +168,180 @@ function getBrazilDayStart(date: Date): Date {
     brazilTime.getUTCDate()
   ))
   return new Date(midnight.getTime() + BRAZIL_OFFSET_MS)
+}
+
+function listScheduleOccurrencesToday(
+  cronExpression: string,
+  dayStart: Date,
+  dayEnd: Date,
+  timeZone: string
+) {
+  const occurrences: Date[] = []
+
+  for (let minuteOffset = 0; minuteOffset < 24 * 60; minuteOffset += 1) {
+    const candidate = new Date(dayStart.getTime() + minuteOffset * 60 * 1000)
+
+    if (candidate >= dayEnd) {
+      break
+    }
+
+    if (matchesCronValue(cronExpression, candidate, timeZone)) {
+      occurrences.push(candidate)
+    }
+  }
+
+  return occurrences
+}
+
+function buildScheduleDispatchSummary(
+  schedules: ActiveScheduleStatsRecord[],
+  logs: DispatchLogStatsRecord[],
+  dayStart: Date,
+  dayEnd: Date,
+  timeZone: string
+): ScheduleDispatchSummary {
+  const defaultOperationStart = new Date(dayStart.getTime() + OPERATION_START_HOUR * 60 * 60 * 1000)
+  const defaultOperationEnd = new Date(dayStart.getTime() + OPERATION_END_HOUR * 60 * 60 * 1000)
+  const activityMoments: Date[] = []
+  const todayLogs = logs.flatMap((log) => {
+    const effectiveDate = getDispatchLogEffectiveDate(log)
+    if (!effectiveDate || effectiveDate < dayStart || effectiveDate >= dayEnd) {
+      return []
+    }
+
+    const outcome = getDispatchLogOutcome(log)
+    activityMoments.push(effectiveDate)
+    return [{ effectiveDate, outcome }]
+  })
+  const scheduledOccurrences: Date[] = []
+
+  for (const schedule of schedules) {
+    const cronExpression = schedule.cron_expression?.trim()
+    if (!cronExpression) {
+      continue
+    }
+
+    const occurrences = listScheduleOccurrencesToday(
+      cronExpression,
+      dayStart,
+      dayEnd,
+      timeZone
+    )
+
+    for (const occurrence of occurrences) {
+      scheduledOccurrences.push(occurrence)
+      activityMoments.push(occurrence)
+    }
+  }
+
+  const earliestActivity =
+    activityMoments.length > 0
+      ? new Date(Math.min(...activityMoments.map((date) => date.getTime())))
+      : defaultOperationStart
+  const latestActivity =
+    activityMoments.length > 0
+      ? new Date(Math.max(...activityMoments.map((date) => date.getTime())))
+      : defaultOperationEnd
+
+  const operationStartDate =
+    earliestActivity < defaultOperationStart
+      ? floorToHalfHour(earliestActivity)
+      : defaultOperationStart
+  const operationEndDate =
+    latestActivity > defaultOperationEnd
+      ? new Date(ceilToHalfHour(latestActivity).getTime() + 30 * 60 * 1000)
+      : defaultOperationEnd
+
+  const operationStart = operationStartDate.getTime()
+  const operationEnd = operationEndDate.getTime()
+  const buckets = new Map<number, ScheduleWindowSummary>(
+    buildOperationalWindows(operationStartDate, operationEndDate).map((window) => [
+      new Date(window.start).getTime(),
+      window,
+    ])
+  )
+  const totals = {
+    scheduled: 0,
+    pending: 0,
+    ongoing: 0,
+    delivered: 0,
+    failed: 0,
+  }
+
+  for (const scheduledAt of scheduledOccurrences) {
+    const bucketStart = floorToHalfHour(scheduledAt)
+    const bucketKey = bucketStart.getTime()
+
+    if (bucketKey < operationStart || bucketKey >= operationEnd) {
+      continue
+    }
+
+    const bucket =
+      buckets.get(bucketKey) ??
+      {
+        start: bucketStart.toISOString(),
+        label: formatHalfHourWindowLabel(bucketStart),
+        scheduled: 0,
+        pending: 0,
+        ongoing: 0,
+        delivered: 0,
+        failed: 0,
+      }
+
+    bucket.scheduled += 1
+    buckets.set(bucketKey, bucket)
+  }
+
+  for (const log of todayLogs) {
+    const bucketStart = floorToHalfHour(log.effectiveDate)
+    const bucketKey = bucketStart.getTime()
+
+    if (bucketKey < operationStart || bucketKey >= operationEnd) {
+      continue
+    }
+
+    const bucket =
+      buckets.get(bucketKey) ??
+      {
+        start: bucketStart.toISOString(),
+        label: formatHalfHourWindowLabel(bucketStart),
+        scheduled: 0,
+        pending: 0,
+        ongoing: 0,
+        delivered: 0,
+        failed: 0,
+      }
+
+    bucket[log.outcome] += 1
+    buckets.set(bucketKey, bucket)
+  }
+
+  const windows = [...buckets.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, window]) => {
+      const actualCount = window.ongoing + window.delivered + window.failed
+      const pending = Math.max(0, window.scheduled - actualCount)
+
+      return {
+        ...window,
+        pending,
+      }
+    })
+
+  totals.scheduled = windows.reduce((sum, window) => sum + window.scheduled, 0)
+  totals.ongoing = windows.reduce((sum, window) => sum + window.ongoing, 0)
+  totals.delivered = windows.reduce((sum, window) => sum + window.delivered, 0)
+  totals.failed = windows.reduce((sum, window) => sum + window.failed, 0)
+  totals.pending = windows.reduce((sum, window) => sum + window.pending, 0)
+
+  return {
+    range: {
+      start: formatTimeLabel(operationStartDate),
+      end: formatTimeLabel(operationEndDate),
+    },
+    totals,
+    windows,
+  }
 }
 
 export async function GET() {
@@ -279,6 +534,14 @@ export async function GET() {
       })
     }
 
+    const scheduleDispatchSummary = buildScheduleDispatchSummary(
+      visibleSchedules,
+      dispatchLogs,
+      todayStart,
+      tomorrowStart,
+      timeZone
+    )
+
     const nextDispatches = visibleSchedules
       .flatMap((schedule) => {
         const cronExpression = schedule.cron_expression?.trim()
@@ -327,6 +590,7 @@ export async function GET() {
         { key: "ongoing", label: "Em andamento", value: ongoingCount },
       ],
       timeZone,
+      scheduleDispatchSummary,
       nextDispatches,
     })
   } catch (error) {

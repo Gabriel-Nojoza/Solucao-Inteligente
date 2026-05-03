@@ -87,6 +87,11 @@ export interface ChatApiResponse {
   chartType?: "bar" | "line" | "pie" | null
 }
 
+export interface StructuredChartDataResult {
+  columns: Array<{ name: string; dataType: string }>
+  rows: Array<Record<string, unknown>>
+}
+
 export type DatasetMetadata = {
   tables: DatasetTable[]
   columns: DatasetColumn[]
@@ -162,6 +167,126 @@ export function extractWebhookAnswer(payload: Record<string, unknown>): string {
   }
 
   return JSON.stringify(payload)
+}
+
+function normalizeStructuredChartResult(
+  value: unknown
+): StructuredChartDataResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record.columns) || !Array.isArray(record.rows)) {
+    return null
+  }
+
+  const columns = record.columns
+    .map((column) => {
+      if (!column || typeof column !== "object") return null
+      const candidate = column as Record<string, unknown>
+      const name = typeof candidate.name === "string" ? candidate.name.trim() : ""
+      if (!name) return null
+      return {
+        name,
+        dataType: typeof candidate.dataType === "string" ? candidate.dataType : "string",
+      }
+    })
+    .filter((column): column is { name: string; dataType: string } => Boolean(column))
+
+  const rows = record.rows
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+
+  if (columns.length === 0 || rows.length === 0) {
+    return null
+  }
+
+  return { columns, rows }
+}
+
+function extractStructuredChartResultFromUnknown(
+  value: unknown
+): StructuredChartDataResult | null {
+  const direct = normalizeStructuredChartResult(value)
+  if (direct) {
+    return direct
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim()
+    if (!text) return null
+
+    const directJson =
+      (text.startsWith("{") && text.endsWith("}")) ||
+      (text.startsWith("[") && text.endsWith("]"))
+        ? text
+        : null
+
+    if (directJson) {
+      try {
+        return extractStructuredChartResultFromUnknown(JSON.parse(directJson))
+      } catch {
+        // ignore invalid JSON
+      }
+    }
+
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+    if (fenced?.[1]) {
+      try {
+        return extractStructuredChartResultFromUnknown(JSON.parse(fenced[1]))
+      } catch {
+        // ignore invalid fenced JSON
+      }
+    }
+
+    return null
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractStructuredChartResultFromUnknown(item)
+      if (nested) return nested
+    }
+    return null
+  }
+
+  if (!value || typeof value !== "object") {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const candidateKeys = [
+    "output",
+    "answer",
+    "message",
+    "response",
+    "content",
+    "text",
+    "markdown",
+    "value",
+    "data",
+    "payload",
+    "result",
+    "blocks",
+  ]
+
+  for (const key of candidateKeys) {
+    const nested = extractStructuredChartResultFromUnknown(record[key])
+    if (nested) return nested
+  }
+
+  for (const nestedValue of Object.values(record)) {
+    const nested = extractStructuredChartResultFromUnknown(nestedValue)
+    if (nested) return nested
+  }
+
+  return null
+}
+
+export function extractStructuredChartResult(
+  payload: unknown
+): StructuredChartDataResult | null {
+  return extractStructuredChartResultFromUnknown(payload)
 }
 
 function normalizeMeasureName(value: string) {

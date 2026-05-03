@@ -8,8 +8,8 @@ export function createClient() {
     {
       cookies: createBrowserSessionCookieMethods(),
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+        persistSession: true,
+        autoRefreshToken: true,
         detectSessionInUrl: false,
       },
     }

@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type UpcomingDispatch = {
+export type UpcomingDispatchItem = {
   id: string
   scheduleName: string
   reportName: string
@@ -22,6 +22,7 @@ type UpcomingDispatch = {
   recurrence: string
   nextRunAt: string
   nextRunLabel: string
+  companyName?: string | null
 }
 
 function formatTimeRemaining(nextRunAt: string, mounted = false) {
@@ -40,8 +41,15 @@ function formatTimeRemaining(nextRunAt: string, mounted = false) {
   })
 }
 
-export function UpcomingDispatches({ items }: { items: UpcomingDispatch[] }) {
+export function UpcomingDispatches({
+  items,
+  showCompanyColumn = false,
+}: {
+  items: UpcomingDispatchItem[]
+  showCompanyColumn?: boolean
+}) {
   const mounted = useMounted()
+  const shouldShowCompanyColumn = showCompanyColumn
 
   return (
     <Card>
@@ -57,6 +65,7 @@ export function UpcomingDispatches({ items }: { items: UpcomingDispatch[] }) {
           <Table>
             <TableHeader>
               <TableRow>
+                {shouldShowCompanyColumn ? <TableHead>Empresa</TableHead> : null}
                 <TableHead>Rotina</TableHead>
                 <TableHead>Relatorio</TableHead>
                 <TableHead>Formato</TableHead>
@@ -67,6 +76,11 @@ export function UpcomingDispatches({ items }: { items: UpcomingDispatch[] }) {
             <TableBody>
               {items.map((item) => (
                 <TableRow key={item.id}>
+                  {shouldShowCompanyColumn ? (
+                    <TableCell className="max-w-[180px] font-medium">
+                      <span className="line-clamp-2">{item.companyName ?? "-"}</span>
+                    </TableCell>
+                  ) : null}
                   <TableCell className="font-medium">{item.scheduleName}</TableCell>
                   <TableCell className="max-w-[240px] truncate">{item.reportName}</TableCell>
                   <TableCell>

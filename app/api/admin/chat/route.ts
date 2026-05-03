@@ -34,6 +34,10 @@ function getTodayDate(): string {
   })
 }
 
+function buildStructuredChartQuestion(question: string) {
+  return `[CHART_REQUEST] Gere os dados estruturados necessarios para responder a pergunta do usuario abaixo e retorne APENAS um JSON no formato exato (sem markdown, sem texto): {"columns":[{"name":"NomeColuna","dataType":"String"}],"rows":[{"NomeColuna":"valor"}]}\nPergunta do usuario: ${question}`
+}
+
 function buildChatSessionId(input: {
   userId: string
   companyId: string
@@ -210,7 +214,7 @@ export async function POST(request: Request) {
       const resp = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
+        body: JSON.stringify({ sessionId, chatInput: buildStructuredChartQuestion(question), question: buildStructuredChartQuestion(question), metadata, conversationHistory, todayDate }),
       })
       if (resp.ok) {
         const raw = await resp.json() as Record<string, unknown>

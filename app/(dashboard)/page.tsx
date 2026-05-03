@@ -38,11 +38,10 @@ export default function DashboardPage() {
 
   const { data: stats, isLoading: statsLoading } = useSWR("/api/stats", fetcher, swrOptions)
   const { data: logsData, isLoading: logsLoading } = useSWR(
-    "/api/logs?limit=10",
+    "/api/logs?limit=20",
     fetcher,
     swrOptions
   )
-
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
@@ -88,14 +87,14 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {logsLoading || statsLoading ? (
+        {statsLoading || logsLoading ? (
           <div className="grid gap-4 xl:grid-cols-2">
-            <Skeleton className="h-[300px] rounded-xl" />
-            <Skeleton className="h-[300px] rounded-xl" />
+            <Skeleton className="h-[420px] rounded-xl" />
+            <Skeleton className="h-[420px] rounded-xl" />
           </div>
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
-            <RecentDispatches logs={logsData?.data ?? []} />
+            <RecentDispatches logs={logsData?.data ?? []} mode="table" />
             <UpcomingDispatches items={stats?.nextDispatches ?? []} />
           </div>
         )}

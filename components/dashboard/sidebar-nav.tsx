@@ -9,6 +9,7 @@ import {
   Users,
   Clock,
   ScrollText,
+  Activity,
   Moon,
   Sun,
   LogOut,
@@ -44,6 +45,7 @@ const mainNav = [
 ]
 
 const automationNav = [
+  { title: "Resumo operacional", href: "/operational-summary", icon: Activity },
   { title: "Rotinas de Disparo", href: "/schedules", icon: Clock },
   { title: "Logs", href: "/logs", icon: ScrollText },
 ]

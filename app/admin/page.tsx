@@ -4,6 +4,8 @@ import useSWR, { mutate } from "swr"
 import Link from "next/link"
 import { useState } from "react"
 import { AdminFloatingChat } from "@/components/admin-floating-chat"
+import { RecentDispatches } from "@/components/dashboard/recent-dispatches"
+import { UpcomingDispatches } from "@/components/dashboard/upcoming-dispatches"
 import {
   Users, Settings, Activity, Shield, UserPlus, ChevronRight,
   BarChart3, Zap, FileText, MessageSquare, CheckCircle2, XCircle,
@@ -30,6 +32,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { CompanyStatItem, CompanyStatsResponse } from "@/app/api/admin/company-stats/route"
+import type { AdminOperationalSummaryResponse } from "@/app/api/admin/operational-summary/route"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -244,10 +247,14 @@ export default function AdminDashboardPage() {
   const { data: companyStatsRaw, isLoading: companyLoading } = useSWR<CompanyStatsResponse>(
     "/api/admin/company-stats", fetcher
   )
+  const { data: operationalData, isLoading: operationalLoading } =
+    useSWR<AdminOperationalSummaryResponse>("/api/admin/operational-summary", fetcher)
 
   const recentUsers: AdminUser[] = Array.isArray(usersRaw) ? usersRaw.slice(0, 6) : []
   const companies: CompanyStatItem[] = companyStatsRaw?.companies ?? []
   const dailyChart = companyStatsRaw?.dailyChart ?? []
+  const showOperationalCompanyColumn =
+    (operationalData?.companyCount ?? companies.length) > 1
 
   // Estado do modal de transferência
   const [transferOpen, setTransferOpen] = useState(false)
@@ -413,6 +420,34 @@ export default function AdminDashboardPage() {
             )}
           </CardContent>
         </Card>
+
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Monitoramento operacional</h2>
+            <p className="text-sm text-muted-foreground">
+              Ultimos disparos e proximas rotinas das empresas visiveis no painel admin.
+            </p>
+          </div>
+
+          {operationalLoading ? (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <Skeleton className="h-[420px] rounded-xl" />
+              <Skeleton className="h-[420px] rounded-xl" />
+            </div>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-2">
+              <RecentDispatches
+                logs={operationalData?.recentLogs ?? []}
+                mode="table"
+                showCompanyColumn={showOperationalCompanyColumn}
+              />
+              <UpcomingDispatches
+                items={operationalData?.nextDispatches ?? []}
+                showCompanyColumn={showOperationalCompanyColumn}
+              />
+            </div>
+          )}
+        </div>
 
         {/* Usuarios recentes + Acoes rapidas */}
         <div className="grid gap-4 lg:grid-cols-3">

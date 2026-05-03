@@ -581,8 +581,30 @@ async function sendGenericPayload(instance, input) {
 
 async function resetAuthState(instanceId) {
   const instance = getInstanceEntry(instanceId)
-  await fs.promises.rm(instance.authDir, { recursive: true, force: true })
+
+  if (!fs.existsSync(instance.authDir)) {
+    ensureDirectory(instance.authDir)
+    return
+  }
+
+  // On Windows, rename works even when files are locked, unlike rm/unlink
+  const tempDir = `${instance.authDir}_old_${Date.now()}`
+  try {
+    await fs.promises.rename(instance.authDir, tempDir)
+  } catch {
+    // If rename also fails, try force delete directly
+    await fs.promises.rm(instance.authDir, { recursive: true, force: true }).catch(() => {})
+  }
+
   ensureDirectory(instance.authDir)
+
+  // Clean up the renamed old dir in background without blocking bot startup
+  fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {
+    // Best-effort: if it fails, leave it and try again on next reset
+    setTimeout(() => {
+      fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {})
+    }, 5000)
+  })
 }
 
 function clearRestartTimer(instance) {

@@ -845,6 +845,12 @@ export async function DELETE(request: Request) {
 
     if (error) throw error
 
+    const companyId = getUserCompanyId(current)
+    if (companyId) {
+      await supabase.from("company_settings").delete().eq("company_id", companyId)
+      await supabase.from("companies").delete().eq("id", companyId)
+    }
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("Error deleting user:", error)

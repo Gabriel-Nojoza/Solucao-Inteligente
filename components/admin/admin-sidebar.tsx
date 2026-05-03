@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
+  Activity,
   Users,
   Settings,
   Moon,
@@ -35,6 +36,7 @@ import { clearTabSessionMarker } from "@/lib/supabase/tab-session"
 
 const adminNav = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { title: "Resumo operacional", href: "/admin/operational-summary", icon: Activity },
   { title: "Usuarios", href: "/admin/users", icon: Users },
   { title: "Configuracoes", href: "/admin/settings", icon: Settings },
 ]

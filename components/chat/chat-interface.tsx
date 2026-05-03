@@ -103,6 +103,34 @@ export function ChatInterface({
     }))
   }, [messages])
 
+  function hasDirectChartQuestion(q: string) {
+    return q
+      .toLowerCase()
+      .replace(/gr[aÃ¡]ficos?/g, " ")
+      .replace(/chart/g, " ")
+      .replace(/visualiz(?:ar|a(?:Ã§|c)Ã£o)?/g, " ")
+      .replace(/mostrar|mostra|gerar|gera|criar|cria|montar|monta|plotar|plota|exibir|exibe/g, " ")
+      .replace(/\b(me|um|uma|o|a|os|as|de|do|da|dos|das|por|favor)\b/g, " ")
+      .replace(/[?!.,:;]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim().length > 0
+  }
+
+  function isStandaloneChartRequest(q: string) {
+    const remaining = q
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/graficos?|chart|visualiz[a-z]*/g, " ")
+      .replace(/mostrar|mostra|gerar|gera|criar|cria|montar|monta|plotar|plota|exibir|exibe/g, " ")
+      .replace(/\b(me|um|uma|o|a|os|as|de|do|da|dos|das|por|favor)\b/g, " ")
+      .replace(/[?!.,:;]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+
+    return remaining.length === 0
+  }
+
   function detectChartType(q: string): "bar" | "line" | "pie" | null {
     const lower = q.toLowerCase()
     if (/gr[aá]fico|chart|visualiz/.test(lower)) {
@@ -119,11 +147,19 @@ export function ChatInterface({
       if (!trimmed || isLoading) return
 
       const chartType = detectChartType(trimmed)
+      const directChartQuestion = !isStandaloneChartRequest(trimmed)
 
       // Chart request: render locally if data exists, otherwise re-query forcing OpenAI
       if (chartType) {
-        const lastWithData = messages.slice().reverse().find((m) => m.role === "assistant" && m.data && m.data.rows.length > 0)
-        if (lastWithData) {
+        const lastAssistantMessage = messages
+          .slice()
+          .reverse()
+          .find((m) => m.role === "assistant" && m.id !== "greeting")
+        const lastWithData: (ChatMessage & { data: NonNullable<ChatMessage["data"]> }) | null =
+          lastAssistantMessage?.data
+            ? { ...lastAssistantMessage, data: lastAssistantMessage.data }
+            : null
+        if (!directChartQuestion && lastWithData?.data && lastWithData.data.rows.length > 0) {
           const userMsg: ChatMessage = { id: createId("msg"), role: "user", content: trimmed, timestamp: new Date().toISOString() }
           const chartMsg: ChatMessage = { id: createId("msg"), role: "assistant", content: "Aqui está o gráfico dos dados da consulta anterior:", timestamp: new Date().toISOString(), data: lastWithData.data, chartType }
           setMessages((prev) => [...prev, userMsg, chartMsg])
@@ -132,7 +168,8 @@ export function ChatInterface({
           return
         }
         const lastUserMsg = messages.slice().reverse().find((m) => m.role === "user")
-        if (!lastUserMsg) {
+        const chartQuestion = directChartQuestion ? trimmed : lastUserMsg?.content
+        if (!chartQuestion) {
           setMessages((prev) => [...prev,
             { id: createId("msg"), role: "user", content: trimmed, timestamp: new Date().toISOString() },
             { id: createId("msg"), role: "assistant", content: "Faça primeiro uma consulta que retorne dados.", timestamp: new Date().toISOString() },
@@ -147,10 +184,11 @@ export function ChatInterface({
         setInput("")
         setIsLoading(true)
         try {
+          const history = buildConversationHistory()
           const resp = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: lastUserMsg.content, datasetId, workspaceId, conversationHistory: [], chartType }),
+            body: JSON.stringify({ question: chartQuestion, datasetId, workspaceId, conversationHistory: history, chartType }),
           })
           const data = (await resp.json()) as ChatApiResponse
           setMessages((prev) => prev.map((m) => m.id === thinkingId ? { id: thinkingId, role: "assistant" as const, content: data.data && data.data.rows.length > 0 ? "Aqui está o gráfico:" : data.answer, timestamp: new Date().toISOString(), data: data.data, chartType: data.chartType ?? chartType, confidence: data.confidence, error: data.error ?? null } : m))

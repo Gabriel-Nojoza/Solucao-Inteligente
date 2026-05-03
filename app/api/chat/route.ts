@@ -12,6 +12,7 @@ import {
   buildChatSystemPrompt,
   buildConversationMessages,
   extractWebhookAnswer,
+  extractStructuredChartResult,
   injectCustomMeasuresIntoDax,
   validateQueryPlan,
   formatDataAnswer,
@@ -31,6 +32,10 @@ function getTodayDate(): string {
     month: "long",
     day: "numeric",
   })
+}
+
+function buildStructuredChartQuestion(question: string) {
+  return `[CHART_REQUEST] Gere os dados estruturados necessarios para responder a pergunta do usuario abaixo e retorne APENAS um JSON no formato exato (sem markdown, sem texto): {"columns":[{"name":"NomeColuna","dataType":"String"}],"rows":[{"NomeColuna":"valor"}]}\nPergunta do usuario: ${question}`
 }
 
 function buildChatSessionId(input: {
@@ -468,10 +473,20 @@ export async function POST(request: Request) {
       const resp = await fetch(n8nWebhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, chatInput: chartQuestion, question: chartQuestion, metadata, conversationHistory, todayDate }),
+        body: JSON.stringify({ sessionId, chatInput: buildStructuredChartQuestion(question), question: buildStructuredChartQuestion(question), metadata, conversationHistory, todayDate }),
       })
       if (resp.ok) {
         const raw = await resp.json() as Record<string, unknown>
+        const structuredChartResult = extractStructuredChartResult(raw)
+        if (structuredChartResult && structuredChartResult.rows.length > 0) {
+          return NextResponse.json<ChatApiResponse>({
+            answer: "Aqui estÃ¡ o grÃ¡fico:",
+            data: structuredChartResult,
+            daxQuery: null,
+            confidence: "high",
+            chartType: chartType as ChatApiResponse["chartType"],
+          })
+        }
         const rawText = (typeof raw.output === "string" ? raw.output : typeof raw.answer === "string" ? raw.answer : JSON.stringify(raw)).trim()
         try {
           const cleaned = rawText.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim()
