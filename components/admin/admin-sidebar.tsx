@@ -10,6 +10,7 @@ import {
   Moon,
   Sun,
   LogOut,
+  MessageSquare,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useTheme } from "next-themes"
@@ -32,11 +33,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { Suspense } from "react"
 import { clearTabSessionMarker } from "@/lib/supabase/tab-session"
+import { CompanyFilter } from "@/components/admin/company-filter"
 
 const adminNav = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { title: "Resumo operacional", href: "/admin/operational-summary", icon: Activity },
+  { title: "Uso do Chat", href: "/admin/chat-usage", icon: MessageSquare },
   { title: "Usuarios", href: "/admin/users", icon: Users },
   { title: "Configuracoes", href: "/admin/settings", icon: Settings },
 ]
@@ -96,6 +100,14 @@ export function AdminSidebar({ currentUser }: AdminSidebarProps) {
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Filtros</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <Suspense>
+              <CompanyFilter />
+            </Suspense>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

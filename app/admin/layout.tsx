@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { AdminSidebar } from "@/components/admin/admin-sidebar"
 import { TabSessionGuard } from "@/components/auth/tab-session-guard"
@@ -33,7 +34,11 @@ export default async function AdminLayout({
     <TabSessionGuard>
       <SidebarProvider>
         <AdminSidebar currentUser={currentUser} />
-        <SidebarInset>{children}</SidebarInset>
+        <SidebarInset>
+          <Suspense>
+            {children}
+          </Suspense>
+        </SidebarInset>
       </SidebarProvider>
     </TabSessionGuard>
   )

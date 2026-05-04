@@ -3,6 +3,7 @@
 import useSWR, { mutate } from "swr"
 import Link from "next/link"
 import { useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { AdminFloatingChat } from "@/components/admin-floating-chat"
 import { RecentDispatches } from "@/components/dashboard/recent-dispatches"
 import { UpcomingDispatches } from "@/components/dashboard/upcoming-dispatches"
@@ -32,7 +33,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { CompanyStatItem, CompanyStatsResponse } from "@/app/api/admin/company-stats/route"
-import type { AdminOperationalSummaryResponse } from "@/app/api/admin/operational-summary/route"
+import type { AdminOperationalSummaryResponse, AdminUpcomingDispatchItem } from "@/app/api/admin/operational-summary/route"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -256,6 +257,17 @@ export default function AdminDashboardPage() {
   const showOperationalCompanyColumn =
     (operationalData?.companyCount ?? companies.length) > 1
 
+  const searchParams = useSearchParams()
+  const selectedOperationalCompany = searchParams.get("empresa") ?? "all"
+
+  const filteredRecentLogs = selectedOperationalCompany === "all"
+    ? (operationalData?.recentLogs ?? [])
+    : (operationalData?.recentLogs ?? []).filter((l) => l.company_id === selectedOperationalCompany)
+
+  const filteredNextDispatches = selectedOperationalCompany === "all"
+    ? (operationalData?.nextDispatches ?? [])
+    : (operationalData?.nextDispatches ?? []).filter((d) => d.companyId === selectedOperationalCompany)
+
   // Estado do modal de transferência
   const [transferOpen, setTransferOpen] = useState(false)
   const [transferSource, setTransferSource] = useState("")
@@ -437,12 +449,12 @@ export default function AdminDashboardPage() {
           ) : (
             <div className="grid gap-4 xl:grid-cols-2">
               <RecentDispatches
-                logs={operationalData?.recentLogs ?? []}
+                logs={filteredRecentLogs}
                 mode="table"
                 showCompanyColumn={showOperationalCompanyColumn}
               />
               <UpcomingDispatches
-                items={operationalData?.nextDispatches ?? []}
+                items={filteredNextDispatches}
                 showCompanyColumn={showOperationalCompanyColumn}
               />
             </div>

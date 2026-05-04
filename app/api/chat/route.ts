@@ -34,6 +34,11 @@ function getTodayDate(): string {
   })
 }
 
+function getCurrentMes(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+}
+
 function buildStructuredChartQuestion(question: string) {
   return `[CHART_REQUEST] Gere os dados estruturados necessarios para responder a pergunta do usuario abaixo e retorne APENAS um JSON no formato exato (sem markdown, sem texto): {"columns":[{"name":"NomeColuna","dataType":"String"}],"rows":[{"NomeColuna":"valor"}]}\nPergunta do usuario: ${question}`
 }
@@ -514,7 +519,7 @@ export async function POST(request: Request) {
         const answer = await callN8nChatWebhook(n8nWebhookUrl, question, metadata, conversationHistory, todayDate, sessionId)
 
         if (question.trim().split(/\s+/).length >= 2) {
-          await supabase.from("chat_logs").insert({ company_id: companyId })
+          await supabase.from("chat_logs").insert({ company_id: companyId, intencao: question.slice(0, 500), mes: getCurrentMes() })
         }
 
         return NextResponse.json<ChatApiResponse>({
@@ -573,7 +578,7 @@ export async function POST(request: Request) {
     // Registrar uso do chat para controle de limite (minimo 2 palavras)
     let warning: string | undefined
     if (question.trim().split(/\s+/).length >= 2) {
-      await supabase.from("chat_logs").insert({ company_id: companyId })
+      await supabase.from("chat_logs").insert({ company_id: companyId, intencao: question.slice(0, 500), mes: getCurrentMes() })
 
       if (chatLimit !== null && chatLimit > 0) {
         const startOfMonth = new Date()

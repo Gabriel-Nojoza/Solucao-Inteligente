@@ -85,6 +85,7 @@ export type AdminOperationalDispatchLog = DispatchLog & {
 
 export type AdminUpcomingDispatchItem = {
   id: string
+  companyId: string
   companyName: string | null
   scheduleName: string
   reportName: string
@@ -698,8 +699,7 @@ export async function GET(request: NextRequest) {
           })
           .sort((left, right) => left.nextRunAt.localeCompare(right.nextRunAt))
     const nextDispatches: AdminUpcomingDispatchItem[] = nextDispatchCandidates
-      .slice(0, NEXT_DISPATCH_LIMIT)
-      .map(({ companyId: _companyId, ...item }) => item)
+      .slice(0, NEXT_DISPATCH_LIMIT) as AdminUpcomingDispatchItem[]
 
     const recentLogsPool = await fetchRecentLogsForScope({
       supabase,
@@ -723,8 +723,7 @@ export async function GET(request: NextRequest) {
       )
       const companyNextDispatches = nextDispatchCandidates
         .filter((item) => item.companyId === company.id)
-        .slice(0, NEXT_DISPATCH_LIMIT)
-        .map(({ companyId: _companyId, ...item }) => item)
+        .slice(0, NEXT_DISPATCH_LIMIT) as AdminUpcomingDispatchItem[]
 
       return {
         companyId: company.id,

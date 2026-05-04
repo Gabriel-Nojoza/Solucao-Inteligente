@@ -103,16 +103,52 @@ export async function GET(request: Request) {
 
     const companyIds = companies.map((c) => c.id)
 
-    // Busca logs dos ultimos 30 dias
-    const { data: logs } = await supabase
-      .from("dispatch_logs")
-      .select("company_id, status, completed_at, created_at")
-      .in("company_id", companyIds)
-      .gte("created_at", since30d.toISOString())
+    // Busca contagens agregadas por empresa e status (evita trazer todas as linhas)
+    const [logsThisMonthResult, logsAllResult, dailyResult] = await Promise.all([
+      supabase
+        .from("dispatch_logs")
+        .select("company_id, status, completed_at")
+        .in("company_id", companyIds)
+        .gte("created_at", startOfMonth.toISOString()),
+      supabase
+        .from("dispatch_logs")
+        .select("company_id, status, completed_at")
+        .in("company_id", companyIds)
+        .gte("created_at", since30d.toISOString()),
+      lite
+        ? Promise.resolve({ data: null })
+        : supabase
+            .from("dispatch_logs")
+            .select("company_id, status, created_at")
+            .in("company_id", companyIds)
+            .gte("created_at", since30d.toISOString()),
+    ])
 
     const companyMetrics = new Map<string, CompanyLogMetric>()
     for (const companyId of companyIds) {
       companyMetrics.set(companyId, createEmptyMetric())
+    }
+
+    for (const log of logsAllResult.data ?? []) {
+      if (!log.company_id) continue
+      const metrics = companyMetrics.get(log.company_id) ?? createEmptyMetric()
+      companyMetrics.set(log.company_id, metrics)
+      metrics.totalDispatches += 1
+      const isDelivered = log.status === "delivered"
+      const isFailed = log.status === "failed" || Boolean(log.completed_at && log.status !== "delivered")
+      if (isDelivered) metrics.deliveredDispatches += 1
+      else if (isFailed) metrics.failedDispatches += 1
+    }
+
+    for (const log of logsThisMonthResult.data ?? []) {
+      if (!log.company_id) continue
+      const metrics = companyMetrics.get(log.company_id) ?? createEmptyMetric()
+      companyMetrics.set(log.company_id, metrics)
+      metrics.dispatchesThisMonth += 1
+      const isDelivered = log.status === "delivered"
+      const isFailed = log.status === "failed" || Boolean(log.completed_at && log.status !== "delivered")
+      if (isDelivered) metrics.deliveredThisMonth += 1
+      else if (isFailed) metrics.failedThisMonth += 1
     }
 
     const dailyMap = lite
@@ -126,43 +162,13 @@ export async function GET(request: Request) {
         const key = d.toISOString().slice(0, 10)
         dailyMap.set(key, { total: 0, delivered: 0, failed: 0 })
       }
-    }
-
-    for (const log of logs ?? []) {
-      if (!log.company_id) continue
-      const metrics = companyMetrics.get(log.company_id) ?? createEmptyMetric()
-      companyMetrics.set(log.company_id, metrics)
-
-      metrics.totalDispatches += 1
-
-      const isThisMonth =
-        Boolean(log.created_at) && new Date(log.created_at as string) >= startOfMonth
-      const isDelivered = log.status === "delivered"
-      const isFailed =
-        log.status === "failed" || Boolean(log.completed_at && log.status !== "delivered")
-
-      if (isThisMonth) {
-        metrics.dispatchesThisMonth += 1
-      }
-
-      if (isDelivered) {
-        metrics.deliveredDispatches += 1
-        if (isThisMonth) {
-          metrics.deliveredThisMonth += 1
-        }
-      } else if (isFailed) {
-        metrics.failedDispatches += 1
-        if (isThisMonth) {
-          metrics.failedThisMonth += 1
-        }
-      }
-
-      if (dailyMap && log.created_at) {
+      for (const log of (dailyResult.data ?? []) as Array<{ company_id: string; status: string; created_at: string }>) {
+        if (!log.created_at) continue
         const key = new Date(log.created_at).toISOString().slice(0, 10)
         const entry = dailyMap.get(key)
         if (!entry) continue
         entry.total += 1
-        if (isDelivered) entry.delivered += 1
+        if (log.status === "delivered") entry.delivered += 1
         else if (log.status === "failed") entry.failed += 1
       }
     }
@@ -172,26 +178,25 @@ export async function GET(request: Request) {
     const limitsMap = new Map<string, Record<string, unknown>>()
 
     if (!lite) {
-      // Busca perguntas do chat este mes
-      const { data: chatLogsThisMonth } = await supabase
-        .from("chat_logs")
-        .select("company_id")
-        .in("company_id", companyIds)
-        .gte("created_at", startOfMonth.toISOString())
+      const [chatLogsResult, settingsResult] = await Promise.all([
+        supabase
+          .from("chat_logs")
+          .select("company_id")
+          .in("company_id", companyIds)
+          .gte("created_at", startOfMonth.toISOString()),
+        supabase
+          .from("company_settings")
+          .select("company_id, key, value")
+          .in("company_id", companyIds)
+          .in("key", ["chat_ia", "usage_limits"]),
+      ])
 
-      for (const row of chatLogsThisMonth ?? []) {
+      for (const row of chatLogsResult.data ?? []) {
         if (!row.company_id) continue
         chatUsageMap.set(row.company_id, (chatUsageMap.get(row.company_id) ?? 0) + 1)
       }
 
-      // Busca configuracoes: chat_ia + usage_limits
-      const { data: settingsRows } = await supabase
-        .from("company_settings")
-        .select("company_id, key, value")
-        .in("company_id", companyIds)
-        .in("key", ["chat_ia", "usage_limits"])
-
-      for (const row of settingsRows ?? []) {
+      for (const row of settingsResult.data ?? []) {
         if (!row.company_id || !row.value) continue
         if (row.key === "chat_ia") chatMap.set(row.company_id, row.value as Record<string, unknown>)
         if (row.key === "usage_limits") limitsMap.set(row.company_id, row.value as Record<string, unknown>)
