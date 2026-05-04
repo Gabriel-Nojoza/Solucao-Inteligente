@@ -42,8 +42,10 @@ export async function GET() {
     const companyId = row.company_id as string
     const companiesRaw = row.companies
     const companyName = (Array.isArray(companiesRaw) ? companiesRaw[0]?.name : (companiesRaw as { name?: string } | null)?.name) ?? companyId
-    const date = new Date(row.created_at as string)
-    const mes = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
+    const mesBr = new Date(row.created_at as string).toLocaleDateString("en-CA", {
+      timeZone: "America/Sao_Paulo",
+    }).slice(0, 7)
+    const mes = mesBr
     const key = `${companyId}::${mes}`
 
     if (!map.has(key)) {

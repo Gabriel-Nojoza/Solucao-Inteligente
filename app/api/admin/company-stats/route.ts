@@ -79,12 +79,9 @@ export async function GET(request: Request) {
 
     const now = new Date()
 
-    // Inicio do mes atual (UTC-3)
-    const startOfMonth = new Date(now)
-    startOfMonth.setHours(startOfMonth.getHours() - 3)
-    startOfMonth.setDate(1)
-    startOfMonth.setHours(0, 0, 0, 0)
-    startOfMonth.setHours(startOfMonth.getHours() + 3)
+    // Inicio do mes atual no horario de Brasilia (UTC-3)
+    const nowBr = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+    const startOfMonth = new Date(Date.UTC(nowBr.getFullYear(), nowBr.getMonth(), 1, 3, 0, 0, 0))
 
     // Ultimos 30 dias
     const since30d = new Date(now)
