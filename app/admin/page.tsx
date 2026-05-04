@@ -333,11 +333,12 @@ export default function AdminDashboardPage() {
     .map((c, i) => ({ name: c.companyName, value: c.dispatchesThisMonth, color: CHART_COLORS[i % CHART_COLORS.length] }))
 
   const chatBarData = companies
-    .filter((c) => c.chatTrialDays !== null)
     .map((c, i) => ({
       name: c.companyName.length > 14 ? c.companyName.slice(0, 14) + "…" : c.companyName,
-      dias: c.chatTrialDays ?? 0,
-      color: c.chatTrialExpired ? "#ef4444" : CHART_COLORS[i % CHART_COLORS.length],
+      perguntas: c.chatUsageThisMonth,
+      color: c.chatUsageThisMonth > 0
+        ? CHART_COLORS[i % CHART_COLORS.length]
+        : "hsl(var(--muted-foreground))",
     }))
 
   if (statsLoading) {
@@ -836,26 +837,26 @@ export default function AdminDashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Trial chart */}
+          {/* Chat usage chart */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Trial do Chat SIL</CardTitle>
-              <CardDescription className="text-xs">Dias configurados por empresa</CardDescription>
+              <CardTitle className="text-base">Uso do Chat este Mes</CardTitle>
+              <CardDescription className="text-xs">Perguntas feitas por empresa</CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-center pb-4">
               {companyLoading ? (
                 <Skeleton className="h-52 w-full rounded-lg" />
               ) : chatBarData.length === 0 ? (
                 <div className="flex h-52 items-center justify-center">
-                  <p className="text-xs text-muted-foreground">Nenhuma empresa com trial</p>
+                  <p className="text-xs text-muted-foreground">Sem dados</p>
                 </div>
               ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chatBarData} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
+                <ResponsiveContainer width="100%" height={Math.max(180, chatBarData.length * 36)}>
+                  <BarChart data={chatBarData} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 0 }}>
                     <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
                     <Tooltip content={<CustomTooltip />} cursor={{ fill: "hsl(var(--muted))" }} />
-                    <Bar dataKey="dias" name="Dias de trial" radius={[0, 4, 4, 0]}>
+                    <Bar dataKey="perguntas" name="Perguntas" radius={[0, 4, 4, 0]}>
                       {chatBarData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                     </Bar>
                   </BarChart>
