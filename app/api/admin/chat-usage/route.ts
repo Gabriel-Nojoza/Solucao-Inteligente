@@ -40,7 +40,8 @@ export async function GET() {
 
   for (const row of data ?? []) {
     const companyId = row.company_id as string
-    const companyName = (row.companies as { name: string } | null)?.name ?? companyId
+    const companiesRaw = row.companies
+    const companyName = (Array.isArray(companiesRaw) ? companiesRaw[0]?.name : (companiesRaw as { name?: string } | null)?.name) ?? companyId
     const date = new Date(row.created_at as string)
     const mes = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
     const key = `${companyId}::${mes}`
