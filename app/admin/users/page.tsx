@@ -66,6 +66,7 @@ interface UserData {
     webhook_url?: string
     callback_secret?: string
     chat_webhook_url?: string
+    audio_webhook_url?: string
   }
   chat_ia?: {
     enabled?: boolean
@@ -157,6 +158,7 @@ export default function UsersPage() {
   const [formN8nWebhookUrl, setFormN8nWebhookUrl] = useState("")
   const [formN8nCallbackSecret, setFormN8nCallbackSecret] = useState("")
   const [formN8nChatWebhookUrl, setFormN8nChatWebhookUrl] = useState("")
+  const [formN8nAudioWebhookUrl, setFormN8nAudioWebhookUrl] = useState("")
   const [formChatIaEnabled, setFormChatIaEnabled] = useState(false)
   const [formChatIaWorkspaceId, setFormChatIaWorkspaceId] = useState("")
   const [formChatIaDatasetId, setFormChatIaDatasetId] = useState("")
@@ -228,6 +230,7 @@ export default function UsersPage() {
     setFormN8nWebhookUrl("")
     setFormN8nCallbackSecret("")
     setFormN8nChatWebhookUrl("")
+    setFormN8nAudioWebhookUrl("")
     setFormChatIaEnabled(false)
     setFormChatIaWorkspaceId("")
     setFormChatIaDatasetId("")
@@ -263,6 +266,7 @@ export default function UsersPage() {
     setFormN8nWebhookUrl("")
     setFormN8nCallbackSecret("")
     setFormN8nChatWebhookUrl("")
+    setFormN8nAudioWebhookUrl("")
     setFormChatIaEnabled(false)
     setFormChatIaWorkspaceId("")
     setFormChatIaDatasetId("")
@@ -299,6 +303,7 @@ export default function UsersPage() {
       setFormN8nWebhookUrl(details.n8n?.webhook_url || "")
       setFormN8nCallbackSecret(details.n8n?.callback_secret || "")
       setFormN8nChatWebhookUrl(details.n8n?.chat_webhook_url || "")
+      setFormN8nAudioWebhookUrl(details.n8n?.audio_webhook_url || "")
       setFormChatIaEnabled(details.chat_ia?.enabled ?? false)
       setFormChatIaWorkspaceId(details.chat_ia?.workspace_id ?? "")
       setFormChatIaDatasetId(details.chat_ia?.dataset_id ?? "")
@@ -528,6 +533,7 @@ export default function UsersPage() {
                 webhook_url: formN8nWebhookUrl,
                 callback_secret: formN8nCallbackSecret,
                 chat_webhook_url: formN8nChatWebhookUrl,
+                audio_webhook_url: formN8nAudioWebhookUrl,
               }
             : undefined,
         chat_ia:
@@ -1113,6 +1119,14 @@ export default function UsersPage() {
                         <p className="text-xs text-muted-foreground">
                           Deixe vazio para usar OpenAI diretamente via OPENAI_API_KEY.
                         </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Outro Fluxo — Webhook URL</Label>
+                        <Input
+                          value={formN8nAudioWebhookUrl}
+                          onChange={(e) => setFormN8nAudioWebhookUrl(e.target.value)}
+                          placeholder="https://n8n.dominio.com/webhook/..."
+                        />
                       </div>
                     </div>
                   </div>
