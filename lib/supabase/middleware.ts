@@ -40,9 +40,13 @@ export async function updateSession(request: NextRequest) {
   )
 
   let user = null
+  let authResolved = false
 
   try {
-    const userPromise = supabase.auth.getUser()
+    const userPromise = supabase.auth.getUser().then((result) => {
+      authResolved = true
+      return result
+    })
     const timeoutPromise = new Promise<{ data: { user: null } }>((resolve) =>
       setTimeout(() => resolve({ data: { user: null } }), 5000)
     )
@@ -52,6 +56,13 @@ export async function updateSession(request: NextRequest) {
     // Invalid or stale auth cookies should not break page rendering.
     clearSupabaseAuthCookies(request, supabaseResponse)
     user = null
+    authResolved = true
+  }
+
+  // Timeout: Supabase demorou mais de 5s. Deixar a request passar para evitar
+  // redirecionar usuarios validos que estao em rede lenta.
+  if (!authResolved) {
+    return supabaseResponse
   }
 
   if (
