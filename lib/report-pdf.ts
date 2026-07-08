@@ -142,26 +142,40 @@ export async function captureReportScreenshot(input: {
 </body>
 </html>`
 
-  const browser = await puppeteer.launch({
-    executablePath,
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-  })
+  const maxAttempts = 2
+  let lastError: unknown
 
-  try {
-    const page = await browser.newPage()
-    await page.setViewport({ width, height, deviceScaleFactor: 2 })
-    await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 30000 })
-    await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
+    try {
+      browser = await puppeteer.launch({
+        executablePath,
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+        timeout: 90000,
+      })
 
-    const element = await page.$("#pbi-container")
-    if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
+      const page = await browser.newPage()
+      await page.setViewport({ width, height, deviceScaleFactor: 2 })
+      await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 30000 })
+      await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
 
-    const screenshot = await element.screenshot({ type: "png" })
-    return Buffer.from(screenshot)
-  } finally {
-    await browser.close()
+      const element = await page.$("#pbi-container")
+      if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
+
+      const screenshot = await element.screenshot({ type: "png" })
+      return Buffer.from(screenshot)
+    } catch (err) {
+      lastError = err
+      if (attempt < maxAttempts) {
+        console.warn(`[captureReportScreenshot] Tentativa ${attempt} falhou, retentando...`, err)
+      }
+    } finally {
+      if (browser) await browser.close().catch(() => {})
+    }
   }
+
+  throw lastError
 }
 
 export async function buildPdfFromHtml(html: string): Promise<Buffer> {
@@ -171,6 +185,7 @@ export async function buildPdfFromHtml(html: string): Promise<Buffer> {
     executablePath,
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
+    timeout: 90000,
   })
 
   try {
