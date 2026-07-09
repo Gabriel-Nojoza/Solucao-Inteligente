@@ -48,7 +48,7 @@ export async function updateSession(request: NextRequest) {
       return result
     })
     const timeoutPromise = new Promise<{ data: { user: null } }>((resolve) =>
-      setTimeout(() => resolve({ data: { user: null } }), 5000)
+      setTimeout(() => resolve({ data: { user: null } }), 2000)
     )
     const { data } = await Promise.race([userPromise, timeoutPromise])
     user = data?.user ?? null
