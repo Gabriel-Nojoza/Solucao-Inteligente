@@ -156,18 +156,27 @@ export async function captureReportScreenshot(input: {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
+    const tmpHtmlPath = path.join(os.tmpdir(), `pbi_capture_${Date.now()}_${attempt}.html`)
     try {
+      await fs.promises.writeFile(tmpHtmlPath, html, "utf-8")
+
       browser = await puppeteer.launch({
         executablePath,
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-gpu",
+          "--disable-dev-shm-usage",
+          "--allow-file-access-from-files",
+        ],
         timeout: 90000,
       })
 
       const page = await browser.newPage()
       await page.setViewport({ width, height, deviceScaleFactor: 2 })
-      await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 30000 })
-      await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
+      await page.goto(`file://${tmpHtmlPath}`, { waitUntil: "domcontentloaded", timeout: 30000 })
+      await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
 
       const element = await page.$("#pbi-container")
       if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
@@ -181,6 +190,7 @@ export async function captureReportScreenshot(input: {
       }
     } finally {
       if (browser) await browser.close().catch(() => {})
+      await fs.promises.unlink(tmpHtmlPath).catch(() => {})
     }
   }
 
