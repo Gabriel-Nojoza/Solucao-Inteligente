@@ -215,8 +215,24 @@ export async function captureReportScreenshot(input: {
 
         const page = await browser.newPage()
         await page.setViewport({ width, height, deviceScaleFactor: 2 })
+
+        page.on("console", (msg) => {
+          if (msg.type() === "error") {
+            console.error(`[captureReportScreenshot] browser error: ${msg.text()}`)
+          }
+        })
+
         await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
-        await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
+
+        try {
+          await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
+        } catch (waitErr) {
+          const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
+          if (pbiError) {
+            throw new Error(`Power BI render error: ${pbiError}`)
+          }
+          throw waitErr
+        }
 
         const element = await page.$("#pbi-container")
         if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
