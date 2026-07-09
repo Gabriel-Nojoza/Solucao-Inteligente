@@ -498,7 +498,10 @@ export async function GET(request: Request) {
     }
 
     const botInstances = Array.isArray(botInstancesRes) ? botInstancesRes : null
-    const botState = botInstances ? null : await readWhatsAppBotRuntimeState()
+    const botState = botInstances ? null : await Promise.race([
+      readWhatsAppBotRuntimeState(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+    ])
     const connectedWhatsAppInstances = botInstances
       ? botInstances.filter((instance) => instance.status === "connected").length
       : botState?.status === "connected"
