@@ -498,10 +498,26 @@ export async function GET(request: Request) {
     }
 
     const botInstances = Array.isArray(botInstancesRes) ? botInstancesRes : null
-    const botState = botInstances ? null : await Promise.race([
-      readWhatsAppBotRuntimeState(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+    let todayLogs = (todayLogsRes.data ?? []) as DispatchLogStatsRecord[]
+    const activeSchedules = (schedulesRes.data ?? []) as ActiveScheduleStatsRecord[]
+
+    // Roda em paralelo: check do bot (max 1.5s) + busca de accessMaps
+    const [botState, accessMaps] = await Promise.all([
+      botInstances
+        ? Promise.resolve(null)
+        : Promise.race([
+            readWhatsAppBotRuntimeState(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+          ]),
+      activeSchedules.length > 0
+        ? getScheduleAccessMaps(supabase, companyId, workspaceScope)
+        : Promise.resolve({
+            visibleTargetIds: new Set<string>(),
+            reportNames: new Map<string, string>(),
+            automationNames: new Map<string, string>(),
+          }),
     ])
+
     const connectedWhatsAppInstances = botInstances
       ? botInstances.filter((instance) => instance.status === "connected").length
       : botState?.status === "connected"
@@ -520,17 +536,6 @@ export async function GET(request: Request) {
 
     const totalReports = reportsRes.count ?? 0
     const activeContacts = contactsRes.count ?? 0
-
-    let todayLogs = (todayLogsRes.data ?? []) as DispatchLogStatsRecord[]
-    const activeSchedules = (schedulesRes.data ?? []) as ActiveScheduleStatsRecord[]
-    const accessMaps =
-      activeSchedules.length > 0
-        ? await getScheduleAccessMaps(supabase, companyId, workspaceScope)
-        : {
-            visibleTargetIds: new Set<string>(),
-            reportNames: new Map<string, string>(),
-            automationNames: new Map<string, string>(),
-          }
     const visibleSchedules = activeSchedules.filter((schedule) =>
       isScheduleAccessible(schedule, accessMaps)
     )
