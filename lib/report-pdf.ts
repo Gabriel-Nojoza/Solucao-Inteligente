@@ -82,6 +82,14 @@ export async function pdfToPng(pdfBuffer: Buffer): Promise<Buffer> {
   }
 }
 
+function loadPowerBiClientJs(): string {
+  const localPath = path.join(process.cwd(), "public", "powerbi-client.min.js")
+  if (fs.existsSync(localPath)) {
+    return fs.readFileSync(localPath, "utf-8")
+  }
+  throw new Error("powerbi-client.min.js nao encontrado em public/. Adicione o arquivo ao repositorio.")
+}
+
 export async function captureReportScreenshot(input: {
   embedUrl: string
   embedToken: string
@@ -93,6 +101,7 @@ export async function captureReportScreenshot(input: {
   const executablePath = await findChromePath()
   const width = input.viewportWidth ?? 900
   const height = input.viewportHeight ?? 1100
+  const powerBiClientJs = loadPowerBiClientJs()
 
   const html = `<!DOCTYPE html>
 <html>
@@ -106,7 +115,7 @@ export async function captureReportScreenshot(input: {
 </head>
 <body>
   <div id="pbi-container"></div>
-  <script src="https://cdn.jsdelivr.net/npm/powerbi-client@2/dist/powerbi.min.js"></script>
+  <script>${powerBiClientJs}</script>
   <script>
     window._pbiRendered = false;
     window._pbiError = null;
