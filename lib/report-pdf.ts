@@ -1,4 +1,5 @@
 import { execFile } from "child_process"
+import * as http from "http"
 import { promisify } from "util"
 import * as fs from "fs"
 import * as path from "path"
@@ -82,6 +83,23 @@ export async function pdfToPng(pdfBuffer: Buffer): Promise<Buffer> {
   }
 }
 
+async function serveHtmlLocally(html: string): Promise<{ url: string; close: () => Promise<void> }> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+      res.end(html)
+    })
+    server.on("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address() as { port: number }
+      resolve({
+        url: `http://127.0.0.1:${addr.port}/`,
+        close: () => new Promise((res) => server.close(() => res())),
+      })
+    })
+  })
+}
+
 function loadPowerBiClientJs(): string {
   const localPath = path.join(process.cwd(), "public", "powerbi-client.min.js")
   if (fs.existsSync(localPath)) {
@@ -156,26 +174,20 @@ export async function captureReportScreenshot(input: {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
-    const tmpHtmlPath = path.join(os.tmpdir(), `pbi_capture_${Date.now()}_${attempt}.html`)
+    let localServer: { url: string; close: () => Promise<void> } | null = null
     try {
-      await fs.promises.writeFile(tmpHtmlPath, html, "utf-8")
+      localServer = await serveHtmlLocally(html)
 
       browser = await puppeteer.launch({
         executablePath,
         headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          "--allow-file-access-from-files",
-        ],
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
         timeout: 90000,
       })
 
       const page = await browser.newPage()
       await page.setViewport({ width, height, deviceScaleFactor: 2 })
-      await page.goto(`file://${tmpHtmlPath}`, { waitUntil: "domcontentloaded", timeout: 30000 })
+      await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
       await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
 
       const element = await page.$("#pbi-container")
@@ -190,7 +202,7 @@ export async function captureReportScreenshot(input: {
       }
     } finally {
       if (browser) await browser.close().catch(() => {})
-      await fs.promises.unlink(tmpHtmlPath).catch(() => {})
+      if (localServer) await localServer.close().catch(() => {})
     }
   }
 
