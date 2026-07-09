@@ -217,9 +217,10 @@ export async function captureReportScreenshot(input: {
         await page.setViewport({ width, height, deviceScaleFactor: 2 })
 
         page.on("console", (msg) => {
-          if (msg.type() === "error") {
-            console.error(`[captureReportScreenshot] browser error: ${msg.text()}`)
-          }
+          console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
+        })
+        page.on("pageerror", (err) => {
+          console.error(`[Chrome pageerror]: ${err.message}`)
         })
 
         await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
@@ -228,6 +229,9 @@ export async function captureReportScreenshot(input: {
           await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
         } catch (waitErr) {
           const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
+          const debugPath = path.join(process.cwd(), "public", `pbi_debug_${Date.now()}.png`)
+          await page.screenshot({ path: debugPath }).catch(() => {})
+          console.log(`[captureReportScreenshot] screenshot de debug salvo: ${debugPath}`)
           if (pbiError) {
             throw new Error(`Power BI render error: ${pbiError}`)
           }
