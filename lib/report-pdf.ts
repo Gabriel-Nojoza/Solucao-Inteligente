@@ -8,6 +8,31 @@ import puppeteer from "puppeteer-core"
 
 const execFileAsync = promisify(execFile)
 
+// Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes
+const MAX_CONCURRENT_CAPTURES = 2
+let _activeCaptures = 0
+const _captureQueue: Array<() => void> = []
+
+function acquireCaptureSemaphore(): Promise<void> {
+  return new Promise((resolve) => {
+    if (_activeCaptures < MAX_CONCURRENT_CAPTURES) {
+      _activeCaptures++
+      resolve()
+    } else {
+      _captureQueue.push(() => { _activeCaptures++; resolve() })
+    }
+  })
+}
+
+function releaseCaptureSemaphore(): void {
+  const next = _captureQueue.shift()
+  if (next) {
+    next()
+  } else {
+    _activeCaptures--
+  }
+}
+
 const CHROME_PATHS = [
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
@@ -169,41 +194,47 @@ export async function captureReportScreenshot(input: {
 </body>
 </html>`
 
+  await acquireCaptureSemaphore()
+
   const maxAttempts = 2
   let lastError: unknown
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
-    let localServer: { url: string; close: () => Promise<void> } | null = null
-    try {
-      localServer = await serveHtmlLocally(html)
+  try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
+      let localServer: { url: string; close: () => Promise<void> } | null = null
+      try {
+        localServer = await serveHtmlLocally(html)
 
-      browser = await puppeteer.launch({
-        executablePath,
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-        timeout: 90000,
-      })
+        browser = await puppeteer.launch({
+          executablePath,
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+          timeout: 90000,
+        })
 
-      const page = await browser.newPage()
-      await page.setViewport({ width, height, deviceScaleFactor: 2 })
-      await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
-      await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
+        const page = await browser.newPage()
+        await page.setViewport({ width, height, deviceScaleFactor: 2 })
+        await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
+        await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
 
-      const element = await page.$("#pbi-container")
-      if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
+        const element = await page.$("#pbi-container")
+        if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
 
-      const screenshot = await element.screenshot({ type: "png" })
-      return Buffer.from(screenshot)
-    } catch (err) {
-      lastError = err
-      if (attempt < maxAttempts) {
-        console.warn(`[captureReportScreenshot] Tentativa ${attempt} falhou, retentando...`, err)
+        const screenshot = await element.screenshot({ type: "png" })
+        return Buffer.from(screenshot)
+      } catch (err) {
+        lastError = err
+        if (attempt < maxAttempts) {
+          console.warn(`[captureReportScreenshot] Tentativa ${attempt} falhou, retentando...`, err)
+        }
+      } finally {
+        if (browser) await browser.close().catch(() => {})
+        if (localServer) await localServer.close().catch(() => {})
       }
-    } finally {
-      if (browser) await browser.close().catch(() => {})
-      if (localServer) await localServer.close().catch(() => {})
     }
+  } finally {
+    releaseCaptureSemaphore()
   }
 
   throw lastError
