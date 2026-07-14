@@ -219,8 +219,8 @@ export async function captureReportScreenshot(input: {
         page.on("console", (msg) => {
           console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
         })
-        page.on("pageerror", (err: Error) => {
-          console.error(`[Chrome pageerror]: ${err.message}`)
+        page.on("pageerror", (err: unknown) => {
+          console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
         })
 
         await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
