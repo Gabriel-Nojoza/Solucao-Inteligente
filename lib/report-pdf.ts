@@ -196,7 +196,7 @@ export async function captureReportScreenshot(input: {
 
   await acquireCaptureSemaphore()
 
-  const maxAttempts = 2
+  const maxAttempts = 1
   let lastError: unknown
 
   try {
