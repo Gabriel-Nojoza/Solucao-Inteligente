@@ -226,7 +226,7 @@ export async function captureReportScreenshot(input: {
         await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
 
         try {
-          await page.waitForFunction("window._pbiRendered === true", { timeout: 90000 })
+          await page.waitForFunction("window._pbiRendered === true", { timeout: 120000 })
         } catch (waitErr) {
           const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
           const debugPath = path.join(process.cwd(), "public", `pbi_debug_${Date.now()}.png`)
