@@ -219,7 +219,7 @@ export async function captureReportScreenshot(input: {
         page.on("console", (msg) => {
           console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
         })
-        page.on("pageerror", (err) => {
+        page.on("pageerror", (err: Error) => {
           console.error(`[Chrome pageerror]: ${err.message}`)
         })
 
