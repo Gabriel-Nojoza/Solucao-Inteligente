@@ -13,7 +13,7 @@ import {
   exportPowerBIReportDocument,
   sanitizeFileName,
 } from "@/lib/powerbi-report-pdf"
-import { pdfToPng, captureReportScreenshot } from "@/lib/report-pdf"
+import { pdfToPng, captureReportScreenshot, captureReportAsPdf } from "@/lib/report-pdf"
 import { generateReportEmbedToken } from "@/lib/powerbi"
 import {
   getPrimarySchedulePageName,
@@ -365,18 +365,51 @@ export async function POST(request: NextRequest) {
           return jsonError(getMissingReportMessage(), 404)
         }
 
-        browserPdfErrorMessage = getErrorMessage(browserPdfError)
-        console.error(
-          "Captura da pagina do sistema falhou, tentando ExportTo",
-          browserPdfError
-        )
-
         // PNG nao tem fallback via API nativa (requer Premium) — retorna erro direto
         if (format === "PNG") {
           return jsonError(
-            `Nao foi possivel exportar o relatorio em PNG. ${browserPdfErrorMessage || "Tente novamente."}`,
+            `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(browserPdfError) || "Tente novamente."}`,
             500
           )
+        }
+
+        // PDF: se nao tem capacidade Premium, tenta captura via Chrome como fallback
+        if (format === "PDF" && isPowerBiFeatureNotAvailableError(browserPdfError)) {
+          console.log("[reports/export] FeatureNotAvailableError no PDF nativo — tentando captura via Chrome")
+          if (!report.embed_url) {
+            return jsonError("Este relatorio nao possui URL de embed configurada", 422)
+          }
+          try {
+            const embedToken = await generateReportEmbedToken(
+              token,
+              workspace.pbi_workspace_id,
+              report.pbi_report_id
+            )
+            const chromePdf = await captureReportAsPdf({
+              embedUrl: report.embed_url,
+              embedToken,
+              reportId: report.pbi_report_id,
+              pageName: pbiPageName ?? null,
+            })
+            return new Response(chromePdf, {
+              status: 200,
+              headers: {
+                "Content-Type": "application/pdf",
+                "Content-Disposition": `inline; filename="${safeName}.pdf"`,
+                "Cache-Control": "no-store",
+              },
+            })
+          } catch (chromePdfError) {
+            if (isPowerBiEntityNotFoundError(chromePdfError)) {
+              await deactivateMissingReport(supabase, companyId, report.id)
+              return jsonError(getMissingReportMessage(), 404)
+            }
+            browserPdfErrorMessage = getErrorMessage(chromePdfError)
+            console.error("Captura Chrome de PDF tambem falhou", chromePdfError)
+          }
+        } else {
+          browserPdfErrorMessage = getErrorMessage(browserPdfError)
+          console.error("Captura da pagina do sistema falhou, tentando ExportTo", browserPdfError)
         }
       }
     }

@@ -260,6 +260,116 @@ export async function captureReportScreenshot(input: {
   throw lastError
 }
 
+export async function captureReportAsPdf(input: {
+  embedUrl: string
+  embedToken: string
+  reportId: string
+  pageName?: string | null
+  viewportWidth?: number
+  viewportHeight?: number
+}): Promise<Buffer> {
+  const executablePath = await findChromePath()
+  const width = input.viewportWidth ?? 1280
+  const height = input.viewportHeight ?? 960
+  const powerBiClientJs = loadPowerBiClientJs()
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #fff; width: ${width}px; height: ${height}px; }
+    #pbi-container { width: ${width}px; height: ${height}px; }
+  </style>
+</head>
+<body>
+  <div id="pbi-container"></div>
+  <script>${powerBiClientJs}</script>
+  <script>
+    window._pbiRendered = false;
+    window._pbiError = null;
+
+    var models = window['powerbi-client'].models;
+    var container = document.getElementById('pbi-container');
+    var config = {
+      type: 'report',
+      id: ${JSON.stringify(input.reportId)},
+      embedUrl: ${JSON.stringify(input.embedUrl)},
+      accessToken: ${JSON.stringify(input.embedToken)},
+      tokenType: models.TokenType.Embed,
+      ${input.pageName ? `pageName: ${JSON.stringify(input.pageName)},` : ""}
+      settings: {
+        filterPaneEnabled: false,
+        navContentPaneEnabled: false,
+        background: models.BackgroundType.Default,
+      },
+    };
+
+    var report = window['powerbi'].embed(container, config);
+
+    report.on('rendered', function() {
+      setTimeout(function() { window._pbiRendered = true; }, 2000);
+    });
+
+    report.on('error', function(event) {
+      window._pbiError = JSON.stringify(event.detail);
+      window._pbiRendered = true;
+    });
+  </script>
+</body>
+</html>`
+
+  await acquireCaptureSemaphore()
+
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
+  let localServer: { url: string; close: () => Promise<void> } | null = null
+
+  try {
+    localServer = await serveHtmlLocally(html)
+
+    browser = await puppeteer.launch({
+      executablePath,
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+      timeout: 90000,
+    })
+
+    const page = await browser.newPage()
+    await page.setViewport({ width, height })
+
+    page.on("console", (msg) => {
+      console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
+    })
+    page.on("pageerror", (err: unknown) => {
+      console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
+    })
+
+    await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
+
+    try {
+      await page.waitForFunction("window._pbiRendered === true", { timeout: 120000 })
+    } catch (waitErr) {
+      const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
+      if (pbiError) throw new Error(`Power BI render error: ${pbiError}`)
+      throw waitErr
+    }
+
+    const pdf = await page.pdf({
+      width: `${width}px`,
+      height: `${height}px`,
+      printBackground: true,
+      margin: { top: "0", right: "0", bottom: "0", left: "0" },
+    })
+
+    return Buffer.from(pdf)
+  } finally {
+    if (browser) await browser.close().catch(() => {})
+    if (localServer) await localServer.close().catch(() => {})
+    releaseCaptureSemaphore()
+  }
+}
+
 export async function buildPdfFromHtml(html: string): Promise<Buffer> {
   const executablePath = await findChromePath()
 
