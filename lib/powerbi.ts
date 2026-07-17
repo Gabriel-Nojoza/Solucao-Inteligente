@@ -2,6 +2,7 @@ import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { withCustomChatMeasures } from "@/lib/chat"
 import type { PowerBIConfig } from "@/lib/types"
 import { getRequestContext } from "@/lib/tenant"
+import { redisGet, redisSet } from "@/lib/redis"
 
 const PBI_API_BASE = "https://api.powerbi.com/v1.0/myorg"
 
@@ -239,11 +240,23 @@ async function getFabricToken(companyId?: string): Promise<string> {
     throw new Error("Credenciais incompletas")
   }
 
-  const cacheKey = `fabric:${config.tenant_id}:${config.client_id}`
+  const cacheKey = `pbi:fabric:${config.tenant_id}:${config.client_id}`
   const SAFETY_MARGIN_MS = 5 * 60 * 1000
-  const cached = fabricTokenCache.get(cacheKey)
-  if (cached && cached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
-    return cached.token
+
+  const memCachedFabric = fabricTokenCache.get(cacheKey)
+  if (memCachedFabric && memCachedFabric.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return memCachedFabric.token
+  }
+
+  const redisCachedFabric = await redisGet(cacheKey)
+  if (redisCachedFabric) {
+    try {
+      const parsed = JSON.parse(redisCachedFabric) as EmbedTokenCacheEntry
+      if (parsed.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+        fabricTokenCache.set(cacheKey, parsed)
+        return parsed.token
+      }
+    } catch {}
   }
 
   const body = new URLSearchParams({
@@ -263,7 +276,10 @@ async function getFabricToken(companyId?: string): Promise<string> {
   const json = await res.json()
   const token = String(json.access_token ?? "")
   const expiresAt = Date.now() + (typeof json.expires_in === "number" ? json.expires_in : 3600) * 1000
-  fabricTokenCache.set(cacheKey, { token, expiresAt })
+  const fabricEntry = { token, expiresAt }
+  fabricTokenCache.set(cacheKey, fabricEntry)
+  const fabricTtl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
+  await redisSet(cacheKey, JSON.stringify(fabricEntry), fabricTtl)
   return token
 }
 
@@ -278,12 +294,23 @@ export async function getAccessToken(companyId?: string): Promise<string> {
     )
   }
 
-  const cacheKey = `${config.tenant_id}:${config.client_id}`
+  const cacheKey = `pbi:access:${config.tenant_id}:${config.client_id}`
   const SAFETY_MARGIN_MS = 5 * 60 * 1000
 
-  const cached = accessTokenCache.get(cacheKey)
-  if (cached && cached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
-    return cached.token
+  const memCached = accessTokenCache.get(cacheKey)
+  if (memCached && memCached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return memCached.token
+  }
+
+  const redisCached = await redisGet(cacheKey)
+  if (redisCached) {
+    try {
+      const parsed = JSON.parse(redisCached) as EmbedTokenCacheEntry
+      if (parsed.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+        accessTokenCache.set(cacheKey, parsed)
+        return parsed.token
+      }
+    } catch {}
   }
 
   const tokenUrl = `https://login.microsoftonline.com/${config.tenant_id}/oauth2/v2.0/token`
@@ -311,7 +338,10 @@ export async function getAccessToken(companyId?: string): Promise<string> {
   const expiresIn = typeof json.expires_in === "number" ? json.expires_in : 3600
   const expiresAt = Date.now() + expiresIn * 1000
 
-  accessTokenCache.set(cacheKey, { token: accessToken, expiresAt })
+  const accessEntry = { token: accessToken, expiresAt }
+  accessTokenCache.set(cacheKey, accessEntry)
+  const accessTtl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
+  await redisSet(cacheKey, JSON.stringify(accessEntry), accessTtl)
 
   return accessToken
 }
@@ -439,12 +469,23 @@ export async function generateReportEmbedToken(
   reportId: string,
   datasetId?: string
 ) {
-  const cacheKey = `${workspaceId}:${reportId}`
+  const cacheKey = `pbi:embed:${workspaceId}:${reportId}`
   const SAFETY_MARGIN_MS = 5 * 60 * 1000
 
-  const cached = embedTokenCache.get(cacheKey)
-  if (cached && cached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
-    return cached.token
+  const memCachedEmbed = embedTokenCache.get(cacheKey)
+  if (memCachedEmbed && memCachedEmbed.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return memCachedEmbed.token
+  }
+
+  const redisCachedEmbed = await redisGet(cacheKey)
+  if (redisCachedEmbed) {
+    try {
+      const parsed = JSON.parse(redisCachedEmbed) as EmbedTokenCacheEntry
+      if (parsed.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+        embedTokenCache.set(cacheKey, parsed)
+        return parsed.token
+      }
+    } catch {}
   }
 
   const body: Record<string, unknown> = {
@@ -479,7 +520,10 @@ export async function generateReportEmbedToken(
     ? Date.parse(data.expiration)
     : Date.now() + 60 * 60 * 1000
 
-  embedTokenCache.set(cacheKey, { token: embedToken, expiresAt })
+  const embedEntry = { token: embedToken, expiresAt }
+  embedTokenCache.set(cacheKey, embedEntry)
+  const embedTtl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
+  await redisSet(cacheKey, JSON.stringify(embedEntry), embedTtl)
 
   return embedToken
 }
