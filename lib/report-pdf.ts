@@ -5,6 +5,7 @@ import * as fs from "fs"
 import * as path from "path"
 import * as os from "os"
 import puppeteer from "puppeteer-core"
+import sharp from "sharp"
 
 const execFileAsync = promisify(execFile)
 
@@ -238,33 +239,12 @@ export async function captureReportScreenshot(input: {
           throw waitErr
         }
 
-        // Detecta o tamanho real da pagina do relatorio para cortar o espaco vazio
-        const reportPageSize = await page.evaluate(async () => {
-          try {
-            const container = document.getElementById("pbi-container")
-            if (!container) return null
-            const embed = (window as any)["powerbi"]?.get(container)
-            if (!embed) return null
-            const pages: any[] = await embed.getPages()
-            const active = pages.find((p: any) => p.isActive) || pages[0]
-            const size = active?.defaultSize
-            if (size?.width && size?.height) return { width: size.width, height: size.height }
-          } catch {}
-          return null
-        }).catch(() => null)
-
-        let clipHeight = height
-        if (reportPageSize?.width && reportPageSize?.height) {
-          clipHeight = Math.ceil((reportPageSize.height / reportPageSize.width) * width)
-          clipHeight = Math.min(clipHeight, height)
-          console.log(`[captureReportScreenshot] page size ${reportPageSize.width}x${reportPageSize.height} → clip height ${clipHeight}px`)
-        }
-
-        const screenshot = await page.screenshot({
-          type: "png",
-          clip: { x: 0, y: 0, width, height: clipHeight },
-        })
-        return Buffer.from(screenshot)
+        const raw = await page.screenshot({ type: "png" })
+        const trimmed = await sharp(Buffer.from(raw))
+          .trim({ background: { r: 255, g: 255, b: 255, alpha: 1 }, threshold: 10 })
+          .toBuffer()
+          .catch(() => Buffer.from(raw))
+        return trimmed
       } catch (err) {
         lastError = err
         if (attempt < maxAttempts) {
