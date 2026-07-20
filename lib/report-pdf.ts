@@ -57,6 +57,52 @@ async function findChromePath(): Promise<string> {
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
+const WHITE = 230  // pixels com todos os canais >= WHITE são considerados fundo branco
+
+async function cropWhitespace(buffer: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true })
+  const { width, height, channels } = info
+
+  const rowIsWhite = (y: number) => {
+    const base = y * width * channels
+    for (let x = 0; x < width; x++) {
+      const i = base + x * channels
+      if (data[i] < WHITE || data[i + 1] < WHITE || data[i + 2] < WHITE) return false
+    }
+    return true
+  }
+
+  const colIsWhite = (x: number) => {
+    for (let y = 0; y < height; y++) {
+      const i = (y * width + x) * channels
+      if (data[i] < WHITE || data[i + 1] < WHITE || data[i + 2] < WHITE) return false
+    }
+    return true
+  }
+
+  let top = 0, bottom = height - 1, left = 0, right = width - 1
+
+  while (top < height && rowIsWhite(top)) top++
+  while (bottom > top && rowIsWhite(bottom)) bottom--
+  while (left < width && colIsWhite(left)) left++
+  while (right > left && colIsWhite(right)) right--
+
+  const PAD = 16
+  top = Math.max(0, top - PAD)
+  bottom = Math.min(height - 1, bottom + PAD)
+  left = Math.max(0, left - PAD)
+  right = Math.min(width - 1, right + PAD)
+
+  const cropWidth = right - left + 1
+  const cropHeight = bottom - top + 1
+
+  if (cropWidth >= width && cropHeight >= height) return buffer
+
+  return sharp(buffer)
+    .extract({ left, top, width: cropWidth, height: cropHeight })
+    .toBuffer()
+}
+
 async function isValidPngFile(filePath: string): Promise<boolean> {
   try {
     const fd = await fs.promises.open(filePath, "r")
@@ -240,11 +286,8 @@ export async function captureReportScreenshot(input: {
         }
 
         const raw = await page.screenshot({ type: "png" })
-        const trimmed = await sharp(Buffer.from(raw))
-          .trim({ threshold: 40 })
-          .toBuffer()
-          .catch(() => Buffer.from(raw))
-        return trimmed
+        const cropped = await cropWhitespace(Buffer.from(raw)).catch(() => Buffer.from(raw))
+        return cropped
       } catch (err) {
         lastError = err
         if (attempt < maxAttempts) {
