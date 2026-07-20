@@ -142,8 +142,8 @@ export async function captureReportScreenshot(input: {
   viewportHeight?: number
 }): Promise<Buffer> {
   const executablePath = await findChromePath()
-  const width = input.viewportWidth ?? 1280
-  const height = input.viewportHeight ?? 1600
+  const width = input.viewportWidth ?? 1920
+  const height = input.viewportHeight ?? 1200
   const powerBiClientJs = loadPowerBiClientJs()
 
   const html = `<!DOCTYPE html>
@@ -214,7 +214,7 @@ export async function captureReportScreenshot(input: {
         })
 
         const page = await browser.newPage()
-        await page.setViewport({ width, height, deviceScaleFactor: 2 })
+        await page.setViewport({ width, height, deviceScaleFactor: 1 })
 
         page.on("console", (msg) => {
           console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
