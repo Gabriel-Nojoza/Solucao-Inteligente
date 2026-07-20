@@ -238,10 +238,32 @@ export async function captureReportScreenshot(input: {
           throw waitErr
         }
 
-        const element = await page.$("#pbi-container")
-        if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
+        // Detecta o tamanho real da pagina do relatorio para cortar o espaco vazio
+        const reportPageSize = await page.evaluate(async () => {
+          try {
+            const container = document.getElementById("pbi-container")
+            if (!container) return null
+            const embed = (window as any)["powerbi"]?.get(container)
+            if (!embed) return null
+            const pages: any[] = await embed.getPages()
+            const active = pages.find((p: any) => p.isActive) || pages[0]
+            const size = active?.defaultSize
+            if (size?.width && size?.height) return { width: size.width, height: size.height }
+          } catch {}
+          return null
+        }).catch(() => null)
 
-        const screenshot = await element.screenshot({ type: "png" })
+        let clipHeight = height
+        if (reportPageSize?.width && reportPageSize?.height) {
+          clipHeight = Math.ceil((reportPageSize.height / reportPageSize.width) * width)
+          clipHeight = Math.min(clipHeight, height)
+          console.log(`[captureReportScreenshot] page size ${reportPageSize.width}x${reportPageSize.height} → clip height ${clipHeight}px`)
+        }
+
+        const screenshot = await page.screenshot({
+          type: "png",
+          clip: { x: 0, y: 0, width, height: clipHeight },
+        })
         return Buffer.from(screenshot)
       } catch (err) {
         lastError = err
