@@ -304,9 +304,9 @@ export async function POST(request: NextRequest) {
         embedToken,
         reportId: report.pbi_report_id,
         pageName: pbiPageName ?? null,
-        viewportWidth: 1480,
-        viewportHeight: 1900,
-        deviceScaleFactor: format === "HTML" ? 3 : 2,
+        viewportWidth: format === "HTML" ? 1100 : undefined,
+        viewportHeight: format === "HTML" ? 650 : undefined,
+        deviceScaleFactor: 2,
       })
 
       return new Response(pngBuffer, {
