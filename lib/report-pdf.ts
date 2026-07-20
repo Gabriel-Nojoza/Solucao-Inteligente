@@ -241,7 +241,7 @@ export async function captureReportScreenshot(input: {
 
         const raw = await page.screenshot({ type: "png" })
         const trimmed = await sharp(Buffer.from(raw))
-          .trim(40)
+          .trim({ threshold: 40 })
           .toBuffer()
           .catch(() => Buffer.from(raw))
         return trimmed
