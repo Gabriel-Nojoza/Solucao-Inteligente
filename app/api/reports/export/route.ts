@@ -306,6 +306,7 @@ export async function POST(request: NextRequest) {
         pageName: pbiPageName ?? null,
         viewportWidth: 1480,
         viewportHeight: 1900,
+        deviceScaleFactor: format === "HTML" ? 2 : 2,
       })
 
       return new Response(pngBuffer, {
