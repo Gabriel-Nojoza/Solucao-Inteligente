@@ -136,6 +136,8 @@ const EMPTY_FORM = {
   days_custom: "" as string,
   phone_column: "",
   name_column: "",
+  dax_query: "",
+  advanced_mode: false,
   message_template: "Ola {{nome}}, faz muito tempo que nao te vemos! Venha nos visitar.",
   image_url: "",
   bot_instance_id: "",
@@ -269,6 +271,7 @@ export default function CampaignsPage() {
     const daysValue = campaign.days_inactive
     const isPreset = DAYS_OPTIONS.some((o) => o.value === daysValue && o.value !== 0)
     const schedule = parseCronToSchedule(campaign.cron_expression)
+    const isAdvanced = !!(campaign.dax_query && !campaign.customer_table)
     setForm({
       name: campaign.name,
       description: campaign.description ?? "",
@@ -280,6 +283,8 @@ export default function CampaignsPage() {
       days_custom: !isPreset && daysValue ? String(daysValue) : "",
       phone_column: campaign.phone_column ?? "",
       name_column: campaign.name_column ?? "",
+      dax_query: campaign.dax_query ?? "",
+      advanced_mode: isAdvanced,
       message_template: campaign.message_template,
       image_url: campaign.image_url ?? "",
       bot_instance_id: campaign.bot_instance_id ?? "",
@@ -305,15 +310,19 @@ export default function CampaignsPage() {
     if (!form.name.trim()) errors.name = "Nome obrigatorio"
     if (!form.bot_instance_id) errors.bot_instance_id = "Selecione o WhatsApp de envio"
     if (!form.message_template.trim()) errors.message_template = "Template de mensagem obrigatorio"
-    // Power BI fields are optional — required only if any one of them is filled
-    const hasPbFields = !!form.customer_table.trim()
-    if (hasPbFields) {
+
+    if (form.advanced_mode) {
       if (!form.dataset_id.trim()) errors.dataset_id = "Selecione um dataset"
-      if (!form.phone_column.trim()) errors.phone_column = "Selecione a coluna de telefone"
-      if (!form.name_column.trim()) errors.name_column = "Selecione a coluna de nome"
-      // date_column + days são opcionais — só valida se um deles foi preenchido
-      if (form.date_column.trim() && !getDaysValue(form)) errors.days = "Informe quantos dias de inatividade"
-      if (!form.date_column.trim() && getDaysValue(form)) errors.date_column = "Selecione a coluna de data para filtrar por inatividade"
+      if (!form.dax_query.trim()) errors.dax_query = "Informe a consulta DAX"
+    } else {
+      const hasPbFields = !!form.customer_table.trim()
+      if (hasPbFields) {
+        if (!form.dataset_id.trim()) errors.dataset_id = "Selecione um dataset"
+        if (!form.phone_column.trim()) errors.phone_column = "Selecione a coluna de telefone"
+        if (!form.name_column.trim()) errors.name_column = "Selecione a coluna de nome"
+        if (form.date_column.trim() && !getDaysValue(form)) errors.days = "Informe quantos dias de inatividade"
+        if (!form.date_column.trim() && getDaysValue(form)) errors.date_column = "Selecione a coluna de data para filtrar por inatividade"
+      }
     }
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -372,7 +381,7 @@ export default function CampaignsPage() {
     if (!validate()) return
     setSaving(true)
     try {
-      const hasPbFields = !!form.customer_table.trim()
+      const hasPbFields = !form.advanced_mode && !!form.customer_table.trim()
       const days = hasPbFields ? getDaysValue(form) : null
       const cron_expression = form.schedule_enabled && form.schedule_days.length > 0
         ? buildCronExpression(form.schedule_time, form.schedule_days)
@@ -383,11 +392,12 @@ export default function CampaignsPage() {
         description: form.description.trim() || null,
         dataset_id: form.dataset_id.trim(),
         workspace_id: form.workspace_id.trim() || null,
-        customer_table: form.customer_table.trim() || null,
-        date_column: form.date_column.trim() || null,
-        days_inactive: days,
-        phone_column: form.phone_column.trim() || null,
-        name_column: form.name_column.trim() || null,
+        dax_query: form.advanced_mode ? (form.dax_query.trim() || null) : null,
+        customer_table: form.advanced_mode ? null : (form.customer_table.trim() || null),
+        date_column: form.advanced_mode ? null : (form.date_column.trim() || null),
+        days_inactive: form.advanced_mode ? null : days,
+        phone_column: form.advanced_mode ? null : (form.phone_column.trim() || null),
+        name_column: form.advanced_mode ? null : (form.name_column.trim() || null),
         message_template: form.message_template.trim(),
         image_url: form.image_url.trim() || null,
         bot_instance_id: form.bot_instance_id || null,
@@ -636,7 +646,27 @@ export default function CampaignsPage() {
 
               {/* Separador */}
               <div className="border-t pt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-4">Quais clientes vao receber?</p>
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quais clientes vao receber?</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setField("advanced_mode", !form.advanced_mode)
+                      setField("customer_table", "")
+                      setField("date_column", "")
+                      setField("phone_column", "")
+                      setField("name_column", "")
+                      setField("dax_query", "")
+                    }}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      form.advanced_mode
+                        ? "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                        : "border-border bg-muted/30 text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {form.advanced_mode ? "DAX ativo" : "Modo avancado"}
+                  </button>
+                </div>
 
                 {/* Workspace */}
                 <div className="flex flex-col gap-1.5 mb-3">
@@ -689,190 +719,215 @@ export default function CampaignsPage() {
                   {formErrors.dataset_id && <p className="text-xs text-destructive">{formErrors.dataset_id}</p>}
                 </div>
 
-                {/* Tabela */}
-                <div className="flex flex-col gap-1.5 mb-3">
-                  <Label className="text-xs">Tabela de clientes</Label>
-                  <ColumnSelect
-                    columns={tableOptions.map((t) => t.name)}
-                    value={form.customer_table}
-                    onChange={(v) => {
-                      setField("customer_table", v)
-                      setField("date_column", "")
-                      setField("phone_column", "")
-                      setField("name_column", "")
-                    }}
-                    placeholder={loadingMeta ? "Carregando..." : "Buscar tabela..."}
-                    disabled={!form.dataset_id || loadingMeta}
-                    error={!!formErrors.customer_table}
-                  />
-                  {formErrors.customer_table && <p className="text-xs text-destructive">{formErrors.customer_table}</p>}
-                </div>
-
-                {/* Coluna de data */}
-                <div className="flex flex-col gap-1.5 mb-3">
-                  <Label className="text-xs">Coluna da ultima compra</Label>
-                  <ColumnSelect
-                    columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
-                    value={form.date_column}
-                    onChange={(v) => setField("date_column", v)}
-                    placeholder="Buscar coluna de data..."
-                    disabled={!form.customer_table}
-                    error={!!formErrors.date_column}
-                  />
-                  {formErrors.date_column && <p className="text-xs text-destructive">{formErrors.date_column}</p>}
-                </div>
-
-                {/* Dias de inatividade */}
-                <div className="flex flex-col gap-1.5 mb-4">
-                  <Label className="text-xs">Clientes sem compra ha quantos dias?</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {DAYS_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setField("days_inactive", opt.value)}
-                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                          form.days_inactive === opt.value
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border bg-background hover:bg-accent"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  {form.days_inactive === 0 && (
-                    <Input
-                      type="number"
-                      min={1}
-                      value={form.days_custom}
-                      onChange={(e) => setField("days_custom", e.target.value)}
-                      placeholder="Ex: 45"
-                      className="w-28 mt-1"
+                {form.advanced_mode ? (
+                  /* ─── Modo avançado: DAX personalizado ─── */
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-xs">Consulta DAX</Label>
+                    <Textarea
+                      value={form.dax_query}
+                      onChange={(e) => setField("dax_query", e.target.value)}
+                      placeholder={`EVALUATE\nSELECTCOLUMNS(\n  FILTER(\n    'A Receber Det',\n    'A Receber Det'[AR Dias Atraso] > 0\n  ),\n  "nome", 'A Receber Det'[AR Cliente],\n  "telefone", 'A Receber Det'[Telefone],\n  "valor", 'A Receber Det'[AR Valor],\n  "dias", 'A Receber Det'[AR Dias Atraso]\n)`}
+                      className={`min-h-52 resize-none font-mono text-[11px] leading-relaxed ${formErrors.dax_query ? "border-destructive" : ""}`}
                     />
-                  )}
-                  {formErrors.days && <p className="text-xs text-destructive">{formErrors.days}</p>}
-                </div>
-
-                {/* Colunas de nome e telefone */}
-                {form.customer_table && (
+                    {formErrors.dax_query && <p className="text-xs text-destructive">{formErrors.dax_query}</p>}
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-1">Como usar no template</p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        A DAX deve retornar <span className="font-mono font-bold text-foreground">&quot;nome&quot;</span> e <span className="font-mono font-bold text-foreground">&quot;telefone&quot;</span> obrigatoriamente. Outros campos ficam disponíveis como <span className="font-mono text-foreground">{"{{campo}}"}</span> na mensagem.
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                        Ex: <span className="font-mono text-foreground">Ola {"{{nome}}"}, voce tem R${"{{valor}}"} em aberto ha {"{{dias}}"} dias.</span>
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  /* ─── Modo simples: seletores de tabela/coluna ─── */
                   <>
-                    <div className="grid grid-cols-2 gap-2 mb-3">
-                      <div className="flex flex-col gap-1.5">
-                        <Label className="text-xs">Nome em</Label>
-                        <ColumnSelect
-                          columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
-                          value={form.name_column}
-                          onChange={(v) => setField("name_column", v)}
-                          placeholder="Coluna de nome..."
-                          disabled={!form.customer_table}
-                          error={!!formErrors.name_column}
-                        />
-                        {formErrors.name_column && <p className="text-xs text-destructive">{formErrors.name_column}</p>}
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <Label className="text-xs">Telefone em</Label>
-                        <ColumnSelect
-                          columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
-                          value={form.phone_column}
-                          onChange={(v) => setField("phone_column", v)}
-                          placeholder="Coluna de tel..."
-                          disabled={!form.customer_table}
-                          error={!!formErrors.phone_column}
-                        />
-                        {formErrors.phone_column && <p className="text-xs text-destructive">{formErrors.phone_column}</p>}
-                      </div>
+                    {/* Tabela */}
+                    <div className="flex flex-col gap-1.5 mb-3">
+                      <Label className="text-xs">Tabela de clientes</Label>
+                      <ColumnSelect
+                        columns={tableOptions.map((t) => t.name)}
+                        value={form.customer_table}
+                        onChange={(v) => {
+                          setField("customer_table", v)
+                          setField("date_column", "")
+                          setField("phone_column", "")
+                          setField("name_column", "")
+                        }}
+                        placeholder={loadingMeta ? "Carregando..." : "Buscar tabela..."}
+                        disabled={!form.dataset_id || loadingMeta}
+                        error={!!formErrors.customer_table}
+                      />
+                      {formErrors.customer_table && <p className="text-xs text-destructive">{formErrors.customer_table}</p>}
                     </div>
 
-                    {/* Preview de clientes */}
-                    {features?.campaigns && form.name_column && form.phone_column && (
-                      <div className="rounded-xl border overflow-hidden">
-                        {/* Header */}
-                        <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            <Users className="size-3.5 text-muted-foreground" />
-                            <span className="text-xs font-medium">
-                              {loadingPreview ? "Buscando..." : previewClients !== null
-                                ? `${previewClients.length} clientes`
-                                : "Contatos"
-                              }
-                            </span>
+                    {/* Coluna de data */}
+                    <div className="flex flex-col gap-1.5 mb-3">
+                      <Label className="text-xs">Coluna da ultima compra</Label>
+                      <ColumnSelect
+                        columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
+                        value={form.date_column}
+                        onChange={(v) => setField("date_column", v)}
+                        placeholder="Buscar coluna de data..."
+                        disabled={!form.customer_table}
+                        error={!!formErrors.date_column}
+                      />
+                      {formErrors.date_column && <p className="text-xs text-destructive">{formErrors.date_column}</p>}
+                    </div>
+
+                    {/* Dias de inatividade */}
+                    <div className="flex flex-col gap-1.5 mb-4">
+                      <Label className="text-xs">Clientes sem compra ha quantos dias?</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {DAYS_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setField("days_inactive", opt.value)}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                              form.days_inactive === opt.value
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border bg-background hover:bg-accent"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {form.days_inactive === 0 && (
+                        <Input
+                          type="number"
+                          min={1}
+                          value={form.days_custom}
+                          onChange={(e) => setField("days_custom", e.target.value)}
+                          placeholder="Ex: 45"
+                          className="w-28 mt-1"
+                        />
+                      )}
+                      {formErrors.days && <p className="text-xs text-destructive">{formErrors.days}</p>}
+                    </div>
+
+                    {/* Colunas de nome e telefone */}
+                    {form.customer_table && (
+                      <>
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs">Nome em</Label>
+                            <ColumnSelect
+                              columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
+                              value={form.name_column}
+                              onChange={(v) => setField("name_column", v)}
+                              placeholder="Coluna de nome..."
+                              disabled={!form.customer_table}
+                              error={!!formErrors.name_column}
+                            />
+                            {formErrors.name_column && <p className="text-xs text-destructive">{formErrors.name_column}</p>}
                           </div>
-                          {previewClients === null && !loadingPreview && (
-                            <button
-                              type="button"
-                              className="text-xs text-primary hover:underline font-medium"
-                              onClick={handlePreview}
-                            >
-                              Buscar clientes
-                            </button>
-                          )}
-                          {previewClients !== null && !loadingPreview && (
-                            <button
-                              type="button"
-                              className="text-xs text-muted-foreground hover:underline"
-                              onClick={handlePreview}
-                            >
-                              Atualizar
-                            </button>
-                          )}
+                          <div className="flex flex-col gap-1.5">
+                            <Label className="text-xs">Telefone em</Label>
+                            <ColumnSelect
+                              columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
+                              value={form.phone_column}
+                              onChange={(v) => setField("phone_column", v)}
+                              placeholder="Coluna de tel..."
+                              disabled={!form.customer_table}
+                              error={!!formErrors.phone_column}
+                            />
+                            {formErrors.phone_column && <p className="text-xs text-destructive">{formErrors.phone_column}</p>}
+                          </div>
                         </div>
 
-                        {loadingPreview ? (
-                          <div className="flex items-center justify-center gap-2 py-5">
-                            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">Buscando clientes...</span>
-                          </div>
-                        ) : previewClients !== null && previewClients.length > 0 ? (
-                          <>
-                            <button
-                              type="button"
-                              className="w-full border-b bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
-                              onClick={() => setRemovedIndexes(new Set())}
-                            >
-                              Selecionar Todos
-                            </button>
-                            <div className="max-h-56 overflow-y-auto divide-y divide-border/40">
-                              {previewClients.map((client, i) => {
-                                const removed = removedIndexes.has(i)
-                                return (
-                                  <div
-                                    key={i}
-                                    className={`flex items-center justify-between rounded-lg mx-1.5 my-1 px-2.5 py-2 transition-colors ${
-                                      removed ? "opacity-40 bg-muted/10" : "bg-muted/20 hover:bg-muted/40"
-                                    }`}
-                                  >
-                                    <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                                      <span className="text-xs font-bold leading-tight truncate">
-                                        {client.name ?? <span className="font-normal text-muted-foreground">Sem nome</span>}
-                                      </span>
-                                      <span className="text-[11px] text-muted-foreground font-mono">
-                                        {client.phone ?? "—"}
-                                      </span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      className="ml-2 shrink-0 text-muted-foreground/50 hover:text-destructive transition-colors"
-                                      onClick={() => setRemovedIndexes((prev) => {
-                                        const next = new Set(prev)
-                                        if (next.has(i)) next.delete(i)
-                                        else next.add(i)
-                                        return next
-                                      })}
-                                    >
-                                      <Trash2 className="size-3.5" />
-                                    </button>
-                                  </div>
-                                )
-                              })}
+                        {/* Preview de clientes */}
+                        {features?.campaigns && form.name_column && form.phone_column && (
+                          <div className="rounded-xl border overflow-hidden">
+                            <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <Users className="size-3.5 text-muted-foreground" />
+                                <span className="text-xs font-medium">
+                                  {loadingPreview ? "Buscando..." : previewClients !== null
+                                    ? `${previewClients.length} clientes`
+                                    : "Contatos"
+                                  }
+                                </span>
+                              </div>
+                              {previewClients === null && !loadingPreview && (
+                                <button
+                                  type="button"
+                                  className="text-xs text-primary hover:underline font-medium"
+                                  onClick={handlePreview}
+                                >
+                                  Buscar clientes
+                                </button>
+                              )}
+                              {previewClients !== null && !loadingPreview && (
+                                <button
+                                  type="button"
+                                  className="text-xs text-muted-foreground hover:underline"
+                                  onClick={handlePreview}
+                                >
+                                  Atualizar
+                                </button>
+                              )}
                             </div>
-                          </>
-                        ) : previewClients !== null ? (
-                          <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                            Nenhum cliente inativo com esse filtro
-                          </p>
-                        ) : null}
-                      </div>
+
+                            {loadingPreview ? (
+                              <div className="flex items-center justify-center gap-2 py-5">
+                                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">Buscando clientes...</span>
+                              </div>
+                            ) : previewClients !== null && previewClients.length > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="w-full border-b bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors"
+                                  onClick={() => setRemovedIndexes(new Set())}
+                                >
+                                  Selecionar Todos
+                                </button>
+                                <div className="max-h-56 overflow-y-auto divide-y divide-border/40">
+                                  {previewClients.map((client, i) => {
+                                    const removed = removedIndexes.has(i)
+                                    return (
+                                      <div
+                                        key={i}
+                                        className={`flex items-center justify-between rounded-lg mx-1.5 my-1 px-2.5 py-2 transition-colors ${
+                                          removed ? "opacity-40 bg-muted/10" : "bg-muted/20 hover:bg-muted/40"
+                                        }`}
+                                      >
+                                        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                          <span className="text-xs font-bold leading-tight truncate">
+                                            {client.name ?? <span className="font-normal text-muted-foreground">Sem nome</span>}
+                                          </span>
+                                          <span className="text-[11px] text-muted-foreground font-mono">
+                                            {client.phone ?? "—"}
+                                          </span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="ml-2 shrink-0 text-muted-foreground/50 hover:text-destructive transition-colors"
+                                          onClick={() => setRemovedIndexes((prev) => {
+                                            const next = new Set(prev)
+                                            if (next.has(i)) next.delete(i)
+                                            else next.add(i)
+                                            return next
+                                          })}
+                                        >
+                                          <Trash2 className="size-3.5" />
+                                        </button>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </>
+                            ) : previewClients !== null ? (
+                              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+                                Nenhum cliente inativo com esse filtro
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </>
                     )}
                   </>
                 )}
