@@ -852,9 +852,9 @@ export default function CampaignsPage() {
                       {formErrors.customer_table && <p className="text-xs text-destructive">{formErrors.customer_table}</p>}
                     </div>
 
-                    {/* Coluna de data */}
+                    {/* Coluna de filtro */}
                     <div className="flex flex-col gap-1.5 mb-3">
-                      <Label className="text-xs">Coluna de data</Label>
+                      <Label className="text-xs">Coluna de filtro</Label>
                       <ColumnSelect
                         columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
                         value={form.date_column}
@@ -899,9 +899,8 @@ export default function CampaignsPage() {
                     </div>
 
                     {/* Filtros extras */}
-                    {form.customer_table && (
-                      <div className="flex flex-col gap-2 mb-3">
-                        {form.extra_filters.map((ef, idx) => (
+                    <div className="flex flex-col gap-2 mb-3">
+                      {form.extra_filters.map((ef, idx) => (
                           <div key={idx} className="flex flex-col gap-1.5 rounded-md border border-border p-2">
                             <div className="flex items-center justify-between">
                               <Label className="text-xs">Coluna de filtro {idx + 2}</Label>
@@ -960,19 +959,19 @@ export default function CampaignsPage() {
                             )}
                           </div>
                         ))}
-                        <button
-                          type="button"
-                          onClick={() => setForm((prev) => ({
-                            ...prev,
-                            extra_filters: [...prev.extra_filters, { ...EMPTY_EXTRA_FILTER }],
-                          }))}
-                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
-                        >
-                          <Plus className="size-3.5" />
-                          Adicionar filtro
-                        </button>
-                      </div>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => setForm((prev) => ({
+                          ...prev,
+                          extra_filters: [...prev.extra_filters, { ...EMPTY_EXTRA_FILTER }],
+                        }))}
+                        disabled={!form.customer_table}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Plus className="size-3.5" />
+                        Adicionar filtro
+                      </button>
+                    </div>
 
                     {/* Colunas de nome e telefone */}
                     {form.customer_table && (
