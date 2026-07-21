@@ -1050,7 +1050,7 @@ export default function CampaignsPage() {
                                 >
                                   Selecionar Todos
                                 </button>
-                                <div className="max-h-56 overflow-y-auto divide-y divide-border/40">
+                                <div className="max-h-96 overflow-y-auto divide-y divide-border/40">
                                   {previewClients.map((client, i) => {
                                     const removed = removedIndexes.has(i)
                                     return (
