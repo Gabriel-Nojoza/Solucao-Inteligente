@@ -700,7 +700,7 @@ export default function CampaignsPage() {
           </div>
 
           {/* ─── Coluna esquerda (visual): configurações ─── */}
-          <div className="flex w-96 shrink-0 flex-col border-r overflow-y-auto">
+          <div className="flex w-[520px] shrink-0 flex-col border-r overflow-y-auto">
             <div className="flex flex-col gap-5 p-5">
 
               {/* Nome */}
