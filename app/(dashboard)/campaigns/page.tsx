@@ -562,9 +562,9 @@ export default function CampaignsPage() {
         </div>
 
         {/* Body — split panel */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-1 min-h-0 overflow-hidden flex-row-reverse">
 
-          {/* ─── Coluna esquerda: mensagem / imagem ─── */}
+          {/* ─── Coluna direita (visual): mensagem / imagem ─── */}
           <div className="flex flex-col flex-1 min-w-0">
             {/* Tabs */}
             <div className="shrink-0 grid grid-cols-2 border-b">
@@ -699,8 +699,8 @@ export default function CampaignsPage() {
             </div>
           </div>
 
-          {/* ─── Coluna direita: configurações ─── */}
-          <div className="flex w-96 shrink-0 flex-col border-l overflow-y-auto">
+          {/* ─── Coluna esquerda (visual): configurações ─── */}
+          <div className="flex w-96 shrink-0 flex-col border-r overflow-y-auto">
             <div className="flex flex-col gap-5 p-5">
 
               {/* Nome */}
