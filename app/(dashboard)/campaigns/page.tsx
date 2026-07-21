@@ -240,6 +240,23 @@ export default function CampaignsPage() {
   const [removedIndexes, setRemovedIndexes] = useState<Set<number>>(new Set())
   const [loadingPreview, setLoadingPreview] = useState(false)
 
+  const [customTemplates, setCustomTemplates] = useState<{ label: string; text: string }[]>([])
+  const [showAddTemplate, setShowAddTemplate] = useState(false)
+  const [newTplName, setNewTplName] = useState("")
+  const [newTplText, setNewTplText] = useState("")
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("campaign_custom_templates")
+      if (saved) setCustomTemplates(JSON.parse(saved))
+    } catch {}
+  }, [])
+
+  function persistCustomTemplates(list: { label: string; text: string }[]) {
+    setCustomTemplates(list)
+    try { localStorage.setItem("campaign_custom_templates", JSON.stringify(list)) } catch {}
+  }
+
   // Reset preview when leaving form
   useEffect(() => {
     if (viewMode !== "form") { setPreviewClients(null); setRemovedIndexes(new Set()) }
@@ -635,7 +652,81 @@ export default function CampaignsPage() {
                           </span>
                         </button>
                       ))}
+                      {customTemplates.map((tpl, idx) => (
+                        <div key={idx} className="group relative flex flex-col gap-1 rounded-xl border border-border bg-muted/20 px-3 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setField("message_template", tpl.text)}
+                            className="flex flex-col gap-1 text-left w-full"
+                          >
+                            <span className="text-xs font-semibold text-foreground pr-4">
+                              {tpl.label}
+                            </span>
+                            <span className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                              {tpl.text}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => persistCustomTemplates(customTemplates.filter((_, i) => i !== idx))}
+                            className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 text-destructive hover:bg-destructive/10 rounded p-0.5 transition-opacity"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
+
+                    {showAddTemplate ? (
+                      <div className="flex flex-col gap-2 rounded-xl border border-dashed border-border p-3">
+                        <Input
+                          placeholder="Nome do modelo"
+                          value={newTplName}
+                          onChange={(e) => setNewTplName(e.target.value)}
+                          className="h-8 text-xs"
+                        />
+                        <Textarea
+                          placeholder="Texto do modelo. Use {{COLUNA}} para valores dinamicos."
+                          value={newTplText}
+                          onChange={(e) => setNewTplText(e.target.value)}
+                          className="text-xs resize-none"
+                          rows={3}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            onClick={() => { setShowAddTemplate(false); setNewTplName(""); setNewTplText("") }}
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-7 text-xs"
+                            disabled={!newTplName.trim() || !newTplText.trim()}
+                            onClick={() => {
+                              persistCustomTemplates([...customTemplates, { label: newTplName.trim(), text: newTplText.trim() }])
+                              setShowAddTemplate(false)
+                              setNewTplName("")
+                              setNewTplText("")
+                            }}
+                          >
+                            Salvar
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddTemplate(true)}
+                        className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+                      >
+                        <Plus className="size-3.5" /> Criar modelo personalizado
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
