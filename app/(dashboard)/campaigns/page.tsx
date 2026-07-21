@@ -320,8 +320,8 @@ export default function CampaignsPage() {
         if (!form.dataset_id.trim()) errors.dataset_id = "Selecione um dataset"
         if (!form.phone_column.trim()) errors.phone_column = "Selecione a coluna de telefone"
         if (!form.name_column.trim()) errors.name_column = "Selecione a coluna de nome"
-        if (form.date_column.trim() && !getDaysValue(form)) errors.days = "Informe quantos dias de inatividade"
-        if (!form.date_column.trim() && getDaysValue(form)) errors.date_column = "Selecione a coluna de data para filtrar por inatividade"
+        if (form.date_column.trim() && !getDaysValue(form)) errors.days = "Informe quantos dias"
+        if (!form.date_column.trim() && getDaysValue(form)) errors.date_column = "Selecione a coluna de data"
       }
     }
     setFormErrors(errors)
@@ -764,7 +764,7 @@ export default function CampaignsPage() {
 
                     {/* Coluna de data */}
                     <div className="flex flex-col gap-1.5 mb-3">
-                      <Label className="text-xs">Coluna da ultima compra</Label>
+                      <Label className="text-xs">Coluna de data</Label>
                       <ColumnSelect
                         columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
                         value={form.date_column}
@@ -778,7 +778,7 @@ export default function CampaignsPage() {
 
                     {/* Dias de inatividade */}
                     <div className="flex flex-col gap-1.5 mb-4">
-                      <Label className="text-xs">Clientes sem compra ha quantos dias?</Label>
+                      <Label className="text-xs">Filtrar registros com data anterior a quantos dias?</Label>
                       <div className="flex flex-wrap gap-1.5">
                         {DAYS_OPTIONS.map((opt) => (
                           <button
@@ -1085,7 +1085,7 @@ export default function CampaignsPage() {
                               <p className="font-medium">{campaign.name}</p>
                               <p className="text-xs text-muted-foreground">
                                 {campaign.customer_table && campaign.days_inactive
-                                  ? `Clientes sem compra ha ${campaign.days_inactive} dias`
+                                  ? `Filtro de ${campaign.days_inactive} dias`
                                   : campaign.description ?? "Envio manual"}
                               </p>
                             </div>
