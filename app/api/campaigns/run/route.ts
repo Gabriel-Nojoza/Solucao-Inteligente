@@ -17,8 +17,23 @@ function resolveMessage(template: string, row: Record<string, unknown>): string 
 
 function normalizePhone(raw: unknown): string | null {
   if (!raw) return null
-  const phone = String(raw).replace(/\D/g, "")
-  return phone.length >= 8 ? phone : null
+  // Remove todos os caracteres nao numericos (-, ;, ., (, ), +, espacos, etc.)
+  let phone = String(raw).replace(/\D/g, "")
+
+  // Remove codigo do pais 55 para normalizar o tamanho
+  if (phone.startsWith("55") && phone.length >= 12) {
+    phone = phone.slice(2)
+  }
+
+  // Adiciona o 9 para numeros moveis antigos de 8 digitos (DDD 2 + numero 8)
+  if (phone.length === 10) {
+    phone = phone.slice(0, 2) + "9" + phone.slice(2)
+  }
+
+  if (phone.length < 8) return null
+
+  // Garante codigo do pais Brasil
+  return `55${phone}`
 }
 
 export async function POST(request: NextRequest) {
