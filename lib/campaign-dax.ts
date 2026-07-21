@@ -20,7 +20,7 @@ export function buildCampaignDaxQuery(campaign: Pick<
       if (selectCols) {
         return [
           "EVALUATE",
-          "SELECTCOLUMNS(",
+          "ADDCOLUMNS(",
           "  FILTER(",
           `    '${table}',`,
           `    NOT ISBLANK('${table}'[${dateCol}])`,
@@ -43,7 +43,7 @@ export function buildCampaignDaxQuery(campaign: Pick<
     if (selectCols) {
       return [
         "EVALUATE",
-        "SELECTCOLUMNS(",
+        "ADDCOLUMNS(",
         `  '${table}',`,
         selectCols,
         ")",

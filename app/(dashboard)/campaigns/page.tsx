@@ -140,7 +140,7 @@ function buildSimpleFiltersDax(
   return [
     `// SIMPLE_FILTERS: ${JSON.stringify(meta)}`,
     "EVALUATE",
-    "SELECTCOLUMNS(",
+    "ADDCOLUMNS(",
     "  FILTER(",
     `    '${table}',`,
     conditions,
