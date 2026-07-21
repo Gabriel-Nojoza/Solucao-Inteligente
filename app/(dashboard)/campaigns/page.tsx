@@ -125,6 +125,41 @@ const MESSAGE_TEMPLATES = [
   },
 ]
 
+type ExtraFilter = { column: string; days: number; days_custom: string }
+
+const EMPTY_EXTRA_FILTER: ExtraFilter = { column: "", days: 30, days_custom: "" }
+
+function buildSimpleFiltersDax(
+  table: string, nameCol: string, phoneCol: string,
+  filters: Array<{ column: string; days: number }>
+): string {
+  const meta = { table, nameCol, phoneCol, filters }
+  const conditions = filters.map(
+    (f) => `    NOT ISBLANK('${table}'[${f.column}])\n      && DATEDIFF('${table}'[${f.column}], TODAY(), DAY) >= ${f.days}`
+  ).join("\n      && ")
+  return [
+    `// SIMPLE_FILTERS: ${JSON.stringify(meta)}`,
+    "EVALUATE",
+    "SELECTCOLUMNS(",
+    "  FILTER(",
+    `    '${table}',`,
+    conditions,
+    "  ),",
+    `  "nome", '${table}'[${nameCol}],`,
+    `  "telefone", '${table}'[${phoneCol}]`,
+    ")",
+  ].join("\n")
+}
+
+function parseSimpleFilters(daxQuery: string): {
+  table: string; nameCol: string; phoneCol: string
+  filters: Array<{ column: string; days: number }>
+} | null {
+  const match = daxQuery.match(/^\/\/ SIMPLE_FILTERS: (.+)/)
+  if (!match) return null
+  try { return JSON.parse(match[1]) } catch { return null }
+}
+
 const EMPTY_FORM = {
   name: "",
   description: "",
@@ -134,6 +169,7 @@ const EMPTY_FORM = {
   date_column: "",
   days_inactive: 30 as number,
   days_custom: "" as string,
+  extra_filters: [] as ExtraFilter[],
   phone_column: "",
   name_column: "",
   dax_query: "",
@@ -268,31 +304,67 @@ export default function CampaignsPage() {
 
   function openEdit(campaign: Campaign) {
     setEditId(campaign.id)
-    const daysValue = campaign.days_inactive
-    const isPreset = DAYS_OPTIONS.some((o) => o.value === daysValue && o.value !== 0)
     const schedule = parseCronToSchedule(campaign.cron_expression)
-    const isAdvanced = !!(campaign.dax_query && !campaign.customer_table)
-    setForm({
-      name: campaign.name,
-      description: campaign.description ?? "",
-      dataset_id: campaign.dataset_id,
-      workspace_id: campaign.workspace_id ?? "",
-      customer_table: campaign.customer_table ?? "",
-      date_column: campaign.date_column ?? "",
-      days_inactive: isPreset ? (daysValue ?? 30) : 0,
-      days_custom: !isPreset && daysValue ? String(daysValue) : "",
-      phone_column: campaign.phone_column ?? "",
-      name_column: campaign.name_column ?? "",
-      dax_query: campaign.dax_query ?? "",
-      advanced_mode: isAdvanced,
-      message_template: campaign.message_template,
-      image_url: campaign.image_url ?? "",
-      bot_instance_id: campaign.bot_instance_id ?? "",
-      is_active: campaign.is_active,
-      schedule_enabled: schedule.enabled,
-      schedule_time: schedule.time,
-      schedule_days: schedule.days,
-    })
+    const rawDax = campaign.dax_query ?? ""
+    const simpleFilters = parseSimpleFilters(rawDax)
+
+    if (simpleFilters) {
+      const [primary, ...rest] = simpleFilters.filters
+      const primaryDays = primary?.days ?? 30
+      const isPreset = DAYS_OPTIONS.some((o) => o.value === primaryDays && o.value !== 0)
+      setForm({
+        ...EMPTY_FORM,
+        name: campaign.name,
+        description: campaign.description ?? "",
+        dataset_id: campaign.dataset_id,
+        workspace_id: campaign.workspace_id ?? "",
+        customer_table: simpleFilters.table,
+        phone_column: simpleFilters.phoneCol,
+        name_column: simpleFilters.nameCol,
+        date_column: primary?.column ?? "",
+        days_inactive: isPreset ? primaryDays : 0,
+        days_custom: !isPreset ? String(primaryDays) : "",
+        extra_filters: rest.map((f) => {
+          const preset = DAYS_OPTIONS.some((o) => o.value === f.days && o.value !== 0)
+          return { column: f.column, days: preset ? f.days : 0, days_custom: preset ? "" : String(f.days) }
+        }),
+        advanced_mode: false,
+        dax_query: "",
+        message_template: campaign.message_template,
+        image_url: campaign.image_url ?? "",
+        bot_instance_id: campaign.bot_instance_id ?? "",
+        is_active: campaign.is_active,
+        schedule_enabled: schedule.enabled,
+        schedule_time: schedule.time,
+        schedule_days: schedule.days,
+      })
+    } else {
+      const daysValue = campaign.days_inactive
+      const isPreset = DAYS_OPTIONS.some((o) => o.value === daysValue && o.value !== 0)
+      const isAdvanced = !!(campaign.dax_query && !campaign.customer_table)
+      setForm({
+        ...EMPTY_FORM,
+        name: campaign.name,
+        description: campaign.description ?? "",
+        dataset_id: campaign.dataset_id,
+        workspace_id: campaign.workspace_id ?? "",
+        customer_table: campaign.customer_table ?? "",
+        date_column: campaign.date_column ?? "",
+        days_inactive: isPreset ? (daysValue ?? 30) : 0,
+        days_custom: !isPreset && daysValue ? String(daysValue) : "",
+        phone_column: campaign.phone_column ?? "",
+        name_column: campaign.name_column ?? "",
+        dax_query: campaign.dax_query ?? "",
+        advanced_mode: isAdvanced,
+        message_template: campaign.message_template,
+        image_url: campaign.image_url ?? "",
+        bot_instance_id: campaign.bot_instance_id ?? "",
+        is_active: campaign.is_active,
+        schedule_enabled: schedule.enabled,
+        schedule_time: schedule.time,
+        schedule_days: schedule.days,
+      })
+    }
     setFormErrors({})
     setFormTab("mensagem")
     setPreviewClients(null)
@@ -386,18 +458,36 @@ export default function CampaignsPage() {
       const cron_expression = form.schedule_enabled && form.schedule_days.length > 0
         ? buildCronExpression(form.schedule_time, form.schedule_days)
         : null
+      // Build extra filters with resolved days values
+      const resolvedExtraFilters = form.extra_filters
+        .filter((f) => f.column.trim())
+        .map((f) => ({
+          column: f.column.trim(),
+          days: f.days === 0 ? (parseInt(f.days_custom, 10) || 1) : f.days,
+        }))
+
+      // When there are extra filters, generate combined DAX and clear simple-mode fields
+      const hasExtraFilters = !form.advanced_mode && hasPbFields && resolvedExtraFilters.length > 0
+      const allFilters = hasExtraFilters ? [
+        ...(form.date_column.trim() && days ? [{ column: form.date_column.trim(), days }] : []),
+        ...resolvedExtraFilters,
+      ] : []
+      const generatedDax = hasExtraFilters && allFilters.length > 0
+        ? buildSimpleFiltersDax(form.customer_table.trim(), form.name_column.trim(), form.phone_column.trim(), allFilters)
+        : null
+
       const payload = {
         ...(editId ? { id: editId } : {}),
         name: form.name.trim(),
         description: form.description.trim() || null,
         dataset_id: form.dataset_id.trim(),
         workspace_id: form.workspace_id.trim() || null,
-        dax_query: form.advanced_mode ? (form.dax_query.trim() || null) : null,
-        customer_table: form.advanced_mode ? null : (form.customer_table.trim() || null),
-        date_column: form.advanced_mode ? null : (form.date_column.trim() || null),
-        days_inactive: form.advanced_mode ? null : days,
-        phone_column: form.advanced_mode ? null : (form.phone_column.trim() || null),
-        name_column: form.advanced_mode ? null : (form.name_column.trim() || null),
+        dax_query: form.advanced_mode ? (form.dax_query.trim() || null) : (generatedDax ?? null),
+        customer_table: (form.advanced_mode || hasExtraFilters) ? null : (form.customer_table.trim() || null),
+        date_column: (form.advanced_mode || hasExtraFilters) ? null : (form.date_column.trim() || null),
+        days_inactive: (form.advanced_mode || hasExtraFilters) ? null : days,
+        phone_column: (form.advanced_mode || hasExtraFilters) ? null : (form.phone_column.trim() || null),
+        name_column: (form.advanced_mode || hasExtraFilters) ? null : (form.name_column.trim() || null),
         message_template: form.message_template.trim(),
         image_url: form.image_url.trim() || null,
         bot_instance_id: form.bot_instance_id || null,
@@ -807,6 +897,82 @@ export default function CampaignsPage() {
                       )}
                       {formErrors.days && <p className="text-xs text-destructive">{formErrors.days}</p>}
                     </div>
+
+                    {/* Filtros extras */}
+                    {form.customer_table && (
+                      <div className="flex flex-col gap-2 mb-3">
+                        {form.extra_filters.map((ef, idx) => (
+                          <div key={idx} className="flex flex-col gap-1.5 rounded-md border border-border p-2">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-xs">Coluna de filtro {idx + 2}</Label>
+                              <button
+                                type="button"
+                                onClick={() => setForm((prev) => ({
+                                  ...prev,
+                                  extra_filters: prev.extra_filters.filter((_, i) => i !== idx),
+                                }))}
+                                className="text-muted-foreground hover:text-destructive"
+                              >
+                                <X className="size-3.5" />
+                              </button>
+                            </div>
+                            <ColumnSelect
+                              columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
+                              value={ef.column}
+                              onChange={(v) => setForm((prev) => ({
+                                ...prev,
+                                extra_filters: prev.extra_filters.map((f, i) => i === idx ? { ...f, column: v } : f),
+                              }))}
+                              placeholder="Buscar coluna..."
+                              disabled={!form.customer_table}
+                            />
+                            <div className="flex flex-wrap gap-1.5">
+                              {DAYS_OPTIONS.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => setForm((prev) => ({
+                                    ...prev,
+                                    extra_filters: prev.extra_filters.map((f, i) => i === idx ? { ...f, days: opt.value } : f),
+                                  }))}
+                                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                    ef.days === opt.value
+                                      ? "border-primary bg-primary text-primary-foreground"
+                                      : "border-border bg-background hover:bg-accent"
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                            {ef.days === 0 && (
+                              <Input
+                                type="number"
+                                min={1}
+                                value={ef.days_custom}
+                                onChange={(e) => setForm((prev) => ({
+                                  ...prev,
+                                  extra_filters: prev.extra_filters.map((f, i) => i === idx ? { ...f, days_custom: e.target.value } : f),
+                                }))}
+                                placeholder="Ex: 45"
+                                className="w-28 mt-1"
+                              />
+                            )}
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setForm((prev) => ({
+                            ...prev,
+                            extra_filters: [...prev.extra_filters, { ...EMPTY_EXTRA_FILTER }],
+                          }))}
+                          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit"
+                        >
+                          <Plus className="size-3.5" />
+                          Adicionar filtro
+                        </button>
+                      </div>
+                    )}
 
                     {/* Colunas de nome e telefone */}
                     {form.customer_table && (
