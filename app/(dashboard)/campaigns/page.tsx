@@ -745,7 +745,7 @@ export default function CampaignsPage() {
                   <>
                     {/* Tabela */}
                     <div className="flex flex-col gap-1.5 mb-3">
-                      <Label className="text-xs">Tabela de clientes</Label>
+                      <Label className="text-xs">Tabela</Label>
                       <ColumnSelect
                         columns={tableOptions.map((t) => t.name)}
                         value={form.customer_table}
