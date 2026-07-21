@@ -100,6 +100,10 @@ const DAYS_OPTIONS = [
 
 const MESSAGE_TEMPLATES = [
   {
+    label: "Cobranca A Receber",
+    text: "Ola {{CLIENTE}}, identificamos um titulo em aberto de R${{VALOR}} com vencimento em {{DTVENC}} ha {{DIASATRASO}} dias. Entre em contato para regularizar.",
+  },
+  {
     label: "Reativacao simples",
     text: "Ola {{nome}}, faz muito tempo que nao te vemos! Venha nos visitar. 😊",
   },
@@ -113,7 +117,7 @@ const MESSAGE_TEMPLATES = [
   },
   {
     label: "Convite",
-    text: "Ola {{nome}}! Gostaríamos de te convidar para conhecer nossas novidades. Estamos com condicoes especiais este mes. Esperamos voce! 🤝",
+    text: "Ola {{nome}}! Gostariamos de te convidar para conhecer nossas novidades. Estamos com condicoes especiais este mes. Esperamos voce! 🤝",
   },
   {
     label: "Lembrete gentil",
