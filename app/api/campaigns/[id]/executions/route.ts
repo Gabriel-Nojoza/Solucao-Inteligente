@@ -4,16 +4,17 @@ import { getRequestContext, isAuthContextError } from "@/lib/tenant"
 
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const ctx = await getRequestContext()
     const supabase = createServiceClient()
 
     const { data, error } = await supabase
       .from("campaign_executions")
       .select("*")
-      .eq("campaign_id", params.id)
+      .eq("campaign_id", id)
       .eq("company_id", ctx.companyId)
       .order("started_at", { ascending: false })
       .limit(30)
