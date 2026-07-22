@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr"
 import {
   Megaphone, Plus, Trash2, Pencil, Play, Loader2,
   ImageIcon, X, Clock, Users, ArrowLeft, MessageSquare, Send, CalendarClock,
+  History, CheckCircle2, XCircle, AlertCircle, ChevronLeft,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -22,6 +23,9 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Select, SelectContent, SelectGroup, SelectItem,
   SelectLabel, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -32,7 +36,7 @@ import {
 import { CampaignDispatchDialog } from "@/components/campaigns/dispatch-dialog"
 import { ColumnSelect } from "@/components/campaigns/column-select"
 import { describeCronExpression } from "@/lib/schedule-cron"
-import type { Campaign, Workspace, WhatsAppBotInstance, DatasetTable, DatasetColumn } from "@/lib/types"
+import type { Campaign, Workspace, WhatsAppBotInstance, DatasetTable, DatasetColumn, CampaignExecution, CampaignSend } from "@/lib/types"
 import type { CompanyFeatures } from "@/app/api/features/route"
 
 async function fetchApi(url: string, init?: RequestInit) {
@@ -244,6 +248,13 @@ export default function CampaignsPage() {
   const [showAddTemplate, setShowAddTemplate] = useState(false)
   const [newTplName, setNewTplName] = useState("")
   const [newTplText, setNewTplText] = useState("")
+
+  const [historyCampaign, setHistoryCampaign] = useState<Campaign | null>(null)
+  const [executions, setExecutions] = useState<CampaignExecution[]>([])
+  const [loadingExecutions, setLoadingExecutions] = useState(false)
+  const [selectedExecution, setSelectedExecution] = useState<CampaignExecution | null>(null)
+  const [executionSends, setExecutionSends] = useState<CampaignSend[]>([])
+  const [loadingSends, setLoadingSends] = useState(false)
 
   useEffect(() => {
     try {
@@ -556,6 +567,30 @@ export default function CampaignsPage() {
       void mutate("/api/campaigns")
     } catch {
       void mutate("/api/campaigns")
+    }
+  }
+
+  async function openHistory(campaign: Campaign) {
+    setHistoryCampaign(campaign)
+    setSelectedExecution(null)
+    setExecutionSends([])
+    setLoadingExecutions(true)
+    try {
+      const { response, data } = await fetchApi(`/api/campaigns/${campaign.id}/executions`)
+      if (response.ok) setExecutions(data as CampaignExecution[])
+    } finally {
+      setLoadingExecutions(false)
+    }
+  }
+
+  async function openExecutionSends(execution: CampaignExecution) {
+    setSelectedExecution(execution)
+    setLoadingSends(true)
+    try {
+      const { response, data } = await fetchApi(`/api/campaigns/executions/${execution.id}/sends`)
+      if (response.ok) setExecutionSends(data as CampaignSend[])
+    } finally {
+      setLoadingSends(false)
     }
   }
 
@@ -1372,6 +1407,9 @@ export default function CampaignsPage() {
                             <Button variant="ghost" size="icon" onClick={() => setDispatchCampaign(campaign)} title="Disparar">
                               <Play className="size-4" />
                             </Button>
+                            <Button variant="ghost" size="icon" onClick={() => openHistory(campaign)} title="Historico">
+                              <History className="size-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => openEdit(campaign)} title="Editar">
                               <Pencil className="size-4" />
                             </Button>
@@ -1409,6 +1447,111 @@ export default function CampaignsPage() {
         onOpenChange={(open) => { if (!open) setDispatchCampaign(null) }}
         onSuccess={() => void mutate("/api/campaigns")}
       />
+
+      {/* History dialog */}
+      <Dialog open={!!historyCampaign} onOpenChange={(open) => { if (!open) { setHistoryCampaign(null); setSelectedExecution(null) } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {selectedExecution ? (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedExecution(null); setExecutionSends([]) }}
+                  className="flex items-center gap-1 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronLeft className="size-4" />
+                  Voltar
+                </button>
+              ) : (
+                <History className="size-4" />
+              )}
+              <span>
+                {selectedExecution
+                  ? `Disparo — ${new Date(selectedExecution.started_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                  : `Historico — ${historyCampaign?.name ?? ""}`}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto mt-2">
+            {!selectedExecution ? (
+              loadingExecutions ? (
+                <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+              ) : executions.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-10">Nenhum disparo realizado ainda.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {executions.map((ex) => (
+                    <button
+                      key={ex.id}
+                      type="button"
+                      onClick={() => openExecutionSends(ex)}
+                      className="flex items-center gap-3 rounded-xl border border-border bg-muted/10 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+                    >
+                      {ex.status === "completed" ? (
+                        <CheckCircle2 className="size-4 shrink-0 text-green-500" />
+                      ) : ex.status === "failed" ? (
+                        <XCircle className="size-4 shrink-0 text-destructive" />
+                      ) : (
+                        <AlertCircle className="size-4 shrink-0 text-yellow-500" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">
+                          {new Date(ex.started_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {ex.sent_count} enviados · {ex.failed_count} falhas · {ex.skipped_count} ignorados · {ex.total_clients} total
+                        </p>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        ex.status === "completed" ? "bg-green-500/10 text-green-600" :
+                        ex.status === "failed" ? "bg-destructive/10 text-destructive" :
+                        "bg-yellow-500/10 text-yellow-600"
+                      }`}>
+                        {ex.status === "completed" ? "Concluido" : ex.status === "failed" ? "Falha" : "Em andamento"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : (
+              loadingSends ? (
+                <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+              ) : executionSends.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-10">Nenhum envio registrado.</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {executionSends.map((s) => (
+                    <div key={s.id} className="flex items-start gap-3 rounded-lg border border-border px-3 py-2.5">
+                      {s.status === "sent" ? (
+                        <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-green-500" />
+                      ) : s.status === "failed" ? (
+                        <XCircle className="size-4 shrink-0 mt-0.5 text-destructive" />
+                      ) : (
+                        <AlertCircle className="size-4 shrink-0 mt-0.5 text-yellow-500" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{s.client_name ?? "—"}</p>
+                        <p className="text-xs text-muted-foreground">{s.client_phone ?? "Sem telefone"}</p>
+                        {s.error_message && (
+                          <p className="text-xs text-destructive mt-0.5">{s.error_message}</p>
+                        )}
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                        s.status === "sent" ? "bg-green-500/10 text-green-600" :
+                        s.status === "failed" ? "bg-destructive/10 text-destructive" :
+                        "bg-yellow-500/10 text-yellow-600"
+                      }`}>
+                        {s.status === "sent" ? "Enviado" : s.status === "failed" ? "Falha" : "Pendente"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete dialog */}
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
