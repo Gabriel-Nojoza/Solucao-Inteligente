@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus, Check, Eye } from "lucide-react"
+import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus, Check, Eye, Maximize2, Minimize2 } from "lucide-react"
 import { toast } from "sonner"
 import type { Campaign, CampaignClient } from "@/lib/types"
 
@@ -68,6 +68,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
   const [manualPhone, setManualPhone] = useState("")
   const [savingContacts, setSavingContacts] = useState(false)
   const [previewClient, setPreviewClient] = useState<CampaignClient | null>(null)
+  const [maximized, setMaximized] = useState(false)
 
   async function persistManualContacts(contacts: { name: string; phone: string }[]) {
     if (!campaign) return
@@ -213,7 +214,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0 sm:rounded-xl overflow-hidden">
+      <DialogContent className={`flex flex-col gap-0 p-0 overflow-hidden transition-all ${maximized ? "h-screen max-h-screen w-screen max-w-screen rounded-none" : "h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:rounded-xl"}`}>
 
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b">
@@ -221,13 +222,23 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
             <DialogTitle className="text-lg font-bold">Disparo de Mensagens</DialogTitle>
             <p className="text-sm text-muted-foreground">{campaign.name}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <X className="size-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setMaximized((v) => !v)}
+              className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              title={maximized ? "Restaurar" : "Maximizar"}
+            >
+              {maximized ? <Minimize2 className="size-5" /> : <Maximize2 className="size-5" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
