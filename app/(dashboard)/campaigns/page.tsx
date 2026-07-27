@@ -1272,19 +1272,18 @@ export default function CampaignsPage() {
                           </SelectContent>
                         </Select>
                         <span className="text-sm text-muted-foreground">:</span>
-                        <Select
+                        <Input
+                          type="number"
+                          min={0}
+                          max={59}
+                          className="w-20 text-center"
                           value={form.schedule_time.split(":")[1] ?? "00"}
-                          onValueChange={(m) => setField("schedule_time", `${form.schedule_time.split(":")[0] ?? "09"}:${m}`)}
-                        >
-                          <SelectTrigger className="w-20">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {["00", "15", "30", "45"].map((m) => (
-                              <SelectItem key={m} value={m}>{m}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "").slice(0, 2)
+                            const num = Math.min(59, parseInt(raw || "0", 10))
+                            setField("schedule_time", `${form.schedule_time.split(":")[0] ?? "09"}:${String(num).padStart(2, "0")}`)
+                          }}
+                        />
                       </div>
                     </div>
 
