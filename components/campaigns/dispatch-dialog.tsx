@@ -244,8 +244,11 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
         {/* Body */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
-          {/* ─── Coluna esquerda: mensagem / imagem ─── */}
-          <div className="flex flex-col flex-1 min-w-0">
+          {/* ─── Coluna esquerda: contatos ─── */}
+          {/* (moved to left — message panel follows on the right) */}
+
+          {/* ─── Coluna direita: mensagem / imagem ─── */}
+          <div className="flex flex-col flex-1 min-w-0 order-2">
 
             {/* Tabs */}
             <div className="shrink-0 grid grid-cols-2 border-b">
@@ -329,8 +332,8 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
             </div>
           </div>
 
-          {/* ─── Coluna direita: contatos + histórico ─── */}
-          <div className="flex w-80 shrink-0 flex-col border-l overflow-hidden">
+          {/* ─── Coluna esquerda: contatos + histórico ─── */}
+          <div className="flex w-80 shrink-0 flex-col border-r overflow-hidden order-1">
 
             {/* Painel Contatos */}
             <div className="flex flex-col min-h-0 flex-1">
