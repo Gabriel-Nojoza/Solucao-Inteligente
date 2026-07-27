@@ -1280,7 +1280,7 @@ export default function CampaignsPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0")).map((m) => (
+                            {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0")).map((m) => (
                               <SelectItem key={m} value={m}>{m}</SelectItem>
                             ))}
                           </SelectContent>
