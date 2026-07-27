@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus, Check, Eye, Maximize2, Minimize2 } from "lucide-react"
+import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, Plus, Check, Eye, Maximize2, Minimize2, X } from "lucide-react"
 import { toast } from "sonner"
 import type { Campaign, CampaignClient } from "@/lib/types"
 
@@ -40,11 +40,28 @@ function formatPhone(phone: string | null): string {
   return phone
 }
 
+function formatValue(value: unknown): string {
+  if (value == null) return ""
+  if (typeof value === "number") {
+    if (!Number.isInteger(value)) {
+      return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    }
+    return value.toLocaleString("pt-BR")
+  }
+  if (typeof value === "string") {
+    const num = parseFloat(value.replace(",", "."))
+    if (!isNaN(num) && /^[\d.,]+$/.test(value.trim())) {
+      if (value.includes(".") || value.includes(",")) {
+        return num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      }
+      if (num >= 1000) return num.toLocaleString("pt-BR")
+    }
+  }
+  return String(value)
+}
+
 function resolveMessage(template: string, data: Record<string, unknown>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-    const value = data[key]
-    return value != null ? String(value) : ""
-  })
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => formatValue(data[key]))
 }
 
 type DispatchHistoryItem = {
@@ -214,7 +231,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`flex flex-col gap-0 p-0 overflow-hidden transition-all sm:max-w-none ${maximized ? "h-screen max-h-screen w-screen rounded-none" : "h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] sm:rounded-xl"}`}>
+      <DialogContent showCloseButton={false} className={`flex flex-col gap-0 p-0 overflow-hidden transition-all sm:max-w-none ${maximized ? "h-screen max-h-screen w-screen rounded-none" : "h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] sm:rounded-xl"}`}>
 
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b">
@@ -235,6 +252,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
               type="button"
               onClick={() => onOpenChange(false)}
               className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              title="Fechar"
             >
               <X className="size-5" />
             </button>
@@ -593,15 +611,18 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
               </div>
             </div>
             {Object.keys(previewClient.data ?? {}).length > 0 && (
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dados do Power BI</p>
-                <div className="rounded-xl border bg-muted/20 px-4 py-3 max-h-48 overflow-y-auto">
-                  {Object.entries(previewClient.data ?? {}).map(([key, val]) => (
-                    <div key={key} className="flex justify-between gap-4 py-1 border-b border-border/30 last:border-0">
-                      <span className="text-xs text-muted-foreground font-mono">{key}</span>
-                      <span className="text-xs text-right truncate max-w-[200px]">{val != null ? String(val) : "—"}</span>
-                    </div>
-                  ))}
+                <div className="rounded-xl border bg-muted/20 px-4 py-2 max-h-72 overflow-y-auto">
+                  {Object.entries(previewClient.data ?? {}).map(([key, val]) => {
+                    const colName = key.replace(/^[^\[]+\[/, "").replace(/\]$/, "")
+                    return (
+                      <div key={key} className="flex justify-between gap-6 py-2 border-b border-border/30 last:border-0">
+                        <span className="text-sm font-medium text-muted-foreground">{colName}</span>
+                        <span className="text-sm text-right font-semibold max-w-[240px] truncate">{val != null ? String(val) : "—"}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}

@@ -8,11 +8,28 @@ import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
 import { retryAsync } from "@/lib/utils"
 import type { CampaignClient } from "@/lib/types"
 
+function formatValue(value: unknown): string {
+  if (value == null) return ""
+  if (typeof value === "number") {
+    if (!Number.isInteger(value)) {
+      return value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    }
+    return value.toLocaleString("pt-BR")
+  }
+  if (typeof value === "string") {
+    const num = parseFloat(value.replace(",", "."))
+    if (!isNaN(num) && /^[\d.,]+$/.test(value.trim())) {
+      if (value.includes(".") || value.includes(",")) {
+        return num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      }
+      if (num >= 1000) return num.toLocaleString("pt-BR")
+    }
+  }
+  return String(value)
+}
+
 function resolveMessage(template: string, row: Record<string, unknown>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-    const value = row[key]
-    return value != null ? String(value) : ""
-  })
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => formatValue(row[key]))
 }
 
 function normalizePhone(raw: unknown): string | null {

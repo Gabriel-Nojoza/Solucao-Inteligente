@@ -95,10 +95,11 @@ function parseCronToSchedule(cron: string | null): { enabled: boolean; time: str
 }
 
 const DAYS_OPTIONS = [
-  { label: "30 dias", value: 30 },
-  { label: "60 dias", value: 60 },
-  { label: "90 dias", value: 90 },
-  { label: "120 dias", value: 120 },
+  { label: "Últimos 15 dias", value: 15 },
+  { label: "Último mês", value: 30 },
+  { label: "Últimos 3 meses", value: 90 },
+  { label: "Últimos 6 meses", value: 180 },
+  { label: "Último ano", value: 365 },
   { label: "Personalizado", value: 0 },
 ]
 
