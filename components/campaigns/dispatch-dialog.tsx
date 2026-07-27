@@ -467,6 +467,31 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                                   Sem telefone
                                 </span>
                               )}
+                              {client.data && (() => {
+                                const find = (col: string) => {
+                                  const entry = Object.entries(client.data ?? {}).find(([k]) =>
+                                    k.toUpperCase().endsWith(`[${col}]`) || k.toUpperCase() === col
+                                  )
+                                  return entry ? formatValue(entry[1]) : null
+                                }
+                                const duplic = find("DUPLIC")
+                                const valor = find("VALOR")
+                                const prest = find("PREST")
+                                const items = [
+                                  duplic && `#${duplic}`,
+                                  valor && `R$ ${valor}`,
+                                  prest && `${prest}x`,
+                                ].filter(Boolean)
+                                return items.length > 0 ? (
+                                  <span className="flex flex-wrap gap-1 mt-0.5">
+                                    {items.map((item, i) => (
+                                      <span key={i} className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-medium text-muted-foreground">
+                                        {item}
+                                      </span>
+                                    ))}
+                                  </span>
+                                ) : null
+                              })()}
                             </div>
                             <button
                               type="button"
