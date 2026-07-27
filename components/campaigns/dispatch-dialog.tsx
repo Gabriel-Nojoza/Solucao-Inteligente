@@ -214,7 +214,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`flex flex-col gap-0 p-0 overflow-hidden transition-all ${maximized ? "h-screen max-h-screen w-screen max-w-screen rounded-none" : "h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] sm:rounded-xl"}`}>
+      <DialogContent className={`flex flex-col gap-0 p-0 overflow-hidden transition-all sm:max-w-none ${maximized ? "h-screen max-h-screen w-screen rounded-none" : "h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] sm:rounded-xl"}`}>
 
         {/* Header */}
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b">
