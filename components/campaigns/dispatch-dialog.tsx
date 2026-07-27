@@ -469,16 +469,16 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                               )}
                               {client.data && (() => {
                                 const SKIP = new Set(["nome", "telefone", "name", "phone"])
-                                const items = Object.entries(client.data)
-                                  .filter(([k, v]) => {
-                                    const col = k.replace(/^[^\[]+\[/, "").replace(/\]$/, "").toLowerCase()
-                                    return !SKIP.has(col) && v != null && String(v).trim() !== ""
-                                  })
-                                  .slice(0, 4)
-                                  .map(([k, v]) => {
-                                    const col = k.replace(/^[^\[]+\[/, "").replace(/\]$/, "")
-                                    return `${col}: ${formatValue(v)}`
-                                  })
+                                const PRIORITY = ["DUPLIC", "VALOR", "PREST"]
+                                const colName = (k: string) => k.replace(/^[^\[]+\[/, "").replace(/\]$/, "")
+                                const entries = Object.entries(client.data).filter(([k, v]) =>
+                                  !SKIP.has(colName(k).toLowerCase()) && v != null && String(v).trim() !== ""
+                                )
+                                const priority = PRIORITY.flatMap(p =>
+                                  entries.filter(([k]) => colName(k).toUpperCase() === p)
+                                )
+                                const rest = entries.filter(([k]) => !PRIORITY.includes(colName(k).toUpperCase()))
+                                const items = [...priority, ...rest].slice(0, 4).map(([k, v]) => `${colName(k)}: ${formatValue(v)}`)
                                 return items.length > 0 ? (
                                   <span className="flex flex-wrap gap-1 mt-0.5">
                                     {items.map((item, i) => (
