@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus } from "lucide-react"
+import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus, Check } from "lucide-react"
 import { toast } from "sonner"
 import type { Campaign, CampaignClient } from "@/lib/types"
 
@@ -132,6 +132,10 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
 
   function selectAll() {
     setRemovedIndexes(new Set())
+  }
+
+  function deselectAll() {
+    setRemovedIndexes(new Set(clients.map((_, i) => i)))
   }
 
   function handleAddManual() {
@@ -359,14 +363,21 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                     />
                   </div>
 
-                  {/* Selecionar Todos */}
-                  <div className="shrink-0 px-3 pb-3">
+                  {/* Selecionar / Desmarcar Todos */}
+                  <div className="shrink-0 px-3 pb-3 flex gap-2">
                     <button
                       type="button"
                       onClick={selectAll}
-                      className="w-full rounded-lg border border-border bg-muted/50 py-2 text-sm font-semibold transition-colors hover:bg-muted"
+                      className="flex-1 rounded-lg border border-border bg-muted/50 py-2 text-sm font-semibold transition-colors hover:bg-muted"
                     >
                       Selecionar Todos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deselectAll}
+                      className="flex-1 rounded-lg border border-border bg-muted/50 py-2 text-sm font-semibold transition-colors hover:bg-muted text-muted-foreground"
+                    >
+                      Desmarcar Todos
                     </button>
                   </div>
 
@@ -380,15 +391,27 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                       filtered.map((client) => {
                         const hasPhone = !!client.phone
                         const removed = removedIndexes.has(client.originalIndex)
+                        const selected = hasPhone && !removed
                         return (
-                          <div
+                          <button
                             key={client.originalIndex}
-                            className={`flex items-center justify-between rounded-lg mx-2 my-1 px-3 py-2.5 transition-colors ${
-                              removed
-                                ? "opacity-40 bg-muted/10"
-                                : "bg-muted/30 hover:bg-muted/50"
+                            type="button"
+                            onClick={() => hasPhone && toggleRemove(client.originalIndex)}
+                            className={`flex w-full items-center gap-3 rounded-lg mx-2 my-1 px-3 py-2.5 transition-colors text-left ${
+                              !hasPhone
+                                ? "opacity-40 cursor-default"
+                                : selected
+                                  ? "bg-muted/30 hover:bg-muted/50"
+                                  : "opacity-50 bg-muted/10 hover:bg-muted/20"
                             }`}
                           >
+                            <div className={`shrink-0 size-4 rounded border flex items-center justify-center transition-colors ${
+                              selected
+                                ? "bg-emerald-600 border-emerald-600"
+                                : "border-muted-foreground/40 bg-transparent"
+                            }`}>
+                              {selected && <Check className="size-3 text-white" />}
+                            </div>
                             <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                               <span className="text-sm font-bold leading-tight truncate">
                                 {client.name || <span className="font-normal text-muted-foreground">Sem nome</span>}
@@ -404,17 +427,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                                 </span>
                               )}
                             </div>
-                            {hasPhone && (
-                              <button
-                                type="button"
-                                onClick={() => toggleRemove(client.originalIndex)}
-                                className="ml-2 shrink-0 text-muted-foreground/60 hover:text-destructive transition-colors"
-                                title={removed ? "Restaurar" : "Remover"}
-                              >
-                                <Trash2 className="size-4" />
-                              </button>
-                            )}
-                          </div>
+                          </button>
                         )
                       })
                     )}
