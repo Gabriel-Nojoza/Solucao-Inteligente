@@ -474,7 +474,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                                     const col = k.replace(/^[^\[]+\[/, "").replace(/\]$/, "").toLowerCase()
                                     return !SKIP.has(col) && v != null && String(v).trim() !== ""
                                   })
-                                  .slice(0, 3)
+                                  .slice(0, 4)
                                   .map(([k, v]) => {
                                     const col = k.replace(/^[^\[]+\[/, "").replace(/\]$/, "")
                                     return `${col}: ${formatValue(v)}`
