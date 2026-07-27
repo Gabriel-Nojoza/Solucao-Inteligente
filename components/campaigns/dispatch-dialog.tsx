@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus, Check } from "lucide-react"
+import { Loader2, Users, Send, PhoneOff, Trash2, ImageIcon, MessageSquare, Clock, X, Plus, Check, Eye } from "lucide-react"
 import { toast } from "sonner"
 import type { Campaign, CampaignClient } from "@/lib/types"
 
@@ -40,6 +40,13 @@ function formatPhone(phone: string | null): string {
   return phone
 }
 
+function resolveMessage(template: string, data: Record<string, unknown>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+    const value = data[key]
+    return value != null ? String(value) : ""
+  })
+}
+
 type DispatchHistoryItem = {
   id: string
   sent_at: string
@@ -60,6 +67,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
   const [manualName, setManualName] = useState("")
   const [manualPhone, setManualPhone] = useState("")
   const [savingContacts, setSavingContacts] = useState(false)
+  const [previewClient, setPreviewClient] = useState<CampaignClient | null>(null)
 
   async function persistManualContacts(contacts: { name: string; phone: string }[]) {
     if (!campaign) return
@@ -203,6 +211,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[calc(100vh-2rem)] max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0 sm:rounded-xl overflow-hidden">
 
@@ -427,6 +436,14 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                                 </span>
                               )}
                             </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setPreviewClient(client) }}
+                              className="shrink-0 ml-1 text-muted-foreground/50 hover:text-primary transition-colors"
+                              title="Visualizar mensagem"
+                            >
+                              <Eye className="size-3.5" />
+                            </button>
                           </button>
                         )
                       })
@@ -539,5 +556,45 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Preview da mensagem por cliente */}
+    {previewClient && campaign && (
+      <Dialog open={!!previewClient} onOpenChange={() => setPreviewClient(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogTitle className="text-base font-semibold">
+            Preview da mensagem
+          </DialogTitle>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cliente</p>
+              <p className="text-sm font-medium">{previewClient.name || "Sem nome"}</p>
+              <p className="text-xs text-muted-foreground">{formatPhone(previewClient.phone) || "Sem telefone"}</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Mensagem que sera enviada</p>
+              <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-5 py-4">
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {resolveMessage(campaign.message_template, previewClient.data ?? {})}
+                </p>
+              </div>
+            </div>
+            {Object.keys(previewClient.data ?? {}).length > 0 && (
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dados do Power BI</p>
+                <div className="rounded-xl border bg-muted/20 px-4 py-3 max-h-48 overflow-y-auto">
+                  {Object.entries(previewClient.data ?? {}).map(([key, val]) => (
+                    <div key={key} className="flex justify-between gap-4 py-1 border-b border-border/30 last:border-0">
+                      <span className="text-xs text-muted-foreground font-mono">{key}</span>
+                      <span className="text-xs text-right truncate max-w-[200px]">{val != null ? String(val) : "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    )}
+    </>
   )
 }
