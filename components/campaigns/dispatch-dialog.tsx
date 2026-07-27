@@ -468,20 +468,17 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
                                 </span>
                               )}
                               {client.data && (() => {
-                                const find = (col: string) => {
-                                  const entry = Object.entries(client.data ?? {}).find(([k]) =>
-                                    k.toUpperCase().endsWith(`[${col}]`) || k.toUpperCase() === col
-                                  )
-                                  return entry ? formatValue(entry[1]) : null
-                                }
-                                const duplic = find("DUPLIC")
-                                const valor = find("VALOR")
-                                const prest = find("PREST")
-                                const items = [
-                                  duplic && `#${duplic}`,
-                                  valor && `R$ ${valor}`,
-                                  prest && `${prest}x`,
-                                ].filter(Boolean)
+                                const SKIP = new Set(["nome", "telefone", "name", "phone"])
+                                const items = Object.entries(client.data)
+                                  .filter(([k, v]) => {
+                                    const col = k.replace(/^[^\[]+\[/, "").replace(/\]$/, "").toLowerCase()
+                                    return !SKIP.has(col) && v != null && String(v).trim() !== ""
+                                  })
+                                  .slice(0, 3)
+                                  .map(([k, v]) => {
+                                    const col = k.replace(/^[^\[]+\[/, "").replace(/\]$/, "")
+                                    return `${col}: ${formatValue(v)}`
+                                  })
                                 return items.length > 0 ? (
                                   <span className="flex flex-wrap gap-1 mt-0.5">
                                     {items.map((item, i) => (
