@@ -333,7 +333,7 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
           </div>
 
           {/* ─── Coluna esquerda: contatos + histórico ─── */}
-          <div className="flex w-[420px] shrink-0 flex-col border-r overflow-hidden order-1">
+          <div className="flex w-[620px] shrink-0 flex-col border-r overflow-hidden order-1">
 
             {/* Painel Contatos */}
             <div className="flex flex-col min-h-0 flex-1">
