@@ -138,9 +138,13 @@ export function CampaignDispatchDialog({ campaign, open, onOpenChange, onSuccess
     .filter((c) => {
       const q = search.trim().toLowerCase()
       if (!q) return true
+      const dataValues = Object.entries(c.data ?? {}).some(([, v]) =>
+        v != null && String(v).toLowerCase().includes(q)
+      )
       return (
         (c.name?.toLowerCase().includes(q) ?? false) ||
-        (c.phone?.includes(q) ?? false)
+        (c.phone?.includes(q) ?? false) ||
+        dataValues
       )
     })
 
