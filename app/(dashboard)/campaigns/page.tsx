@@ -5,7 +5,7 @@ import useSWR, { mutate } from "swr"
 import {
   Megaphone, Plus, Trash2, Pencil, Play, Loader2,
   ImageIcon, X, Clock, Users, ArrowLeft, MessageSquare, Send, CalendarClock,
-  History, CheckCircle2, XCircle, AlertCircle, ChevronLeft,
+  History, CheckCircle2, XCircle, AlertCircle, ChevronLeft, Check, PhoneOff,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -36,7 +36,7 @@ import {
 import { CampaignDispatchDialog } from "@/components/campaigns/dispatch-dialog"
 import { ColumnSelect } from "@/components/campaigns/column-select"
 import { describeCronExpression } from "@/lib/schedule-cron"
-import type { Campaign, Workspace, WhatsAppBotInstance, DatasetTable, DatasetColumn, CampaignExecution, CampaignSend } from "@/lib/types"
+import type { Campaign, Workspace, WhatsAppBotInstance, DatasetTable, DatasetColumn, CampaignExecution, CampaignSend, CampaignClient } from "@/lib/types"
 import type { CompanyFeatures } from "@/app/api/features/route"
 
 async function fetchApi(url: string, init?: RequestInit) {
@@ -223,7 +223,13 @@ export default function CampaignsPage() {
 
   // View mode: list or form (create/edit)
   const [viewMode, setViewMode] = useState<"list" | "form">("list")
-  const [formTab, setFormTab] = useState<"mensagem" | "imagem">("mensagem")
+  const [formTab, setFormTab] = useState<"mensagem" | "imagem" | "contatos">("mensagem")
+  const [inlineClients, setInlineClients] = useState<CampaignClient[]>([])
+  const [inlineRemovedIndexes, setInlineRemovedIndexes] = useState<Set<number>>(new Set())
+  const [inlineSearch, setInlineSearch] = useState("")
+  const [inlineLoading, setInlineLoading] = useState(false)
+  const [inlineSending, setInlineSending] = useState(false)
+  const [inlineSavedId, setInlineSavedId] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [dispatchCampaign, setDispatchCampaign] = useState<Campaign | null>(null)
@@ -482,6 +488,49 @@ export default function CampaignsPage() {
     }
   }
 
+  async function fetchInlineClients(campaignId: string) {
+    setInlineLoading(true)
+    setInlineClients([])
+    setInlineRemovedIndexes(new Set())
+    setInlineSearch("")
+    try {
+      const { response, data } = await fetchApi("/api/campaigns/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaign_id: campaignId }),
+      })
+      if (!response.ok) throw new Error(extractError(data) || "Erro ao carregar contatos")
+      const result = data as { clients: CampaignClient[] }
+      setInlineClients(result.clients ?? [])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao carregar contatos")
+    } finally {
+      setInlineLoading(false)
+    }
+  }
+
+  async function handleInlineSend() {
+    if (!inlineSavedId) return
+    setInlineSending(true)
+    try {
+      const selected = inlineClients.filter((c, i) => !inlineRemovedIndexes.has(i) && c.phone)
+      if (selected.length === 0) { toast.error("Nenhum contato selecionado"); return }
+      const { response, data } = await fetchApi("/api/campaigns/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaign_id: inlineSavedId, contacts: selected }),
+      })
+      if (!response.ok) throw new Error(extractError(data) || "Erro ao disparar")
+      toast.success("Campanha disparada com sucesso!")
+      setViewMode("list")
+      void mutate("/api/campaigns")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao disparar campanha")
+    } finally {
+      setInlineSending(false)
+    }
+  }
+
   async function handleSave() {
     if (!validate()) return
     setSaving(true)
@@ -536,7 +585,10 @@ export default function CampaignsPage() {
       const saved = data as Campaign
       toast.success(editId ? "Campanha atualizada!" : "Campanha criada!")
       void mutate("/api/campaigns")
-      setDispatchCampaign(saved)
+      if (!editId) setEditId(saved.id)
+      setInlineSavedId(saved.id)
+      setFormTab("contatos")
+      void fetchInlineClients(saved.id)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao salvar campanha")
     } finally {
@@ -622,10 +674,10 @@ export default function CampaignsPage() {
         {/* Body — split panel */}
         <div className="flex flex-1 min-h-0 overflow-hidden flex-row-reverse">
 
-          {/* ─── Coluna direita (visual): mensagem / imagem ─── */}
+          {/* ─── Coluna direita (visual): mensagem / imagem / contatos ─── */}
           <div className="flex flex-col flex-1 min-w-0">
             {/* Tabs */}
-            <div className="shrink-0 grid grid-cols-2 border-b">
+            <div className="shrink-0 grid grid-cols-3 border-b">
               <button
                 type="button"
                 onClick={() => setFormTab("mensagem")}
@@ -646,10 +698,30 @@ export default function CampaignsPage() {
                 <ImageIcon className="size-4" />
                 Imagem
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormTab("contatos")
+                  if (inlineSavedId && inlineClients.length === 0 && !inlineLoading) {
+                    void fetchInlineClients(inlineSavedId)
+                  }
+                }}
+                className={`flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-colors ${
+                  formTab === "contatos" ? "bg-muted/50 text-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Users className="size-4" />
+                Contatos
+                {inlineClients.length > 0 && (
+                  <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {inlineClients.filter((c, i) => !inlineRemovedIndexes.has(i) && c.phone).length}
+                  </span>
+                )}
+              </button>
             </div>
 
-            {/* Conteúdo da tab */}
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Conteúdo da tab mensagem/imagem */}
+            {formTab !== "contatos" && <div className="flex-1 overflow-y-auto p-6">
               {formTab === "mensagem" ? (
                 <div className="flex flex-col gap-4">
                   <Textarea
@@ -812,22 +884,161 @@ export default function CampaignsPage() {
                   />
                 </div>
               )}
-            </div>
+            </div>}
 
-            {/* Botão salvar */}
-            <div className="shrink-0 border-t px-6 py-4">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving || uploadingImage}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? (
-                  <><Loader2 className="size-4 animate-spin" /> Salvando...</>
-                ) : (
-                  <><Send className="size-4" /> {editId ? "Salvar Alteracoes" : "Criar Campanha"}</>
+            {/* Aba contatos inline */}
+            {formTab === "contatos" && (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                {inlineLoading && (
+                  <div className="flex flex-1 items-center justify-center gap-2">
+                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Buscando contatos...</span>
+                  </div>
                 )}
-              </button>
+                {!inlineLoading && !inlineSavedId && (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                    <Users className="size-12 text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">Salve a campanha primeiro para ver os contatos</p>
+                  </div>
+                )}
+                {!inlineLoading && inlineSavedId && inlineClients.length === 0 && (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                    <Users className="size-12 text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">Nenhum contato encontrado</p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchInlineClients(inlineSavedId)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Tentar novamente
+                    </button>
+                  </div>
+                )}
+                {!inlineLoading && inlineClients.length > 0 && (() => {
+                  const q = inlineSearch.trim().toLowerCase()
+                  const filtered = inlineClients.map((c, i) => ({ ...c, idx: i })).filter((c) => {
+                    if (!q) return true
+                    return (
+                      (c.name?.toLowerCase().includes(q) ?? false) ||
+                      (c.phone?.includes(q) ?? false) ||
+                      Object.values(c.data ?? {}).some((v) => v != null && String(v).toLowerCase().includes(q))
+                    )
+                  })
+                  const activeCount = inlineClients.filter((c, i) => !inlineRemovedIndexes.has(i) && c.phone).length
+                  return (
+                    <div className="flex flex-col flex-1 min-h-0">
+                      <div className="shrink-0 px-4 pt-3 pb-2 flex flex-col gap-2">
+                        <Input
+                          value={inlineSearch}
+                          onChange={(e) => setInlineSearch(e.target.value)}
+                          placeholder="Buscar por nome, telefone ou qualquer campo..."
+                          className="h-9 text-sm"
+                        />
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setInlineRemovedIndexes(new Set())}
+                            className="flex-1 rounded-lg border py-1.5 text-xs font-semibold hover:bg-muted transition-colors">
+                            Selecionar Todos
+                          </button>
+                          <button type="button" onClick={() => setInlineRemovedIndexes(new Set(inlineClients.map((_, i) => i)))}
+                            className="flex-1 rounded-lg border py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors">
+                            Desmarcar Todos
+                          </button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{activeCount} selecionado{activeCount !== 1 ? "s" : ""} de {inlineClients.length}</p>
+                      </div>
+                      <div className="flex-1 overflow-y-auto divide-y divide-border/40 px-2 pb-2">
+                        {filtered.map((client) => {
+                          const hasPhone = !!client.phone
+                          const selected = hasPhone && !inlineRemovedIndexes.has(client.idx)
+                          const colName = (k: string) => k.replace(/^[^\[]+\[/, "").replace(/\]$/, "")
+                          const SKIP = new Set(["nome", "telefone", "name", "phone"])
+                          const PRIORITY = ["DUPLIC", "VALOR", "PREST"]
+                          const entries = Object.entries(client.data ?? {}).filter(([k, v]) =>
+                            !SKIP.has(colName(k).toLowerCase()) && v != null && String(v).trim() !== ""
+                          )
+                          const priority = PRIORITY.flatMap(p => entries.filter(([k]) => colName(k).toUpperCase() === p))
+                          const rest = entries.filter(([k]) => !PRIORITY.includes(colName(k).toUpperCase()))
+                          const tags = [...priority, ...rest].slice(0, 4).map(([k, v]) => `${colName(k)}: ${v}`)
+                          return (
+                            <button
+                              key={client.idx}
+                              type="button"
+                              onClick={() => {
+                                if (!hasPhone) return
+                                setInlineRemovedIndexes((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(client.idx)) next.delete(client.idx)
+                                  else next.add(client.idx)
+                                  return next
+                                })
+                              }}
+                              className={`flex w-full items-center gap-3 rounded-lg mx-1 my-0.5 px-3 py-2.5 transition-colors text-left ${
+                                !hasPhone ? "opacity-40 cursor-default" : selected ? "bg-muted/30 hover:bg-muted/50" : "opacity-50 bg-muted/10 hover:bg-muted/20"
+                              }`}
+                            >
+                              <div className={`shrink-0 size-4 rounded border flex items-center justify-center transition-colors ${
+                                selected ? "bg-emerald-600 border-emerald-600" : "border-muted-foreground/40"
+                              }`}>
+                                {selected && <Check className="size-3 text-white" />}
+                              </div>
+                              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                <span className="text-sm font-bold leading-tight truncate">
+                                  {client.name || <span className="font-normal text-muted-foreground">Sem nome</span>}
+                                </span>
+                                {hasPhone ? (
+                                  <span className="text-xs text-muted-foreground">{client.phone}</span>
+                                ) : (
+                                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                    <PhoneOff className="size-3" /> Sem telefone
+                                  </span>
+                                )}
+                                {tags.length > 0 && (
+                                  <span className="flex flex-wrap gap-1 mt-0.5">
+                                    {tags.map((tag, i) => (
+                                      <span key={i} className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-medium text-muted-foreground">{tag}</span>
+                                    ))}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
+            {/* Botão salvar / enviar */}
+            <div className="shrink-0 border-t px-6 py-4">
+              {formTab === "contatos" && inlineSavedId ? (
+                <button
+                  type="button"
+                  onClick={handleInlineSend}
+                  disabled={inlineSending || inlineLoading || inlineClients.filter((c, i) => !inlineRemovedIndexes.has(i) && c.phone).length === 0}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {inlineSending ? (
+                    <><Loader2 className="size-4 animate-spin" /> Enviando...</>
+                  ) : (
+                    <><Send className="size-4" /> Enviar para {inlineClients.filter((c, i) => !inlineRemovedIndexes.has(i) && c.phone).length} contato{inlineClients.filter((c, i) => !inlineRemovedIndexes.has(i) && c.phone).length !== 1 ? "s" : ""}</>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving || uploadingImage}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? (
+                    <><Loader2 className="size-4 animate-spin" /> Salvando...</>
+                  ) : (
+                    <><Send className="size-4" /> {editId ? "Salvar e Ver Contatos" : "Criar e Ver Contatos"}</>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -1446,8 +1657,8 @@ export default function CampaignsPage() {
       <CampaignDispatchDialog
         campaign={dispatchCampaign}
         open={!!dispatchCampaign}
-        onOpenChange={(open) => { if (!open) { setDispatchCampaign(null); setViewMode("list") } }}
-        onSuccess={() => { setDispatchCampaign(null); setViewMode("list"); void mutate("/api/campaigns") }}
+        onOpenChange={(open) => { if (!open) setDispatchCampaign(null) }}
+        onSuccess={() => void mutate("/api/campaigns")}
       />
 
       {/* History dialog */}
