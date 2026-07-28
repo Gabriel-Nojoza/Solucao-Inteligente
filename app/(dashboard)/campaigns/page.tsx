@@ -582,13 +582,9 @@ export default function CampaignsPage() {
         body: JSON.stringify(payload),
       })
       if (!response.ok) throw new Error(extractError(data) || "Erro ao salvar")
-      const saved = data as Campaign
       toast.success(editId ? "Campanha atualizada!" : "Campanha criada!")
       void mutate("/api/campaigns")
-      if (!editId) setEditId(saved.id)
-      setInlineSavedId(saved.id)
-      setFormTab("contatos")
-      void fetchInlineClients(saved.id)
+      setViewMode("list")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao salvar campanha")
     } finally {
@@ -648,28 +644,36 @@ export default function CampaignsPage() {
     }
   }
 
-  // ─── VIEW MODO FORMULÁRIO (tela cheia estilo Disparo de Mensagens) ───
+  // ─── VIEW MODO FORMULÁRIO (dialog sobre a lista) ───
   if (viewMode === "form") {
     return (
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <div className="shrink-0 flex items-center gap-4 border-b px-6 py-4">
-          <button
-            type="button"
-            onClick={() => setViewMode("list")}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="size-4" />
-            Campanhas
-          </button>
-          <div className="h-4 w-px bg-border" />
-          <div>
-            <h1 className="text-base font-bold leading-tight">
-              {editId ? "Editar Campanha" : "Nova Campanha"}
-            </h1>
-            <p className="text-xs text-muted-foreground">Configure a mensagem e os destinatarios</p>
-          </div>
-        </div>
+      <div className="flex flex-1 flex-col">
+        {/* Header da lista visível atrás */}
+        <PageHeader title="Campanhas" description="Disparo de mensagens para clientes inativos">
+          <Button size="sm" disabled><Plus className="mr-1 size-4" />Nova Campanha</Button>
+        </PageHeader>
+
+        {/* Overlay com form como dialog centralizado */}
+        <div className="relative flex flex-1 overflow-hidden">
+          <div className="absolute inset-0 z-10 bg-background/60 backdrop-blur-sm" />
+          <div className="absolute inset-3 z-20 flex flex-col bg-background border rounded-xl shadow-2xl overflow-hidden">
+
+            {/* Header do form */}
+            <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h1 className="text-base font-bold leading-tight">
+                  {editId ? "Editar Campanha" : "Nova Campanha"}
+                </h1>
+                <p className="text-xs text-muted-foreground">Configure a mensagem e os destinatarios</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
 
         {/* Body — split panel */}
         <div className="flex flex-1 min-h-0 overflow-hidden flex-row-reverse">
@@ -1035,7 +1039,7 @@ export default function CampaignsPage() {
                   {saving ? (
                     <><Loader2 className="size-4 animate-spin" /> Salvando...</>
                   ) : (
-                    <><Send className="size-4" /> {editId ? "Salvar e Ver Contatos" : "Criar e Ver Contatos"}</>
+                    <><Send className="size-4" /> {editId ? "Salvar Alteracoes" : "Criar Campanha"}</>
                   )}
                 </button>
               )}
@@ -1542,6 +1546,8 @@ export default function CampaignsPage() {
             </div>
           </div>
         </div>
+          </div>{/* fim absolute inner */}
+        </div>{/* fim relative overlay */}
       </div>
     )
   }
