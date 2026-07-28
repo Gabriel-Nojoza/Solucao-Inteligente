@@ -533,9 +533,10 @@ export default function CampaignsPage() {
         body: JSON.stringify(payload),
       })
       if (!response.ok) throw new Error(extractError(data) || "Erro ao salvar")
+      const saved = data as Campaign
       toast.success(editId ? "Campanha atualizada!" : "Campanha criada!")
-      setViewMode("list")
       void mutate("/api/campaigns")
+      setDispatchCampaign(saved)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao salvar campanha")
     } finally {
@@ -1445,8 +1446,8 @@ export default function CampaignsPage() {
       <CampaignDispatchDialog
         campaign={dispatchCampaign}
         open={!!dispatchCampaign}
-        onOpenChange={(open) => { if (!open) setDispatchCampaign(null) }}
-        onSuccess={() => void mutate("/api/campaigns")}
+        onOpenChange={(open) => { if (!open) { setDispatchCampaign(null); setViewMode("list") } }}
+        onSuccess={() => { setDispatchCampaign(null); setViewMode("list"); void mutate("/api/campaigns") }}
       />
 
       {/* History dialog */}
