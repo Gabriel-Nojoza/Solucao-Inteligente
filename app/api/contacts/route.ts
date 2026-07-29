@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
           .order("name", { ascending: true })
           .range(offset, offset + pageSize - 1)
         if (botInstanceId) {
-          q = q.or(`bot_instance_id.eq.${botInstanceId},bot_instance_id.is.null`)
+          q = q.eq("bot_instance_id", botInstanceId)
         }
         const { data: page, error: pageError } = await q
         if (pageError) return { data: all, error: pageError }
