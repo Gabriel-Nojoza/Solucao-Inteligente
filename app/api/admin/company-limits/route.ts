@@ -26,7 +26,7 @@ export async function PUT(request: NextRequest) {
       excelExportEnabled?: boolean
       hideZeroRowsEnabled?: boolean
       campaignClientPreviewEnabled?: boolean
-      sendingHours?: { enabled: boolean; mode?: string; windows: Array<{ startTime: string; endTime: string }> } | null
+      sendingHours?: { enabled: boolean; mode?: string; allowedWindows?: Array<{ startTime: string; endTime: string }>; blockedWindows?: Array<{ startTime: string; endTime: string }> } | null
     }
 
     const companyId = String(body.companyId ?? "").trim()
@@ -119,12 +119,15 @@ export async function PUT(request: NextRequest) {
 
     if (body.sendingHours !== undefined) {
       const sh = body.sendingHours
+      const mapWin = (arr: Array<{ startTime: string; endTime: string }> | undefined) =>
+        (arr ?? []).map((w) => ({ start_time: w.startTime, end_time: w.endTime }))
       const shValue = sh === null
-        ? { enabled: false, mode: "allowed", windows: [] }
+        ? { enabled: false, mode: "allowed", allowed_windows: [], blocked_windows: [] }
         : {
             enabled: sh.enabled,
             mode: sh.mode === "blocked" ? "blocked" : "allowed",
-            windows: (sh.windows ?? []).map((w) => ({ start_time: w.startTime, end_time: w.endTime })),
+            allowed_windows: mapWin(sh.allowedWindows),
+            blocked_windows: mapWin(sh.blockedWindows),
           }
 
       const { error: shError } = await supabase

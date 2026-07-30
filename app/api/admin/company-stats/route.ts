@@ -41,7 +41,7 @@ export type CompanyStatItem = {
   excelExportEnabled: boolean
   hideZeroRowsEnabled: boolean
   campaignClientPreviewEnabled: boolean
-  sendingHours: { enabled: boolean; mode: "allowed" | "blocked"; windows: Array<{ startTime: string; endTime: string }> } | null
+  sendingHours: { enabled: boolean; mode: "allowed" | "blocked"; allowedWindows: Array<{ startTime: string; endTime: string }>; blockedWindows: Array<{ startTime: string; endTime: string }> } | null
 }
 
 export type DailyDispatchPoint = {
@@ -221,16 +221,19 @@ export async function GET(request: Request) {
       const limits = limitsMap.get(company.id)
       const features = featuresMap.get(company.id)
       const sh = sendingHoursMap.get(company.id)
+      const mapWindows = (arr: unknown) =>
+        Array.isArray(arr)
+          ? (arr as Array<Record<string, unknown>>).map((w) => ({
+              startTime: typeof w.start_time === "string" ? w.start_time : "08:00",
+              endTime: typeof w.end_time === "string" ? w.end_time : "18:00",
+            }))
+          : []
       const sendingHours = sh
         ? {
             enabled: sh.enabled === true,
             mode: sh.mode === "blocked" ? "blocked" as const : "allowed" as const,
-            windows: Array.isArray(sh.windows)
-              ? (sh.windows as Array<Record<string, unknown>>).map((w) => ({
-                  startTime: typeof w.start_time === "string" ? w.start_time : "08:00",
-                  endTime: typeof w.end_time === "string" ? w.end_time : "18:00",
-                }))
-              : [],
+            allowedWindows: mapWindows(sh.allowed_windows),
+            blockedWindows: mapWindows(sh.blocked_windows),
           }
         : null
 

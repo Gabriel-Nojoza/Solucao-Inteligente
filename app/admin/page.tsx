@@ -318,7 +318,8 @@ export default function AdminDashboardPage() {
     companyName: string
     enabled: boolean
     mode: "allowed" | "blocked"
-    windows: TimeWindow[]
+    allowedWindows: TimeWindow[]
+    blockedWindows: TimeWindow[]
   }
   const [sendingHoursDialog, setSendingHoursDialog] = useState<SendingHoursDialog | null>(null)
   const [sendingHoursSaving, setSendingHoursSaving] = useState(false)
@@ -329,43 +330,42 @@ export default function AdminDashboardPage() {
       companyName: c.companyName,
       enabled: c.sendingHours?.enabled ?? false,
       mode: c.sendingHours?.mode ?? "allowed",
-      windows: c.sendingHours?.windows?.length ? c.sendingHours.windows : [{ startTime: "08:00", endTime: "18:00" }],
+      allowedWindows: c.sendingHours?.allowedWindows?.length ? c.sendingHours.allowedWindows : [{ startTime: "08:00", endTime: "18:00" }],
+      blockedWindows: c.sendingHours?.blockedWindows?.length ? c.sendingHours.blockedWindows : [{ startTime: "08:00", endTime: "09:00" }],
     })
   }
 
   function updateWindow(index: number, field: keyof TimeWindow, value: string) {
     setSendingHoursDialog((prev) => {
       if (!prev) return prev
-      const windows = prev.windows.map((w, i) => i === index ? { ...w, [field]: value } : w)
-      return { ...prev, windows }
+      const key = prev.mode === "blocked" ? "blockedWindows" : "allowedWindows"
+      const updated = prev[key].map((w, i) => i === index ? { ...w, [field]: value } : w)
+      return { ...prev, [key]: updated }
     })
   }
 
   function addWindow() {
-    setSendingHoursDialog((prev) => prev ? { ...prev, windows: [...prev.windows, { startTime: "08:00", endTime: "18:00" }] } : prev)
+    setSendingHoursDialog((prev) => {
+      if (!prev) return prev
+      if (prev.mode === "blocked") {
+        return { ...prev, blockedWindows: [...prev.blockedWindows, { startTime: "08:00", endTime: "09:00" }] }
+      }
+      return { ...prev, allowedWindows: [...prev.allowedWindows, { startTime: "08:00", endTime: "18:00" }] }
+    })
   }
 
   function removeWindow(index: number) {
     setSendingHoursDialog((prev) => {
-      if (!prev || prev.windows.length <= 1) return prev
-      return { ...prev, windows: prev.windows.filter((_, i) => i !== index) }
+      if (!prev) return prev
+      const key = prev.mode === "blocked" ? "blockedWindows" : "allowedWindows"
+      if (prev[key].length <= 1) return prev
+      return { ...prev, [key]: prev[key].filter((_, i) => i !== index) }
     })
-  }
-
-  function addBlockedHour(time: string): string {
-    const [h, m] = time.split(":").map(Number)
-    const totalMinutes = h * 60 + m + 60
-    const endH = Math.floor(totalMinutes / 60) % 24
-    const endM = totalMinutes % 60
-    return `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`
   }
 
   async function saveSendingHours() {
     if (!sendingHoursDialog) return
     setSendingHoursSaving(true)
-    const windows = sendingHoursDialog.mode === "blocked"
-      ? sendingHoursDialog.windows.map((w) => ({ startTime: w.startTime, endTime: addBlockedHour(w.startTime) }))
-      : sendingHoursDialog.windows
     try {
       const res = await fetch("/api/admin/company-limits", {
         method: "PUT",
@@ -375,7 +375,8 @@ export default function AdminDashboardPage() {
           sendingHours: {
             enabled: sendingHoursDialog.enabled,
             mode: sendingHoursDialog.mode,
-            windows,
+            allowedWindows: sendingHoursDialog.allowedWindows,
+            blockedWindows: sendingHoursDialog.blockedWindows,
           },
         }),
       })
@@ -1146,7 +1147,7 @@ export default function AdminDashboardPage() {
             )}
             {sendingHoursDialog?.enabled && (
               <div className="space-y-2">
-                {sendingHoursDialog.windows.map((w, i) => (
+                {(sendingHoursDialog.mode === "blocked" ? sendingHoursDialog.blockedWindows : sendingHoursDialog.allowedWindows).map((w, i) => (
                   <div key={i} className="flex items-end gap-2">
                     {sendingHoursDialog.mode === "blocked" ? (
                       <div className="space-y-1">
@@ -1165,7 +1166,7 @@ export default function AdminDashboardPage() {
                         </div>
                       </>
                     )}
-                    {sendingHoursDialog.windows.length > 1 && (
+                    {(sendingHoursDialog.mode === "blocked" ? sendingHoursDialog.blockedWindows : sendingHoursDialog.allowedWindows).length > 1 && (
                       <button
                         onClick={() => removeWindow(i)}
                         className="mb-0.5 p-1.5 text-muted-foreground hover:text-destructive transition-colors"
