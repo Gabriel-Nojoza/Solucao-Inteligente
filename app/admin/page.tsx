@@ -1124,30 +1124,14 @@ export default function AdminDashboardPage() {
               </span>
             </div>
             {sendingHoursDialog?.enabled && (
-              <div className="flex rounded-md border border-border overflow-hidden text-xs">
-                <button
-                  className={[
-                    "flex-1 px-3 py-1.5 transition-colors",
-                    sendingHoursDialog.mode === "allowed"
-                      ? "bg-primary text-primary-foreground font-medium"
-                      : "text-muted-foreground hover:bg-muted/50",
-                  ].join(" ")}
-                  onClick={() => setSendingHoursDialog((prev) => prev ? { ...prev, mode: "allowed" } : prev)}
-                >
-                  Só enviar nesses horários
-                </button>
-                <button
-                  className={[
-                    "flex-1 px-3 py-1.5 transition-colors border-l border-border",
-                    sendingHoursDialog.mode === "blocked"
-                      ? "bg-destructive text-destructive-foreground font-medium"
-                      : "text-muted-foreground hover:bg-muted/50",
-                  ].join(" ")}
-                  onClick={() => setSendingHoursDialog((prev) => prev ? { ...prev, mode: "blocked" } : prev)}
-                >
-                  Não enviar nesses horários
-                </button>
-              </div>
+              <select
+                className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                value={sendingHoursDialog.mode}
+                onChange={(e) => setSendingHoursDialog((prev) => prev ? { ...prev, mode: e.target.value as "allowed" | "blocked" } : prev)}
+              >
+                <option value="allowed">Só enviar nesses horários</option>
+                <option value="blocked">Não enviar nesses horários</option>
+              </select>
             )}
             {sendingHoursDialog?.enabled && (
               <div className="space-y-2">
