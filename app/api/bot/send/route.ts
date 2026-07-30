@@ -5,7 +5,7 @@ import {
 } from "@/lib/whatsapp-bot"
 import { resolveRequestCompanyContext } from "@/lib/n8n-auth"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
-import { resolveConnectedBotInstance } from "@/lib/whatsapp-bot-instances"
+import { listCompanyWhatsAppBotInstances } from "@/lib/whatsapp-bot-instances"
 
 function toOptionalString(value: unknown) {
   if (typeof value !== "string") return null
@@ -60,8 +60,19 @@ export async function POST(request: NextRequest) {
       payload.instance_id = queryInstanceId
     }
     if (!payload.instance_id && companyId) {
-      const resolved = await resolveConnectedBotInstance(supabase, companyId, null)
-      if (resolved) payload.instance_id = resolved.id
+      const companyInstances = await listCompanyWhatsAppBotInstances(supabase, companyId).catch(() => [])
+      if (companyInstances.length > 1) {
+        return NextResponse.json(
+          {
+            error:
+              "instance_id obrigatorio: esta empresa tem mais de um WhatsApp conectado e o envio nao informou qual instancia usar.",
+          },
+          { status: 400 }
+        )
+      }
+      if (companyInstances.length === 1) {
+        payload.instance_id = companyInstances[0].id
+      }
     }
     const metadata = normalizeDispatchMetadata(body)
     dispatchLogId = metadata.dispatchLogId
