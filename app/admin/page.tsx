@@ -899,12 +899,15 @@ export default function AdminDashboardPage() {
                                 className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted/50 transition-colors"
                               >
                                 <Clock className="size-3 shrink-0" />
-                                {c.sendingHours?.enabled && c.sendingHours.windows.length > 0
-                                  ? c.sendingHours.windows.length === 1
-                                    ? <span className="text-blue-500">{c.sendingHours.windows[0].startTime}–{c.sendingHours.windows[0].endTime}</span>
-                                    : <span className="text-blue-500">{c.sendingHours.windows.length} janelas</span>
-                                  : <span className="text-muted-foreground">Livre</span>
-                                }
+                                {(() => {
+                                  const sh = c.sendingHours
+                                  if (!sh?.enabled) return <span className="text-muted-foreground">Livre</span>
+                                  const wins = sh.mode === "blocked" ? sh.blockedWindows : sh.allowedWindows
+                                  if (!wins?.length) return <span className="text-muted-foreground">Livre</span>
+                                  return wins.length === 1
+                                    ? <span className="text-blue-500">{wins[0].startTime}–{wins[0].endTime}</span>
+                                    : <span className="text-blue-500">{wins.length} janelas</span>
+                                })()}
                               </button>
                             </td>
                             <td className="px-4 py-3 text-center">
