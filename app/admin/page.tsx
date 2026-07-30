@@ -348,7 +348,7 @@ export default function AdminDashboardPage() {
     setSendingHoursDialog((prev) => {
       if (!prev) return prev
       if (prev.mode === "blocked") {
-        return { ...prev, blockedWindows: [...prev.blockedWindows, { startTime: "08:00", endTime: "09:00" }] }
+        return { ...prev, blockedWindows: [...prev.blockedWindows, { startTime: "08:00", endTime: "18:00" }] }
       }
       return { ...prev, allowedWindows: [...prev.allowedWindows, { startTime: "08:00", endTime: "18:00" }] }
     })
@@ -1152,23 +1152,16 @@ export default function AdminDashboardPage() {
               <div className="space-y-2">
                 {(sendingHoursDialog.mode === "blocked" ? sendingHoursDialog.blockedWindows : sendingHoursDialog.allowedWindows).map((w, i) => (
                   <div key={i} className="flex items-end gap-2">
-                    {sendingHoursDialog.mode === "blocked" ? (
+                    <>
                       <div className="space-y-1">
-                        <Label className="text-xs">Horário</Label>
+                        <Label className="text-xs">Das</Label>
                         <TimeSelect value={w.startTime} onChange={(v) => updateWindow(i, "startTime", v)} />
                       </div>
-                    ) : (
-                      <>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Das</Label>
-                          <TimeSelect value={w.startTime} onChange={(v) => updateWindow(i, "startTime", v)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Até</Label>
-                          <TimeSelect value={w.endTime} onChange={(v) => updateWindow(i, "endTime", v)} />
-                        </div>
-                      </>
-                    )}
+                      <div className="space-y-1">
+                        <Label className="text-xs">Até</Label>
+                        <TimeSelect value={w.endTime} onChange={(v) => updateWindow(i, "endTime", v)} />
+                      </div>
+                    </>
                     {(sendingHoursDialog.mode === "blocked" ? sendingHoursDialog.blockedWindows : sendingHoursDialog.allowedWindows).length > 1 && (
                       <button
                         onClick={() => removeWindow(i)}
