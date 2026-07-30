@@ -26,7 +26,7 @@ export async function PUT(request: NextRequest) {
       excelExportEnabled?: boolean
       hideZeroRowsEnabled?: boolean
       campaignClientPreviewEnabled?: boolean
-      sendingHours?: { enabled: boolean; windows: Array<{ startTime: string; endTime: string }> } | null
+      sendingHours?: { enabled: boolean; mode?: string; windows: Array<{ startTime: string; endTime: string }> } | null
     }
 
     const companyId = String(body.companyId ?? "").trim()
