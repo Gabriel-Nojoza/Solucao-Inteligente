@@ -317,6 +317,7 @@ export default function AdminDashboardPage() {
     companyId: string
     companyName: string
     enabled: boolean
+    mode: "allowed" | "blocked"
     windows: TimeWindow[]
   }
   const [sendingHoursDialog, setSendingHoursDialog] = useState<SendingHoursDialog | null>(null)
@@ -327,6 +328,7 @@ export default function AdminDashboardPage() {
       companyId: c.companyId,
       companyName: c.companyName,
       enabled: c.sendingHours?.enabled ?? false,
+      mode: c.sendingHours?.mode ?? "allowed",
       windows: c.sendingHours?.windows?.length ? c.sendingHours.windows : [{ startTime: "08:00", endTime: "18:00" }],
     })
   }
@@ -361,6 +363,7 @@ export default function AdminDashboardPage() {
           companyId: sendingHoursDialog.companyId,
           sendingHours: {
             enabled: sendingHoursDialog.enabled,
+            mode: sendingHoursDialog.mode,
             windows: sendingHoursDialog.windows,
           },
         }),
@@ -1120,6 +1123,32 @@ export default function AdminDashboardPage() {
                 {sendingHoursDialog?.enabled ? "Restrição ativa" : "Sem restrição de horário"}
               </span>
             </div>
+            {sendingHoursDialog?.enabled && (
+              <div className="flex rounded-md border border-border overflow-hidden text-xs">
+                <button
+                  className={[
+                    "flex-1 px-3 py-1.5 transition-colors",
+                    sendingHoursDialog.mode === "allowed"
+                      ? "bg-primary text-primary-foreground font-medium"
+                      : "text-muted-foreground hover:bg-muted/50",
+                  ].join(" ")}
+                  onClick={() => setSendingHoursDialog((prev) => prev ? { ...prev, mode: "allowed" } : prev)}
+                >
+                  Só enviar nesses horários
+                </button>
+                <button
+                  className={[
+                    "flex-1 px-3 py-1.5 transition-colors border-l border-border",
+                    sendingHoursDialog.mode === "blocked"
+                      ? "bg-destructive text-destructive-foreground font-medium"
+                      : "text-muted-foreground hover:bg-muted/50",
+                  ].join(" ")}
+                  onClick={() => setSendingHoursDialog((prev) => prev ? { ...prev, mode: "blocked" } : prev)}
+                >
+                  Não enviar nesses horários
+                </button>
+              </div>
+            )}
             {sendingHoursDialog?.enabled && (
               <div className="space-y-2">
                 {sendingHoursDialog.windows.map((w, i) => (

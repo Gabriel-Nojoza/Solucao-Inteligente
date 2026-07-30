@@ -41,7 +41,7 @@ export type CompanyStatItem = {
   excelExportEnabled: boolean
   hideZeroRowsEnabled: boolean
   campaignClientPreviewEnabled: boolean
-  sendingHours: { enabled: boolean; windows: Array<{ startTime: string; endTime: string }> } | null
+  sendingHours: { enabled: boolean; mode: "allowed" | "blocked"; windows: Array<{ startTime: string; endTime: string }> } | null
 }
 
 export type DailyDispatchPoint = {
@@ -224,6 +224,7 @@ export async function GET(request: Request) {
       const sendingHours = sh
         ? {
             enabled: sh.enabled === true,
+            mode: sh.mode === "blocked" ? "blocked" as const : "allowed" as const,
             windows: Array.isArray(sh.windows)
               ? (sh.windows as Array<Record<string, unknown>>).map((w) => ({
                   startTime: typeof w.start_time === "string" ? w.start_time : "08:00",

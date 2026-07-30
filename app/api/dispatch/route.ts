@@ -235,10 +235,11 @@ async function handleDispatch(request: NextRequest) {
     .eq("key", "sending_hours")
     .maybeSingle()
 
-  const sendingHours = sendingHoursRow?.value as { enabled?: boolean; windows?: Array<{ start_time?: string; end_time?: string }> } | null
+  const sendingHours = sendingHoursRow?.value as { enabled?: boolean; mode?: string; windows?: Array<{ start_time?: string; end_time?: string }> } | null
   if (sendingHours?.enabled && Array.isArray(sendingHours.windows) && sendingHours.windows.length > 0) {
     const nowBr = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
     const currentMinutes = nowBr.getHours() * 60 + nowBr.getMinutes()
+    const isBlocked = sendingHours.mode === "blocked"
 
     const isInAnyWindow = sendingHours.windows.some((w) => {
       if (!w.start_time || !w.end_time) return false
@@ -247,11 +248,18 @@ async function handleDispatch(request: NextRequest) {
       return currentMinutes >= sh * 60 + sm && currentMinutes <= eh * 60 + em
     })
 
-    if (!isInAnyWindow) {
-      const windowsStr = sendingHours.windows
-        .filter((w) => w.start_time && w.end_time)
-        .map((w) => `${w.start_time}–${w.end_time}`)
-        .join(", ")
+    const windowsStr = sendingHours.windows
+      .filter((w) => w.start_time && w.end_time)
+      .map((w) => `${w.start_time}–${w.end_time}`)
+      .join(", ")
+
+    if (isBlocked && isInAnyWindow) {
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: `Horario bloqueado para envio (${windowsStr})`,
+      })
+    } else if (!isBlocked && !isInAnyWindow) {
       return NextResponse.json({
         success: true,
         skipped: true,

@@ -120,9 +120,10 @@ export async function PUT(request: NextRequest) {
     if (body.sendingHours !== undefined) {
       const sh = body.sendingHours
       const shValue = sh === null
-        ? { enabled: false, windows: [] }
+        ? { enabled: false, mode: "allowed", windows: [] }
         : {
             enabled: sh.enabled,
+            mode: sh.mode === "blocked" ? "blocked" : "allowed",
             windows: (sh.windows ?? []).map((w) => ({ start_time: w.startTime, end_time: w.endTime })),
           }
 
