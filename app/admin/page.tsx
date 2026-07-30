@@ -352,9 +352,20 @@ export default function AdminDashboardPage() {
     })
   }
 
+  function addBlockedHour(time: string): string {
+    const [h, m] = time.split(":").map(Number)
+    const totalMinutes = h * 60 + m + 60
+    const endH = Math.floor(totalMinutes / 60) % 24
+    const endM = totalMinutes % 60
+    return `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`
+  }
+
   async function saveSendingHours() {
     if (!sendingHoursDialog) return
     setSendingHoursSaving(true)
+    const windows = sendingHoursDialog.mode === "blocked"
+      ? sendingHoursDialog.windows.map((w) => ({ startTime: w.startTime, endTime: addBlockedHour(w.startTime) }))
+      : sendingHoursDialog.windows
     try {
       const res = await fetch("/api/admin/company-limits", {
         method: "PUT",
@@ -364,7 +375,7 @@ export default function AdminDashboardPage() {
           sendingHours: {
             enabled: sendingHoursDialog.enabled,
             mode: sendingHoursDialog.mode,
-            windows: sendingHoursDialog.windows,
+            windows,
           },
         }),
       })
@@ -1137,14 +1148,23 @@ export default function AdminDashboardPage() {
               <div className="space-y-2">
                 {sendingHoursDialog.windows.map((w, i) => (
                   <div key={i} className="flex items-end gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Das</Label>
-                      <TimeSelect value={w.startTime} onChange={(v) => updateWindow(i, "startTime", v)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Até</Label>
-                      <TimeSelect value={w.endTime} onChange={(v) => updateWindow(i, "endTime", v)} />
-                    </div>
+                    {sendingHoursDialog.mode === "blocked" ? (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Horário</Label>
+                        <TimeSelect value={w.startTime} onChange={(v) => updateWindow(i, "startTime", v)} />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Das</Label>
+                          <TimeSelect value={w.startTime} onChange={(v) => updateWindow(i, "startTime", v)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Até</Label>
+                          <TimeSelect value={w.endTime} onChange={(v) => updateWindow(i, "endTime", v)} />
+                        </div>
+                      </>
+                    )}
                     {sendingHoursDialog.windows.length > 1 && (
                       <button
                         onClick={() => removeWindow(i)}
