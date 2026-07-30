@@ -138,7 +138,7 @@ async function exportFileFromPowerBi(input: {
 
   let finalStatus: Awaited<ReturnType<typeof getExportStatus>> | null = null
 
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 60; attempt++) {
     await sleep(2000)
 
     const status = await getExportStatus(
