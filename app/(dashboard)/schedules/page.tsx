@@ -330,7 +330,7 @@ type AutomationItem = {
   cron_expression: string | null
   export_format: string
   is_active: boolean
-  contacts: { id: string; name: string; phone: string | null }[]
+  contacts: { id: string; name: string; phone: string | null; type?: "individual" | "group" }[]
   created_at: string
 }
 
