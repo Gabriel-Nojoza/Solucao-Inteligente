@@ -205,12 +205,12 @@ export async function GET() {
 
         const contactIds = (scContacts ?? []).map((sc) => sc.contact_id)
 
-        let contacts: Array<{ id: string; name: string }> = []
+        let contacts: Array<{ id: string; name: string; phone: string | null; type: string }> = []
 
         if (contactIds.length > 0) {
           const { data } = await supabase
             .from("contacts")
-            .select("id, name")
+            .select("id, name, phone, type")
             .eq("company_id", companyId)
             .in("id", contactIds)
 
