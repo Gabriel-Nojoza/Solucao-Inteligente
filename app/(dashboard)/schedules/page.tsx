@@ -16,6 +16,8 @@ import {
   X,
   Workflow,
   Image as ImageIcon,
+  User,
+  Users,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -1371,9 +1373,30 @@ export default function SchedulesPage() {
                           </div>
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          <Badge variant="secondary">
-                            {schedule.contacts?.length ?? 0} contato(s)
-                          </Badge>
+                          {(() => {
+                            const contacts = schedule.contacts ?? []
+                            const individuals = contacts.filter(c => c.type === "individual").length
+                            const groups = contacts.filter(c => c.type === "group").length
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                {individuals > 0 && (
+                                  <Badge variant="secondary" className="gap-1 w-fit">
+                                    <User className="h-3 w-3" />
+                                    {individuals} individual{individuals !== 1 ? "is" : ""}
+                                  </Badge>
+                                )}
+                                {groups > 0 && (
+                                  <Badge variant="secondary" className="gap-1 w-fit">
+                                    <Users className="h-3 w-3" />
+                                    {groups} grupo{groups !== 1 ? "s" : ""}
+                                  </Badge>
+                                )}
+                                {contacts.length === 0 && (
+                                  <Badge variant="secondary">0 contatos</Badge>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </TableCell>
                         <TableCell>
                           <Switch
@@ -1521,9 +1544,30 @@ export default function SchedulesPage() {
                           )}
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
-                          <Badge variant="secondary">
-                            {auto.contacts?.length ?? 0} contato(s)
-                          </Badge>
+                          {(() => {
+                            const contacts = auto.contacts ?? []
+                            const individuals = contacts.filter(c => c.type === "individual").length
+                            const groups = contacts.filter(c => c.type === "group").length
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                {individuals > 0 && (
+                                  <Badge variant="secondary" className="gap-1 w-fit">
+                                    <User className="h-3 w-3" />
+                                    {individuals} individual{individuals !== 1 ? "is" : ""}
+                                  </Badge>
+                                )}
+                                {groups > 0 && (
+                                  <Badge variant="secondary" className="gap-1 w-fit">
+                                    <Users className="h-3 w-3" />
+                                    {groups} grupo{groups !== 1 ? "s" : ""}
+                                  </Badge>
+                                )}
+                                {contacts.length === 0 && (
+                                  <Badge variant="secondary">0 contatos</Badge>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </TableCell>
                         <TableCell>
                           <Switch
