@@ -24,7 +24,7 @@ import {
   exportPowerBIReportDocument,
   sanitizeFileName,
 } from "@/lib/powerbi-report-pdf"
-import { getAccessToken } from "@/lib/powerbi"
+import { getAccessToken, getAccessTokenMasterUser } from "@/lib/powerbi"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
 import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
@@ -652,7 +652,7 @@ async function handleDispatch(request: NextRequest) {
     })
 
     if (directPdfTargets.length > 0) {
-      const pbiToken = await getAccessToken(companyId)
+      const pbiToken = await getAccessTokenMasterUser(companyId)
       let exportCount = 0
 
       for (const [contactIndex, contact] of normalizedContacts.entries()) {

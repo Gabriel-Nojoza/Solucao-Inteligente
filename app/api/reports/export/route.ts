@@ -4,6 +4,7 @@ import { createServiceClient as createClient } from "@/lib/supabase/server"
 import {
   exportReport,
   getAccessToken,
+  getAccessTokenMasterUser,
   getExportFile,
   getExportStatus,
   isPowerBiEntityNotFoundError,
@@ -284,6 +285,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = await getAccessToken(companyId)
+    const exportToken = await getAccessTokenMasterUser(companyId)
     const safeName = sanitizeFileName(report.name || "relatorio")
     let browserPdfErrorMessage: string | null = null
     let nativePdfError: unknown = null
@@ -332,7 +334,7 @@ export async function POST(request: NextRequest) {
         })
 
         const exportedFile = await exportPowerBIReportDocument({
-          token,
+          token: exportToken,
           workspaceId: workspace.pbi_workspace_id,
           reportId: report.pbi_report_id,
           reportName: report.name,
@@ -428,7 +430,7 @@ export async function POST(request: NextRequest) {
       })
 
       const fileBuffer = await exportFileFromPowerBi({
-        token,
+        token: exportToken,
         workspaceId: workspace.pbi_workspace_id,
         reportId: report.pbi_report_id,
         format: format as "PDF" | "PNG" | "PPTX",
@@ -468,7 +470,7 @@ export async function POST(request: NextRequest) {
 
         try {
           const exportedFile = await exportPowerBIReportDocument({
-            token,
+            token: exportToken,
             workspaceId: workspace.pbi_workspace_id,
             reportId: report.pbi_report_id,
             reportName: report.name,

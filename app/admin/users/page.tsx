@@ -61,6 +61,8 @@ interface UserData {
     tenant_id?: string
     client_id?: string
     client_secret?: string
+    master_user_email?: string
+    master_user_password?: string
   }
   n8n?: {
     webhook_url?: string
@@ -155,6 +157,8 @@ export default function UsersPage() {
   const [formPbiTenantId, setFormPbiTenantId] = useState("")
   const [formPbiClientId, setFormPbiClientId] = useState("")
   const [formPbiClientSecret, setFormPbiClientSecret] = useState("")
+  const [formPbiMasterUserEmail, setFormPbiMasterUserEmail] = useState("")
+  const [formPbiMasterUserPassword, setFormPbiMasterUserPassword] = useState("")
   const [formN8nWebhookUrl, setFormN8nWebhookUrl] = useState("")
   const [formN8nCallbackSecret, setFormN8nCallbackSecret] = useState("")
   const [formN8nChatWebhookUrl, setFormN8nChatWebhookUrl] = useState("")
@@ -227,6 +231,8 @@ export default function UsersPage() {
     setFormPbiTenantId("")
     setFormPbiClientId("")
     setFormPbiClientSecret("")
+    setFormPbiMasterUserEmail("")
+    setFormPbiMasterUserPassword("")
     setFormN8nWebhookUrl("")
     setFormN8nCallbackSecret("")
     setFormN8nChatWebhookUrl("")
@@ -263,6 +269,8 @@ export default function UsersPage() {
     setFormPbiTenantId("")
     setFormPbiClientId("")
     setFormPbiClientSecret("")
+    setFormPbiMasterUserEmail("")
+    setFormPbiMasterUserPassword("")
     setFormN8nWebhookUrl("")
     setFormN8nCallbackSecret("")
     setFormN8nChatWebhookUrl("")
@@ -300,6 +308,8 @@ export default function UsersPage() {
       setFormPbiTenantId(details.powerbi?.tenant_id || "")
       setFormPbiClientId(details.powerbi?.client_id || "")
       setFormPbiClientSecret(details.powerbi?.client_secret || "")
+      setFormPbiMasterUserEmail(details.powerbi?.master_user_email || "")
+      setFormPbiMasterUserPassword(details.powerbi?.master_user_password || "")
       setFormN8nWebhookUrl(details.n8n?.webhook_url || "")
       setFormN8nCallbackSecret(details.n8n?.callback_secret || "")
       setFormN8nChatWebhookUrl(details.n8n?.chat_webhook_url || "")
@@ -525,6 +535,8 @@ export default function UsersPage() {
                 tenant_id: formPbiTenantId,
                 client_id: formPbiClientId,
                 client_secret: formPbiClientSecret,
+                master_user_email: formPbiMasterUserEmail || undefined,
+                master_user_password: formPbiMasterUserPassword || undefined,
               }
             : undefined,
         n8n:
@@ -861,6 +873,24 @@ export default function UsersPage() {
                             setSelectedPbiDatasetIds([])
                           }}
                           placeholder="Client secret"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Email Master User (PPU)</Label>
+                        <Input
+                          type="email"
+                          value={formPbiMasterUserEmail}
+                          onChange={(e) => setFormPbiMasterUserEmail(e.target.value)}
+                          placeholder="sac@empresa.com.br"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label>Senha Master User (PPU)</Label>
+                        <Input
+                          type="password"
+                          value={formPbiMasterUserPassword}
+                          onChange={(e) => setFormPbiMasterUserPassword(e.target.value)}
+                          placeholder="Senha da conta SAC"
                         />
                       </div>
                       <Button

@@ -123,6 +123,8 @@ export interface PowerBIConfig {
   tenant_id: string
   client_id: string
   client_secret: string
+  master_user_email?: string
+  master_user_password?: string
 }
 
 export interface N8NConfig {

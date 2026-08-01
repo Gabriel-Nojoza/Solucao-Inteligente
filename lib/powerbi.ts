@@ -64,6 +64,7 @@ function applyCustomChatMeasuresToSnapshot(
 
 const embedTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const accessTokenCache = new Map<string, EmbedTokenCacheEntry>()
+const masterUserTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const fabricTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const powerBiConfigCache = new Map<string, CachedValue<PowerBIConfig>>()
 const datasetMetadataCache = new Map<string, CachedValue<DatasetMetadataSnapshot>>()
@@ -342,6 +343,78 @@ export async function getAccessToken(companyId?: string): Promise<string> {
   accessTokenCache.set(cacheKey, accessEntry)
   const accessTtl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
   await redisSet(cacheKey, JSON.stringify(accessEntry), accessTtl)
+
+  return accessToken
+}
+
+export async function getAccessTokenMasterUser(companyId?: string): Promise<string> {
+  const config = companyId
+    ? await getConfigForCompany(companyId)
+    : await getConfig()
+
+  if (!config.tenant_id || !config.client_id) {
+    throw new Error("Credenciais do Power BI incompletas. Configure em Configuracoes.")
+  }
+
+  if (!config.master_user_email || !config.master_user_password) {
+    throw new Error(
+      "Email e senha do usuario master nao configurados. Configure em Admin > Usuarios > Power BI (Master User)."
+    )
+  }
+
+  const cacheKey = `pbi:master:${config.tenant_id}:${config.master_user_email}`
+  const SAFETY_MARGIN_MS = 5 * 60 * 1000
+
+  const memCached = masterUserTokenCache.get(cacheKey)
+  if (memCached && memCached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return memCached.token
+  }
+
+  const redisCached = await redisGet(cacheKey)
+  if (redisCached) {
+    try {
+      const parsed = JSON.parse(redisCached) as EmbedTokenCacheEntry
+      if (parsed.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+        masterUserTokenCache.set(cacheKey, parsed)
+        return parsed.token
+      }
+    } catch {}
+  }
+
+  const tokenUrl = `https://login.microsoftonline.com/${config.tenant_id}/oauth2/v2.0/token`
+
+  const body = new URLSearchParams({
+    grant_type: "password",
+    client_id: config.client_id,
+    username: config.master_user_email,
+    password: config.master_user_password,
+    scope: "https://analysis.windows.net/powerbi/api/.default",
+  })
+
+  if (config.client_secret) {
+    body.set("client_secret", config.client_secret)
+  }
+
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Falha ao autenticar usuario master Power BI: ${err}`)
+  }
+
+  const json = await res.json()
+  const accessToken = String(json.access_token ?? "")
+  const expiresIn = typeof json.expires_in === "number" ? json.expires_in : 3600
+  const expiresAt = Date.now() + expiresIn * 1000
+
+  const entry = { token: accessToken, expiresAt }
+  masterUserTokenCache.set(cacheKey, entry)
+  const ttl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
+  await redisSet(cacheKey, JSON.stringify(entry), ttl)
 
   return accessToken
 }
