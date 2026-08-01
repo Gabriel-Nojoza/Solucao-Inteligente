@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -22,8 +21,6 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
-
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsLoading(true)
@@ -59,13 +56,7 @@ export default function LoginPage() {
 
       markTabSessionActive()
 
-      if (loginType === "admin") {
-        router.push("/admin")
-      } else {
-        router.push("/")
-      }
-
-      router.refresh()
+      window.location.href = loginType === "admin" ? "/admin" : "/"
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Erro ao entrar")
     } finally {
