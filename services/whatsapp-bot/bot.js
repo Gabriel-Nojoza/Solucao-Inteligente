@@ -578,6 +578,17 @@ function isValidationError(error) {
   return error && typeof error === "object" && "code" in error && error.code === "VALIDATION"
 }
 
+function notifyTelegramAlert(text) {
+  const token = process.env.TELEGRAM_ALERT_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_ALERT_CHAT_ID
+  if (!token || !chatId) return
+  fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+  }).catch((err) => console.error("Erro ao enviar alerta Telegram:", err.message))
+}
+
 function findIndividualJidByPhone(instance, phone) {
   const normalizedPhone = normalizePhone(phone)
   if (!normalizedPhone) {
@@ -1201,6 +1212,16 @@ function bindSocketEvents(instance, saveCreds) {
         display_name: null,
         jid: null,
       })
+
+      {
+        const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+        const label = instance.label || instance.id
+        if (wasLoggedOut) {
+          notifyTelegramAlert(`🚫 *WhatsApp Desconectado*\n📱 *${label}*\n❌ Sessão encerrada pelo WhatsApp (conta banida ou deslogada)\n🕐 ${now}`)
+        } else {
+          notifyTelegramAlert(`⚠️ *WhatsApp Desconectado*\n📱 *${label}*\n🔄 Conexão perdida, tentando reconectar...${errorMessage ? `\n🔍 ${errorMessage}` : ""}\n🕐 ${now}`)
+        }
+      }
 
       if (wasLoggedOut) {
         console.log(`Sessao desconectada do WhatsApp (${instance.id}). Gere um novo QR reiniciando o bot.`)
