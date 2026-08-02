@@ -795,18 +795,42 @@ async function handleDispatch(request: NextRequest) {
 
                 // Se nenhuma página foi selecionada, busca todas as páginas visíveis via API
                 let resolvedPageNames: string[] | null = selectedPageNames.length > 0 ? selectedPageNames : null
-                if (!resolvedPageNames && !target.config.pbi_page_name && pbiWorkspaceId) {
-                  try {
-                    const allPages = await getReportPages(pbiToken, pbiWorkspaceId, pbiReportId)
-                    const sorted = [...allPages].sort((a, b) => a.order - b.order)
-                    if (sorted.length > 1) {
-                      resolvedPageNames = sorted.map((p) => p.name)
-                      console.log(`[dispatch] paginas detectadas via API: ${JSON.stringify(resolvedPageNames)}`)
+                if (!resolvedPageNames && !target.config.pbi_page_name) {
+                  console.log("[dispatch] nenhuma pagina selecionada — buscando paginas via API REST", {
+                    pbiWorkspaceId,
+                    pbiReportId,
+                    hasPbiWorkspaceId: !!pbiWorkspaceId,
+                  })
+                  if (pbiWorkspaceId) {
+                    try {
+                      const allPages = await getReportPages(pbiToken, pbiWorkspaceId, pbiReportId)
+                      const sorted = [...allPages].sort((a, b) => a.order - b.order)
+                      console.log(`[dispatch] getReportPages retornou ${sorted.length} paginas: ${JSON.stringify(sorted.map((p) => ({ name: p.name, displayName: p.displayName, order: p.order })))}`)
+                      if (sorted.length > 1) {
+                        resolvedPageNames = sorted.map((p) => p.name)
+                      } else if (sorted.length === 1) {
+                        console.log("[dispatch] relatorio tem apenas 1 pagina — exportando como pagina unica")
+                      } else {
+                        console.log("[dispatch] getReportPages retornou lista vazia")
+                      }
+                    } catch (pagesErr) {
+                      console.warn("[dispatch] nao foi possivel listar paginas do relatorio:", pagesErr instanceof Error ? pagesErr.message : pagesErr)
                     }
-                  } catch (pagesErr) {
-                    console.warn("[dispatch] nao foi possivel listar paginas do relatorio:", pagesErr instanceof Error ? pagesErr.message : pagesErr)
+                  } else {
+                    console.warn("[dispatch] pbiWorkspaceId vazio — nao e possivel buscar paginas via API")
                   }
                 }
+
+                const resolvedEmbedUrl = pbiEmbedUrl ||
+                  (pbiWorkspaceId && pbiReportId
+                    ? `https://app.powerbi.com/reportEmbed?reportId=${pbiReportId}&groupId=${pbiWorkspaceId}`
+                    : null)
+
+                console.log("[dispatch] chamando exportDocumentWithFallback", {
+                  resolvedPageNames,
+                  pageName: target.config.pbi_page_name,
+                  hasEmbedUrl: !!resolvedEmbedUrl,
+                })
 
                 const exportedFile = await exportDocumentWithFallback({
                   pbiToken,
@@ -814,7 +838,7 @@ async function handleDispatch(request: NextRequest) {
                   workspaceId: pbiWorkspaceId,
                   reportId: pbiReportId,
                   reportName: target.report.name,
-                  embedUrl: pbiEmbedUrl,
+                  embedUrl: resolvedEmbedUrl,
                   pageNames: resolvedPageNames,
                   pageName: target.config.pbi_page_name,
                 })

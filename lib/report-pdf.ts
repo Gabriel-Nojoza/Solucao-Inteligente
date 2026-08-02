@@ -452,11 +452,12 @@ export async function captureReportAsPdf(input: {
 
     // Captura página única
     if (!pagesToCapture) {
+      console.log(`[Chrome] captureReportAsPdf: pagina unica — pageName=${input.pageName ?? "null"} pageNames=${JSON.stringify(input.pageNames ?? null)}`)
       return await captureSinglePagePdf(page, pdfFormat)
     }
 
     // Captura múltiplas páginas e mescla
-    console.log(`[Chrome] Capturando ${pagesToCapture.length} páginas do relatório`)
+    console.log(`[Chrome] captureReportAsPdf: multi-pagina — capturando ${pagesToCapture.length} paginas: ${JSON.stringify(pagesToCapture)}`)
     const pagePdfs: Buffer[] = []
 
     for (let i = 0; i < pagesToCapture.length; i++) {
