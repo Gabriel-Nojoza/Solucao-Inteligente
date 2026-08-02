@@ -180,14 +180,17 @@ export async function captureReportScreenshot(input: {
         filterPaneEnabled: false,
         navContentPaneEnabled: false,
         background: models.BackgroundType.Default,
+        layoutType: models.LayoutType.Custom,
+        customLayout: {
+          displayOption: models.DisplayOption.FitToPage,
+        },
       },
     };
 
     var report = window['powerbi'].embed(container, config);
 
     report.on('rendered', function() {
-      // Extra delay so custom visuals finish painting
-      setTimeout(function() { window._pbiRendered = true; }, 2000);
+      setTimeout(function() { window._pbiRendered = true; }, 3000);
     });
 
     report.on('error', function(event) {

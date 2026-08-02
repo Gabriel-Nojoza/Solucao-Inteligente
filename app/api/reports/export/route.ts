@@ -370,22 +370,23 @@ export async function POST(request: NextRequest) {
           return jsonError(getMissingReportMessage(), 404)
         }
 
-        // PNG: gera PDF via Chrome (comprovado funcionar) e converte para PNG com Ghostscript
+        // PNG: captura screenshot em alta resolução via Chrome (1920×1080 @2x = 3840×2160)
         if (format === "PNG") {
           const nativePngErrMsg = getErrorMessage(browserPdfError)
-          // Constrói embed URL se não estiver salva no banco
           const embedUrlForChrome = report.embed_url ||
             `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
-          console.log(`[reports/export] PNG via API nativa falhou (${nativePngErrMsg}) — gerando PDF via Chrome e convertendo para PNG`, { embedUrlForChrome })
+          console.log(`[reports/export] PNG via API nativa falhou (${nativePngErrMsg}) — capturando screenshot via Chrome`, { embedUrlForChrome })
           try {
-            const chromePdf = await captureReportAsPdf({
+            const chromePng = await captureReportScreenshot({
               embedUrl: embedUrlForChrome,
               embedToken: exportToken,
               reportId: report.pbi_report_id,
               pageName: pbiPageName ?? null,
               tokenType: "Aad",
+              viewportWidth: 1920,
+              viewportHeight: 1080,
+              deviceScaleFactor: 2,
             })
-            const chromePng = await pdfToPng(chromePdf)
             return new Response(chromePng, {
               status: 200,
               headers: {
