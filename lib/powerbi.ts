@@ -162,6 +162,7 @@ function parsePowerBiError(raw: string): ParsedPowerBiError {
 
 async function throwPowerBiApiError(action: string, response: Response): Promise<never> {
   const raw = (await response.text().catch(() => "")).trim()
+  console.error(`[PowerBI] ${action} — ${response.status} ${response.statusText}:`, raw)
   const parsed = parsePowerBiError(raw)
   const fallbackMessage = parsed.message || `${response.status} ${response.statusText}`.trim()
 

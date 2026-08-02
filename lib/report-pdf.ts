@@ -269,6 +269,7 @@ export async function captureReportAsPdf(input: {
   pageName?: string | null
   viewportWidth?: number
   viewportHeight?: number
+  tokenType?: "Embed" | "Aad"
 }): Promise<Buffer> {
   const executablePath = await findChromePath()
   const width = input.viewportWidth ?? 1280
@@ -299,7 +300,7 @@ export async function captureReportAsPdf(input: {
       id: ${JSON.stringify(input.reportId)},
       embedUrl: ${JSON.stringify(input.embedUrl)},
       accessToken: ${JSON.stringify(input.embedToken)},
-      tokenType: models.TokenType.Embed,
+      tokenType: ${input.tokenType === "Aad" ? "models.TokenType.Aad" : "models.TokenType.Embed"},
       ${input.pageName ? `pageName: ${JSON.stringify(input.pageName)},` : ""}
       settings: {
         filterPaneEnabled: false,

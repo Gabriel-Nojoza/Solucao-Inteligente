@@ -385,16 +385,12 @@ export async function POST(request: NextRequest) {
             return jsonError("Este relatorio nao possui URL de embed configurada", 422)
           }
           try {
-            const embedToken = await generateReportEmbedToken(
-              token,
-              workspace.pbi_workspace_id,
-              report.pbi_report_id
-            )
             const chromePdf = await captureReportAsPdf({
               embedUrl: report.embed_url,
-              embedToken,
+              embedToken: exportToken,
               reportId: report.pbi_report_id,
               pageName: pbiPageName ?? null,
+              tokenType: "Aad",
             })
             return new Response(chromePdf, {
               status: 200,

@@ -23,8 +23,15 @@ import { getRequestContext } from "@/lib/tenant"
 import {
   exportPowerBIReportDocument,
   sanitizeFileName,
+  type PowerBiExportedDocument,
 } from "@/lib/powerbi-report-pdf"
-import { getAccessToken, getAccessTokenMasterUser } from "@/lib/powerbi"
+import {
+  getAccessToken,
+  getAccessTokenMasterUser,
+  generateReportEmbedToken,
+  isPowerBiFeatureNotAvailableError,
+} from "@/lib/powerbi"
+import { captureReportAsPdf } from "@/lib/report-pdf"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
 import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
@@ -33,6 +40,40 @@ import { runStoredAutomation } from "@/lib/automation-runner"
 import { retryAsync } from "@/lib/utils"
 
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
+
+async function exportDocumentWithFallback(input: {
+  pbiToken: string
+  companyId: string
+  workspaceId: string
+  reportId: string
+  reportName: string
+  embedUrl: string | null
+  pageNames: string[] | null
+  pageName: string | null | undefined
+}): Promise<PowerBiExportedDocument> {
+  try {
+    return await exportPowerBIReportDocument({
+      token: input.pbiToken,
+      workspaceId: input.workspaceId,
+      reportId: input.reportId,
+      reportName: input.reportName,
+      embedUrl: input.embedUrl,
+      pageNames: input.pageNames,
+      pageName: input.pageName,
+    })
+  } catch (err) {
+    if (!isPowerBiFeatureNotAvailableError(err) || !input.embedUrl) throw err
+    console.log("[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (AAD)")
+    const pdfBuffer = await captureReportAsPdf({
+      embedUrl: input.embedUrl,
+      embedToken: input.pbiToken,
+      reportId: input.reportId,
+      pageName: input.pageName ?? null,
+      tokenType: "Aad",
+    })
+    return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
+  }
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -697,8 +738,9 @@ async function handleDispatch(request: NextRequest) {
                     await sleep(EXPORT_DELAY_MS)
                   }
                   exportCount++
-                  const exportedFile = await exportPowerBIReportDocument({
-                    token: pbiToken,
+                  const exportedFile = await exportDocumentWithFallback({
+                    pbiToken,
+                    companyId,
                     workspaceId: pbiWorkspaceId,
                     reportId: pbiReportId,
                     reportName: target.report.name,
@@ -745,10 +787,13 @@ async function handleDispatch(request: NextRequest) {
                   reportName: target.report.name,
                   selectedPageNames,
                   pageName: target.config.pbi_page_name,
+                  pbiWorkspaceId,
+                  pbiReportId,
                 })
 
-                const exportedFile = await exportPowerBIReportDocument({
-                  token: pbiToken,
+                const exportedFile = await exportDocumentWithFallback({
+                  pbiToken,
+                  companyId,
                   workspaceId: pbiWorkspaceId,
                   reportId: pbiReportId,
                   reportName: target.report.name,
