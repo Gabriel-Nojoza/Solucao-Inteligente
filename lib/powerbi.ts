@@ -709,6 +709,19 @@ export async function getExportFile(
   return res.arrayBuffer()
 }
 
+export async function getReportPages(token: string, workspaceId: string, reportId: string): Promise<Array<{ name: string; displayName: string; order: number }>> {
+  const res = await fetch(`${PBI_API_BASE}/groups/${workspaceId}/reports/${reportId}/pages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!res.ok) {
+    await throwPowerBiApiError(`Falha ao listar paginas do relatorio ${reportId}`, res)
+  }
+
+  const json = await res.json()
+  return (json.value ?? []) as Array<{ name: string; displayName: string; order: number }>
+}
+
 export async function listDatasets(token: string, workspaceId: string) {
   const res = await fetch(`${PBI_API_BASE}/groups/${workspaceId}/datasets`, {
     headers: { Authorization: `Bearer ${token}` },

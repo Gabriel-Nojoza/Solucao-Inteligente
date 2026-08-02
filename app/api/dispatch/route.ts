@@ -30,6 +30,7 @@ import {
   getAccessTokenMasterUser,
   generateReportEmbedToken,
   isPowerBiFeatureNotAvailableError,
+  getReportPages,
 } from "@/lib/powerbi"
 import { captureReportAsPdf } from "@/lib/report-pdf"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
@@ -792,6 +793,21 @@ async function handleDispatch(request: NextRequest) {
                   pbiReportId,
                 })
 
+                // Se nenhuma página foi selecionada, busca todas as páginas visíveis via API
+                let resolvedPageNames: string[] | null = selectedPageNames.length > 0 ? selectedPageNames : null
+                if (!resolvedPageNames && !target.config.pbi_page_name && pbiWorkspaceId) {
+                  try {
+                    const allPages = await getReportPages(pbiToken, pbiWorkspaceId, pbiReportId)
+                    const sorted = [...allPages].sort((a, b) => a.order - b.order)
+                    if (sorted.length > 1) {
+                      resolvedPageNames = sorted.map((p) => p.name)
+                      console.log(`[dispatch] paginas detectadas via API: ${JSON.stringify(resolvedPageNames)}`)
+                    }
+                  } catch (pagesErr) {
+                    console.warn("[dispatch] nao foi possivel listar paginas do relatorio:", pagesErr instanceof Error ? pagesErr.message : pagesErr)
+                  }
+                }
+
                 const exportedFile = await exportDocumentWithFallback({
                   pbiToken,
                   companyId,
@@ -799,7 +815,7 @@ async function handleDispatch(request: NextRequest) {
                   reportId: pbiReportId,
                   reportName: target.report.name,
                   embedUrl: pbiEmbedUrl,
-                  pageNames: selectedPageNames.length > 0 ? selectedPageNames : null,
+                  pageNames: resolvedPageNames,
                   pageName: target.config.pbi_page_name,
                 })
 
