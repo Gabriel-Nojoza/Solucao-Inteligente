@@ -180,6 +180,10 @@ export async function captureReportScreenshot(input: {
         filterPaneEnabled: false,
         navContentPaneEnabled: false,
         background: models.BackgroundType.Default,
+        layoutType: models.LayoutType.Custom,
+        customLayout: {
+          displayOption: models.DisplayOption.FitToPage,
+        },
       },
     };
 

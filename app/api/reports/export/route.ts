@@ -383,9 +383,9 @@ export async function POST(request: NextRequest) {
               reportId: report.pbi_report_id,
               pageName: pbiPageName ?? null,
               tokenType: "Aad",
-              viewportWidth: 1920,
-              viewportHeight: 1080,
-              deviceScaleFactor: 2,
+              viewportWidth: 3840,
+              viewportHeight: 2160,
+              deviceScaleFactor: 1,
             })
             return new Response(chromePng, {
               status: 200,
