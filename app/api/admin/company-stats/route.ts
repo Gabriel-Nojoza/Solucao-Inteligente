@@ -42,6 +42,8 @@ export type CompanyStatItem = {
   hideZeroRowsEnabled: boolean
   campaignClientPreviewEnabled: boolean
   sendingHours: { enabled: boolean; mode: "allowed" | "blocked"; allowedWindows: Array<{ startTime: string; endTime: string }>; blockedWindows: Array<{ startTime: string; endTime: string }> } | null
+  pbiPlan: "pro" | "premium" | "fabric" | null
+  hasMasterUser: boolean
 }
 
 export type DailyDispatchPoint = {
@@ -181,6 +183,7 @@ export async function GET(request: Request) {
     const limitsMap = new Map<string, Record<string, unknown>>()
     const featuresMap = new Map<string, Record<string, unknown>>()
     const sendingHoursMap = new Map<string, Record<string, unknown>>()
+    const powerbiMap = new Map<string, Record<string, unknown>>()
 
     if (!lite) {
       const [chatLogsResult, settingsResult] = await Promise.all([
@@ -193,7 +196,7 @@ export async function GET(request: Request) {
           .from("company_settings")
           .select("company_id, key, value")
           .in("company_id", companyIds)
-          .in("key", ["chat_ia", "usage_limits", "features", "sending_hours"]),
+          .in("key", ["chat_ia", "usage_limits", "features", "sending_hours", "powerbi"]),
       ])
 
       for (const row of chatLogsResult.data ?? []) {
@@ -207,6 +210,7 @@ export async function GET(request: Request) {
         if (row.key === "usage_limits") limitsMap.set(row.company_id, row.value as Record<string, unknown>)
         if (row.key === "features") featuresMap.set(row.company_id, row.value as Record<string, unknown>)
         if (row.key === "sending_hours") sendingHoursMap.set(row.company_id, row.value as Record<string, unknown>)
+        if (row.key === "powerbi") powerbiMap.set(row.company_id, row.value as Record<string, unknown>)
       }
     }
 
@@ -221,6 +225,10 @@ export async function GET(request: Request) {
       const limits = limitsMap.get(company.id)
       const features = featuresMap.get(company.id)
       const sh = sendingHoursMap.get(company.id)
+      const powerbi = powerbiMap.get(company.id)
+      const rawPlan = typeof powerbi?.plan === "string" ? powerbi.plan : null
+      const pbiPlan = (rawPlan === "pro" || rawPlan === "premium" || rawPlan === "fabric") ? rawPlan : null
+      const hasMasterUser = !!(powerbi?.master_user_email)
       const mapWindows = (arr: unknown) =>
         Array.isArray(arr)
           ? (arr as Array<Record<string, unknown>>).map((w) => ({
@@ -299,6 +307,8 @@ export async function GET(request: Request) {
         hideZeroRowsEnabled: features?.hide_zero_rows === true,
         campaignClientPreviewEnabled: features?.campaign_client_preview === true,
         sendingHours,
+        pbiPlan,
+        hasMasterUser,
       }
     })
 

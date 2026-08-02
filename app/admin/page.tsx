@@ -760,6 +760,7 @@ export default function AdminDashboardPage() {
                     <thead>
                       <tr className="border-b border-border bg-muted/30">
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Empresa</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Plano</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Este Mês</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Limite/mês</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">R$/excedente</th>
@@ -780,6 +781,24 @@ export default function AdminDashboardPage() {
                         return (
                           <tr key={c.companyId} className="hover:bg-muted/30 transition-colors">
                             <td className="px-4 py-3 font-medium">{c.companyName}</td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex flex-col items-center gap-1">
+                                {c.pbiPlan === "fabric" ? (
+                                  <span className="inline-flex items-center rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-500">Fabric</span>
+                                ) : c.pbiPlan === "premium" ? (
+                                  <span className="inline-flex items-center rounded-full border border-purple-500/40 bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-500">Premium</span>
+                                ) : c.pbiPlan === "pro" ? (
+                                  <span className="inline-flex items-center rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-500">Pro</span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
+                                {c.pbiPlan && (
+                                  <span className={`text-xs font-medium ${c.pbiPlan === "fabric" ? (c.hasMasterUser ? "text-emerald-500" : "text-red-400") : "text-blue-400"}`}>
+                                    {c.pbiPlan === "fabric" ? (c.hasMasterUser ? "Chrome ✓" : "Chrome ✗") : "ExportTo API"}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-4 py-3 text-center">
                               <div className="flex flex-col items-center leading-tight gap-0.5">
                                 <span className={`font-bold text-sm ${isOverLimit ? "text-red-500" : ""}`}>{c.deliveredThisMonth + c.failedThisMonth}</span>
@@ -936,7 +955,7 @@ export default function AdminDashboardPage() {
                             </div>
                           </div>
                         </td>
-                        <td colSpan={10} />
+                        <td colSpan={11} />
                       </tr>
                     </tfoot>
                   </table>

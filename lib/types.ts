@@ -125,6 +125,7 @@ export interface PowerBIConfig {
   client_secret: string
   master_user_email?: string
   master_user_password?: string
+  plan?: "pro" | "premium" | "fabric"
 }
 
 export interface N8NConfig {

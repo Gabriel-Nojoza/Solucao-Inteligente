@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { BRAND_NAME } from "@/lib/branding"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -23,6 +24,9 @@ export default function SettingsPage() {
   const [tenantId, setTenantId] = useState("")
   const [clientId, setClientId] = useState("")
   const [clientSecret, setClientSecret] = useState("")
+  const [pbiPlan, setPbiPlan] = useState<"pro" | "premium" | "fabric" | "">("")
+  const [masterUserEmail, setMasterUserEmail] = useState("")
+  const [masterUserPassword, setMasterUserPassword] = useState("")
   const [pbiTesting, setPbiTesting] = useState(false)
   const [pbiTestResult, setPbiTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [pbiSyncing, setPbiSyncing] = useState(false)
@@ -55,6 +59,10 @@ export default function SettingsPage() {
         setTenantId(settings.powerbi.tenant_id ?? "")
         setClientId(settings.powerbi.client_id ?? "")
         setClientSecret(settings.powerbi.client_secret ?? "")
+        const plan = settings.powerbi.plan
+        setPbiPlan(plan === "pro" || plan === "premium" || plan === "fabric" ? plan : "")
+        setMasterUserEmail(settings.powerbi.master_user_email ?? "")
+        setMasterUserPassword(settings.powerbi.master_user_password ?? "")
       }
       if (settings.n8n) {
         setWebhookUrl(settings.n8n.webhook_url ?? "")
@@ -127,11 +135,23 @@ export default function SettingsPage() {
     }
   }
 
+  function buildPowerBiPayload() {
+    const payload: Record<string, unknown> = {
+      tenant_id: tenantId,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }
+    if (pbiPlan) payload.plan = pbiPlan
+    if (masterUserEmail.trim()) payload.master_user_email = masterUserEmail.trim()
+    if (masterUserPassword.trim()) payload.master_user_password = masterUserPassword.trim()
+    return payload
+  }
+
   async function testPowerBI() {
     setPbiTesting(true)
     setPbiTestResult(null)
     // Save first
-    await saveSetting("powerbi", { tenant_id: tenantId, client_id: clientId, client_secret: clientSecret })
+    await saveSetting("powerbi", buildPowerBiPayload())
     try {
       const res = await fetch("/api/powerbi/test", { method: "POST" })
       const data = await res.json()
@@ -232,15 +252,55 @@ export default function SettingsPage() {
                     placeholder="Seu client secret"
                   />
                 </div>
+                <div className="border-t pt-4 flex flex-col gap-4">
+                  <div>
+                    <Label>Plano Power BI</Label>
+                    <p className="text-xs text-muted-foreground mt-1">Indica o tipo de licenca desta empresa. Fabric/PPU usa captura via Chrome.</p>
+                  </div>
+                  <Select value={pbiPlan} onValueChange={(v) => setPbiPlan(v as typeof pbiPlan)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o plano..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pro">Pro</SelectItem>
+                      <SelectItem value="premium">Premium</SelectItem>
+                      <SelectItem value="fabric">Fabric / PPU</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="border-t pt-4 flex flex-col gap-4">
+                  <div>
+                    <Label>Master User (Fabric / PPU)</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Necessario para exportar PDF em workspaces Fabric/PPU. A conta deve ter MFA desativado e licenca Pro ou PPU.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="master-user-email">E-mail do Master User</Label>
+                    <Input
+                      id="master-user-email"
+                      type="email"
+                      value={masterUserEmail}
+                      onChange={(e) => setMasterUserEmail(e.target.value)}
+                      placeholder="usuario@empresa.com"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="master-user-password">Senha do Master User</Label>
+                    <Input
+                      id="master-user-password"
+                      type="password"
+                      value={masterUserPassword}
+                      onChange={(e) => setMasterUserPassword(e.target.value)}
+                      placeholder="Senha da conta"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-3">
                   <Button
-                    onClick={() =>
-                      saveSetting("powerbi", {
-                        tenant_id: tenantId,
-                        client_id: clientId,
-                        client_secret: clientSecret,
-                      })
-                    }
+                    onClick={() => saveSetting("powerbi", buildPowerBiPayload())}
                     disabled={saving === "powerbi"}
                   >
                     {saving === "powerbi" ? (
