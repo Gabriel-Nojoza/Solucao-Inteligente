@@ -69,6 +69,7 @@ async function exportDocumentWithFallback(input: {
       embedToken: input.pbiToken,
       reportId: input.reportId,
       pageName: input.pageName ?? null,
+      pageNames: input.pageNames,
       tokenType: "Aad",
     })
     return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }

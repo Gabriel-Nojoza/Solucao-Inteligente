@@ -370,12 +370,39 @@ export async function POST(request: NextRequest) {
           return jsonError(getMissingReportMessage(), 404)
         }
 
-        // PNG nao tem fallback via API nativa (requer Premium) — retorna erro direto
+        // PNG: tenta captura via Chrome com AAD token (fallback para qualquer falha na API nativa)
         if (format === "PNG") {
-          return jsonError(
-            `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(browserPdfError) || "Tente novamente."}`,
-            500
-          )
+          const nativePngErrMsg = getErrorMessage(browserPdfError)
+          console.log(`[reports/export] PNG via API nativa falhou (${nativePngErrMsg}) — tentando captura via Chrome`)
+          if (!report.embed_url) {
+            return jsonError(`Nao foi possivel exportar o relatorio em PNG. ${nativePngErrMsg}`, 500)
+          }
+          try {
+            const chromePng = await captureReportScreenshot({
+              embedUrl: report.embed_url,
+              embedToken: exportToken,
+              reportId: report.pbi_report_id,
+              pageName: pbiPageName ?? null,
+              tokenType: "Aad",
+            })
+            return new Response(chromePng, {
+              status: 200,
+              headers: {
+                "Content-Type": "image/png",
+                "Content-Disposition": `inline; filename="${safeName}.png"`,
+                "Cache-Control": "no-store",
+              },
+            })
+          } catch (chromePngError) {
+            if (isPowerBiEntityNotFoundError(chromePngError)) {
+              await deactivateMissingReport(supabase, companyId, report.id)
+              return jsonError(getMissingReportMessage(), 404)
+            }
+            return jsonError(
+              `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(chromePngError) || "Tente novamente."}`,
+              500
+            )
+          }
         }
 
         // PDF: se nao tem capacidade Premium, tenta captura via Chrome como fallback

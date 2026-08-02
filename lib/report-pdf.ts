@@ -5,6 +5,7 @@ import * as fs from "fs"
 import * as path from "path"
 import * as os from "os"
 import puppeteer from "puppeteer-core"
+import { PDFDocument } from "pdf-lib"
 
 const execFileAsync = promisify(execFile)
 
@@ -141,6 +142,7 @@ export async function captureReportScreenshot(input: {
   viewportWidth?: number
   viewportHeight?: number
   deviceScaleFactor?: number
+  tokenType?: "Embed" | "Aad"
 }): Promise<Buffer> {
   const executablePath = await findChromePath()
   const width = input.viewportWidth ?? 1280
@@ -172,7 +174,7 @@ export async function captureReportScreenshot(input: {
       id: ${JSON.stringify(input.reportId)},
       embedUrl: ${JSON.stringify(input.embedUrl)},
       accessToken: ${JSON.stringify(input.embedToken)},
-      tokenType: models.TokenType.Embed,
+      tokenType: ${input.tokenType === "Aad" ? "models.TokenType.Aad" : "models.TokenType.Embed"},
       ${input.pageName ? `pageName: ${JSON.stringify(input.pageName)},` : ""}
       settings: {
         filterPaneEnabled: false,
@@ -262,28 +264,55 @@ export async function captureReportScreenshot(input: {
   throw lastError
 }
 
+async function injectPrintColorAdjust(page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>): Promise<void> {
+  for (const frame of page.frames()) {
+    await frame.evaluate(() => {
+      const s = document.createElement("style")
+      s.textContent =
+        "* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }"
+      ;(document.head ?? document.documentElement)?.appendChild(s)
+    }).catch(() => {})
+  }
+}
+
+async function captureSinglePagePdf(page: any, format: string): Promise<Buffer> {
+  await injectPrintColorAdjust(page)
+  const pdf = await page.pdf({
+    format,
+    landscape: true,
+    printBackground: true,
+    margin: { top: "0", right: "0", bottom: "0", left: "0" },
+  })
+  return Buffer.from(pdf)
+}
+
 export async function captureReportAsPdf(input: {
   embedUrl: string
   embedToken: string
   reportId: string
   pageName?: string | null
+  pageNames?: string[] | null
   viewportWidth?: number
   viewportHeight?: number
   tokenType?: "Embed" | "Aad"
 }): Promise<Buffer> {
   const executablePath = await findChromePath()
-  const width = input.viewportWidth ?? 1280
-  const height = input.viewportHeight ?? 960
+  // A6 landscape em 96dpi: 148mm × 105mm → 559 × 397px
+  const width = input.viewportWidth ?? 559
+  const height = input.viewportHeight ?? 397
   const powerBiClientJs = loadPowerBiClientJs()
+  const pdfFormat = "A6"
 
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <style>
+    @page { margin: 0; size: A6 landscape; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: #fff; width: ${width}px; height: ${height}px; }
-    #pbi-container { width: ${width}px; height: ${height}px; }
+    html { width: ${width}px; height: ${height}px; overflow: hidden; max-height: ${height}px; }
+    body { overflow: hidden; background: #fff; width: ${width}px; height: ${height}px; max-height: ${height}px; }
+    #pbi-container { width: ${width}px; height: ${height}px; overflow: hidden; }
   </style>
 </head>
 <body>
@@ -292,6 +321,8 @@ export async function captureReportAsPdf(input: {
   <script>
     window._pbiRendered = false;
     window._pbiError = null;
+    window._pbiReport = null;
+    window._pbiPages = null; // null = ainda carregando, [] = falhou, ['name',...] = ok
 
     var models = window['powerbi-client'].models;
     var container = document.getElementById('pbi-container');
@@ -306,17 +337,34 @@ export async function captureReportAsPdf(input: {
         filterPaneEnabled: false,
         navContentPaneEnabled: false,
         background: models.BackgroundType.Default,
+        layoutType: models.LayoutType.Custom,
+        customLayout: {
+          displayOption: models.DisplayOption.FitToPage,
+        },
       },
     };
 
     var report = window['powerbi'].embed(container, config);
+    window._pbiReport = report;
+
+    report.on('loaded', function() {
+      report.getPages().then(function(pages) {
+        var visible = pages.filter(function(p) { return p.visibility === 0; }).map(function(p) { return p.name; });
+        window._pbiPages = visible;
+        console.log('[PBI] pages loaded:', JSON.stringify(visible));
+      }).catch(function(err) {
+        console.log('[PBI] getPages error:', err && err.message ? err.message : String(err));
+        window._pbiPages = [];
+      });
+    });
 
     report.on('rendered', function() {
-      setTimeout(function() { window._pbiRendered = true; }, 2000);
+      setTimeout(function() { window._pbiRendered = true; }, 5000);
     });
 
     report.on('error', function(event) {
       window._pbiError = JSON.stringify(event.detail);
+      window._pbiPages = [];
       window._pbiRendered = true;
     });
   </script>
@@ -334,12 +382,18 @@ export async function captureReportAsPdf(input: {
     browser = await puppeteer.launch({
       executablePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--force-color-profile=srgb",
+      ],
       timeout: 90000,
     })
 
     const page = await browser.newPage()
-    await page.setViewport({ width, height })
+    await page.setViewport({ width, height, deviceScaleFactor: 1 })
 
     page.on("console", (msg) => {
       console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
@@ -358,14 +412,84 @@ export async function captureReportAsPdf(input: {
       throw waitErr
     }
 
-    const pdf = await page.pdf({
-      width: `${width}px`,
-      height: `${height}px`,
-      printBackground: true,
-      margin: { top: "0", right: "0", bottom: "0", left: "0" },
-    })
+    await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {})
+    await new Promise((r) => setTimeout(r, 2000))
 
-    return Buffer.from(pdf)
+    // Determina quais páginas capturar
+    // Se pageName foi especificado → só essa página
+    // Se pageNames foi especificado com múltiplas → essas páginas
+    // Se nenhum foi especificado → busca todas as páginas visíveis do relatório
+    let pagesToCapture: string[] | null = null
+
+    if (input.pageName) {
+      pagesToCapture = null // já está na página certa, captura direto
+    } else if (input.pageNames && input.pageNames.length > 1) {
+      pagesToCapture = input.pageNames
+    } else if (!input.pageName && (!input.pageNames || input.pageNames.length === 0)) {
+      // Aguarda _pbiPages ser preenchido pelo evento 'loaded'
+      await page.waitForFunction("Array.isArray(window._pbiPages)", { timeout: 15000 }).catch(() => {})
+
+      let allPages = await page.evaluate(() => (window as any)._pbiPages ?? null).catch(() => null) as string[] | null
+
+      // Fallback: chama getPages() diretamente se o evento 'loaded' nao preencheu _pbiPages
+      if (!Array.isArray(allPages) || allPages.length === 0) {
+        console.log("[Chrome] _pbiPages nao disponivel via loaded — chamando getPages() diretamente")
+        allPages = await page.evaluate(() => {
+          const rpt = (window as any)._pbiReport
+          if (!rpt || typeof rpt.getPages !== "function") return []
+          return rpt.getPages().then((pages: any[]) =>
+            pages.filter((p: any) => p.visibility === 0).map((p: any) => ({ name: p.name, displayName: p.displayName }))
+          )
+        }).then((items: any) => (Array.isArray(items) ? items.map((i: any) => (typeof i === "string" ? i : i.name)) : [])).catch(() => [])
+      }
+
+      console.log(`[Chrome] páginas detectadas: ${JSON.stringify(allPages)}`)
+      if (Array.isArray(allPages) && allPages.length > 1) pagesToCapture = allPages
+    }
+
+    // Captura página única
+    if (!pagesToCapture) {
+      return await captureSinglePagePdf(page, pdfFormat)
+    }
+
+    // Captura múltiplas páginas e mescla
+    console.log(`[Chrome] Capturando ${pagesToCapture.length} páginas do relatório`)
+    const pagePdfs: Buffer[] = []
+
+    for (let i = 0; i < pagesToCapture.length; i++) {
+      const pbiPageName = pagesToCapture[i]
+
+      if (i > 0) {
+        // Navega para a próxima página e aguarda re-render
+        await page.evaluate((name: string) => {
+          ;(window as any)._pbiRendered = false
+          ;(window as any)._pbiReport.setPage(name)
+        }, pbiPageName)
+
+        try {
+          await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
+        } catch {
+          console.warn(`[Chrome] Timeout aguardando render da página ${pbiPageName}`)
+        }
+        await page.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 }).catch(() => {})
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+
+      const pdfBuf = await captureSinglePagePdf(page, pdfFormat)
+      pagePdfs.push(pdfBuf)
+      console.log(`[Chrome] Página ${i + 1}/${pagesToCapture.length} capturada`)
+    }
+
+    // Mescla todos os PDFs num único documento
+    const merged = await PDFDocument.create()
+    for (const pdfBuf of pagePdfs) {
+      const doc = await PDFDocument.load(pdfBuf)
+      const copied = await merged.copyPages(doc, doc.getPageIndices())
+      copied.forEach((p) => merged.addPage(p))
+    }
+    const mergedBytes = await merged.save()
+    return Buffer.from(mergedBytes)
+
   } finally {
     if (browser) await browser.close().catch(() => {})
     if (localServer) await localServer.close().catch(() => {})
