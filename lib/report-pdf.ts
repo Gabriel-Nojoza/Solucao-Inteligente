@@ -180,10 +180,6 @@ export async function captureReportScreenshot(input: {
         filterPaneEnabled: false,
         navContentPaneEnabled: false,
         background: models.BackgroundType.Default,
-        layoutType: models.LayoutType.Custom,
-        customLayout: {
-          displayOption: models.DisplayOption.FitToPage,
-        },
       },
     };
 
@@ -216,7 +212,7 @@ export async function captureReportScreenshot(input: {
         browser = await puppeteer.launch({
           executablePath,
           headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--force-color-profile=srgb"],
           timeout: 90000,
         })
 
