@@ -370,21 +370,22 @@ export async function POST(request: NextRequest) {
           return jsonError(getMissingReportMessage(), 404)
         }
 
-        // PNG: tenta captura via Chrome com AAD token (fallback para qualquer falha na API nativa)
+        // PNG: gera PDF via Chrome (comprovado funcionar) e converte para PNG com Ghostscript
         if (format === "PNG") {
           const nativePngErrMsg = getErrorMessage(browserPdfError)
-          console.log(`[reports/export] PNG via API nativa falhou (${nativePngErrMsg}) — tentando captura via Chrome`)
-          if (!report.embed_url) {
-            return jsonError(`Nao foi possivel exportar o relatorio em PNG. ${nativePngErrMsg}`, 500)
-          }
+          // Constrói embed URL se não estiver salva no banco
+          const embedUrlForChrome = report.embed_url ||
+            `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
+          console.log(`[reports/export] PNG via API nativa falhou (${nativePngErrMsg}) — gerando PDF via Chrome e convertendo para PNG`, { embedUrlForChrome })
           try {
-            const chromePng = await captureReportScreenshot({
-              embedUrl: report.embed_url,
+            const chromePdf = await captureReportAsPdf({
+              embedUrl: embedUrlForChrome,
               embedToken: exportToken,
               reportId: report.pbi_report_id,
               pageName: pbiPageName ?? null,
               tokenType: "Aad",
             })
+            const chromePng = await pdfToPng(chromePdf)
             return new Response(chromePng, {
               status: 200,
               headers: {
@@ -407,13 +408,12 @@ export async function POST(request: NextRequest) {
 
         // PDF: se nao tem capacidade Premium, tenta captura via Chrome como fallback
         if (format === "PDF" && isPowerBiFeatureNotAvailableError(browserPdfError)) {
-          console.log("[reports/export] FeatureNotAvailableError no PDF nativo — tentando captura via Chrome")
-          if (!report.embed_url) {
-            return jsonError("Este relatorio nao possui URL de embed configurada", 422)
-          }
+          const embedUrlForChromePdf = report.embed_url ||
+            `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
+          console.log("[reports/export] FeatureNotAvailableError no PDF nativo — tentando captura via Chrome", { embedUrlForChromePdf })
           try {
             const chromePdf = await captureReportAsPdf({
-              embedUrl: report.embed_url,
+              embedUrl: embedUrlForChromePdf,
               embedToken: exportToken,
               reportId: report.pbi_report_id,
               pageName: pbiPageName ?? null,
