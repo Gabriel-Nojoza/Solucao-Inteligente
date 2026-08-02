@@ -361,6 +361,8 @@ export async function POST(request: Request) {
       const pbiTenantId = String(powerbi?.tenant_id ?? "").trim()
       const pbiClientId = String(powerbi?.client_id ?? "").trim()
       const pbiClientSecret = String(powerbi?.client_secret ?? "").trim()
+      const pbiMasterUserEmail = String(powerbi?.master_user_email ?? "").trim()
+      const pbiMasterUserPassword = String(powerbi?.master_user_password ?? "").trim()
       const n8nWebhookUrl = String(n8n?.webhook_url ?? "").trim()
       const n8nCallbackSecret = String(n8n?.callback_secret ?? "").trim()
 
@@ -394,6 +396,14 @@ export async function POST(request: Request) {
 
       targetCompanyId = company.id
 
+      const powerbiValue: Record<string, string> = {
+        tenant_id: pbiTenantId,
+        client_id: pbiClientId,
+        client_secret: pbiClientSecret,
+      }
+      if (pbiMasterUserEmail) powerbiValue.master_user_email = pbiMasterUserEmail
+      if (pbiMasterUserPassword) powerbiValue.master_user_password = pbiMasterUserPassword
+
       await supabase
         .from("company_settings")
         .upsert(
@@ -401,11 +411,7 @@ export async function POST(request: Request) {
             {
               company_id: targetCompanyId,
               key: "powerbi",
-              value: {
-                tenant_id: pbiTenantId,
-                client_id: pbiClientId,
-                client_secret: pbiClientSecret,
-              },
+              value: powerbiValue,
               updated_at: new Date().toISOString(),
             },
             {
@@ -642,6 +648,8 @@ export async function PUT(request: Request) {
       const pbiTenantId = String(powerbi?.tenant_id ?? "").trim()
       const pbiClientId = String(powerbi?.client_id ?? "").trim()
       const pbiClientSecret = String(powerbi?.client_secret ?? "").trim()
+      const pbiMasterUserEmail = String(powerbi?.master_user_email ?? "").trim()
+      const pbiMasterUserPassword = String(powerbi?.master_user_password ?? "").trim()
       const n8nWebhookUrl = String(n8n?.webhook_url ?? "").trim()
       const n8nCallbackSecret = String(n8n?.callback_secret ?? "").trim()
 
@@ -689,6 +697,14 @@ export async function PUT(request: Request) {
           .maybeSingle(),
       ])
 
+      const powerbiValue: Record<string, string> = {
+        tenant_id: pbiTenantId,
+        client_id: pbiClientId,
+        client_secret: pbiClientSecret,
+      }
+      if (pbiMasterUserEmail) powerbiValue.master_user_email = pbiMasterUserEmail
+      if (pbiMasterUserPassword) powerbiValue.master_user_password = pbiMasterUserPassword
+
       const { error: settingsErr } = await supabase
         .from("company_settings")
         .upsert(
@@ -696,11 +712,7 @@ export async function PUT(request: Request) {
             {
               company_id: targetCompanyId,
               key: "powerbi",
-              value: {
-                tenant_id: pbiTenantId,
-                client_id: pbiClientId,
-                client_secret: pbiClientSecret,
-              },
+              value: powerbiValue,
               updated_at: new Date().toISOString(),
             },
             {
