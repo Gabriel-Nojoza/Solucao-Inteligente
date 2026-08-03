@@ -27,7 +27,6 @@ import {
 } from "@/lib/powerbi-report-pdf"
 import {
   getAccessToken,
-  getAccessTokenMasterUser,
   generateReportEmbedToken,
   isPowerBiFeatureNotAvailableError,
   getReportPages,
@@ -43,7 +42,6 @@ import { retryAsync } from "@/lib/utils"
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
 
 async function exportDocumentWithFallback(input: {
-  pbiToken: string
   companyId: string
   workspaceId: string
   reportId: string
@@ -52,9 +50,10 @@ async function exportDocumentWithFallback(input: {
   pageNames: string[] | null
   pageName: string | null | undefined
 }): Promise<PowerBiExportedDocument> {
+  const serviceToken = await getAccessToken(input.companyId)
   try {
     return await exportPowerBIReportDocument({
-      token: input.pbiToken,
+      token: serviceToken,
       workspaceId: input.workspaceId,
       reportId: input.reportId,
       reportName: input.reportName,
@@ -64,14 +63,15 @@ async function exportDocumentWithFallback(input: {
     })
   } catch (err) {
     if (!isPowerBiFeatureNotAvailableError(err) || !input.embedUrl) throw err
-    console.log("[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (AAD)")
+    console.log("[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (embed token)")
+    const embedToken = await generateReportEmbedToken(serviceToken, input.workspaceId, input.reportId)
     const pdfBuffer = await captureReportAsPdf({
       embedUrl: input.embedUrl,
-      embedToken: input.pbiToken,
+      embedToken,
       reportId: input.reportId,
       pageName: input.pageName ?? null,
       pageNames: input.pageNames,
-      tokenType: "Aad",
+      tokenType: "Embed",
     })
     return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
   }
@@ -695,7 +695,6 @@ async function handleDispatch(request: NextRequest) {
     })
 
     if (directPdfTargets.length > 0) {
-      const pbiToken = await getAccessTokenMasterUser(companyId)
       let exportCount = 0
 
       for (const [contactIndex, contact] of normalizedContacts.entries()) {
@@ -741,7 +740,6 @@ async function handleDispatch(request: NextRequest) {
                   }
                   exportCount++
                   const exportedFile = await exportDocumentWithFallback({
-                    pbiToken,
                     companyId,
                     workspaceId: pbiWorkspaceId,
                     reportId: pbiReportId,
@@ -833,7 +831,6 @@ async function handleDispatch(request: NextRequest) {
                 })
 
                 const exportedFile = await exportDocumentWithFallback({
-                  pbiToken,
                   companyId,
                   workspaceId: pbiWorkspaceId,
                   reportId: pbiReportId,
