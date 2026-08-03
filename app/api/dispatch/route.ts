@@ -87,6 +87,7 @@ function getDispatchLogTarget(contact: {
   return contact.phone || contact.whatsapp_group_id || contact.name || "destino-desconhecido"
 }
 
+
 function normalizeAutomationExportFormat(value: unknown) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
   if (normalized === "table" || normalized === "csv" || normalized === "pdf" || normalized === "xlsx") {

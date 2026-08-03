@@ -11,8 +11,9 @@ function createRedisClient(): Redis {
     commandTimeout: 2000,
     enableOfflineQueue: false,
   })
-  client.on("error", (err: Error) => {
-    console.warn("[redis] erro:", err.message)
+  client.on("error", (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err ?? "desconhecido")
+    console.warn("[redis] erro:", msg)
   })
   return client
 }

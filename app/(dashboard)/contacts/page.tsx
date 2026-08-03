@@ -162,6 +162,8 @@ export default function ContactsPage() {
     setManualBotQrUrl(botQrConfig?.manual_qr_code_url ?? "")
   }, [botQrConfig?.manual_qr_code_url])
 
+  const canSyncContacts = botQrConfig?.status === "connected"
+
   const lastAutoSyncedAt = useRef<string | null>(null)
   useEffect(() => {
     if (
@@ -259,7 +261,6 @@ export default function ContactsPage() {
   const connectedPhoneLabel = botQrConfig?.phone_number || "-"
   const connectedNameLabel = botQrConfig?.display_name || "-"
   const canManageSelectedInstance = Boolean(resolvedBotInstanceId)
-  const canSyncContacts = botQrConfig?.status === "connected"
 
   function openCreate() {
     if (!resolvedBotInstanceId) {

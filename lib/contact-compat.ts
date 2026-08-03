@@ -40,6 +40,15 @@ function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() || null : null
 }
 
+export function normalizeContactPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  let phone = String(raw).replace(/\D/g, "")
+  if (phone.startsWith("55") && phone.length >= 12) phone = phone.slice(2)
+  if (phone.length === 10) phone = phone.slice(0, 2) + "9" + phone.slice(2)
+  if (phone.length < 8) return null
+  return `55${phone}`
+}
+
 export function isMissingWhatsappGroupIdColumnError(error: unknown) {
   const code =
     typeof error === "object" && error !== null && "code" in error
@@ -86,7 +95,7 @@ export function getEffectiveWhatsAppGroupId(contact: ContactLike) {
 export function normalizeContactForResponse<T extends ContactLike>(contact: T) {
   const type = contact.type === "group" ? "group" : "individual"
   const whatsappGroupId = getEffectiveWhatsAppGroupId(contact)
-  const phone = type === "group" ? null : normalizeString(contact.phone)
+  const phone = type === "group" ? null : normalizeContactPhone(contact.phone)
 
   return {
     ...contact,
