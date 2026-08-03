@@ -320,12 +320,11 @@ async function handleDispatch(request: NextRequest) {
     }
   }
 
-  const { data: schedule } = await supabase
-    .from("schedules")
-    .select("*")
-    .eq("company_id", companyId)
-    .eq("id", schedule_id)
-    .single()
+  const [{ data: schedule }, { data: companyRow }] = await Promise.all([
+    supabase.from("schedules").select("*").eq("company_id", companyId).eq("id", schedule_id).single(),
+    supabase.from("companies").select("name").eq("id", companyId).single(),
+  ])
+  const companyName: string = companyRow?.name ?? companyId
 
   if (!schedule) {
     return NextResponse.json({ error: "Rotina nao encontrada" }, { status: 404 })
@@ -952,6 +951,8 @@ async function handleDispatch(request: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        company_id: companyId,
+        company_name: companyName,
         schedule_id: schedule.id,
         schedule_name: schedule.name,
         cron_expression: schedule.cron_expression,

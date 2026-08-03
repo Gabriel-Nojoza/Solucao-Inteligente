@@ -134,25 +134,61 @@ const MESSAGE_TEMPLATES = [
   },
 ]
 
-type ExtraFilter = { column: string; days: number; days_custom: string }
+type ValueFilter = { column: string; operator: "eq" | "neq" | "gt" | "lt" | "gte" | "lte" | "contains"; value: string }
 
-const EMPTY_EXTRA_FILTER: ExtraFilter = { column: "", days: 30, days_custom: "" }
+const EMPTY_VALUE_FILTER: ValueFilter = { column: "", operator: "eq", value: "" }
+
+const OPERATOR_OPTIONS: { value: ValueFilter["operator"]; label: string }[] = [
+  { value: "eq", label: "= igual a" },
+  { value: "neq", label: "≠ diferente de" },
+  { value: "gt", label: "> maior que" },
+  { value: "lt", label: "< menor que" },
+  { value: "gte", label: "≥ maior ou igual" },
+  { value: "lte", label: "≤ menor ou igual" },
+  { value: "contains", label: "contém" },
+]
+
+function formatDaxValue(value: string): string {
+  const trimmed = value.trim()
+  if (trimmed !== "" && !isNaN(Number(trimmed))) return trimmed
+  return `"${trimmed.replace(/"/g, '""')}"`
+}
+
+function buildValueFilterCondition(table: string, f: ValueFilter): string {
+  const col = `'${table}'[${f.column}]`
+  const val = formatDaxValue(f.value)
+  switch (f.operator) {
+    case "eq": return `${col} = ${val}`
+    case "neq": return `${col} <> ${val}`
+    case "gt": return `${col} > ${val}`
+    case "lt": return `${col} < ${val}`
+    case "gte": return `${col} >= ${val}`
+    case "lte": return `${col} <= ${val}`
+    case "contains": return `SEARCH(${val}, ${col}, 1, 0) > 0`
+    default: return `${col} = ${val}`
+  }
+}
 
 function buildSimpleFiltersDax(
   table: string, nameCol: string, phoneCol: string,
-  filters: Array<{ column: string; days: number }>
+  dateFilters: Array<{ column: string; days: number }>,
+  valueFilters: ValueFilter[]
 ): string {
-  const meta = { table, nameCol, phoneCol, filters }
-  const conditions = filters.map(
+  const meta = { table, nameCol, phoneCol, dateFilters, valueFilters }
+  const dateConditions = dateFilters.map(
     (f) => `    NOT ISBLANK('${table}'[${f.column}])\n      && DATEDIFF('${table}'[${f.column}], TODAY(), DAY) >= ${f.days}`
-  ).join("\n      && ")
+  )
+  const valueConditions = valueFilters
+    .filter((f) => f.column.trim() && f.value.trim())
+    .map((f) => `    ${buildValueFilterCondition(table, f)}`)
+  const allConditions = [...dateConditions, ...valueConditions].join("\n      && ")
   return [
-    `// SIMPLE_FILTERS: ${JSON.stringify(meta)}`,
+    `// SIMPLE_FILTERS_V2: ${JSON.stringify(meta)}`,
     "EVALUATE",
     "ADDCOLUMNS(",
     "  FILTER(",
     `    '${table}',`,
-    conditions,
+    allConditions,
     "  ),",
     `  "nome", '${table}'[${nameCol}],`,
     `  "telefone", '${table}'[${phoneCol}]`,
@@ -162,11 +198,22 @@ function buildSimpleFiltersDax(
 
 function parseSimpleFilters(daxQuery: string): {
   table: string; nameCol: string; phoneCol: string
-  filters: Array<{ column: string; days: number }>
+  dateFilters: Array<{ column: string; days: number }>
+  valueFilters: ValueFilter[]
 } | null {
-  const match = daxQuery.match(/^\/\/ SIMPLE_FILTERS: (.+)/)
-  if (!match) return null
-  try { return JSON.parse(match[1]) } catch { return null }
+  const matchV2 = daxQuery.match(/^\/\/ SIMPLE_FILTERS_V2: (.+)/)
+  if (matchV2) {
+    try { return JSON.parse(matchV2[1]) } catch { return null }
+  }
+  // backward compat: old format had "filters" (date only)
+  const matchV1 = daxQuery.match(/^\/\/ SIMPLE_FILTERS: (.+)/)
+  if (matchV1) {
+    try {
+      const old = JSON.parse(matchV1[1]) as { table: string; nameCol: string; phoneCol: string; filters: Array<{ column: string; days: number }> }
+      return { table: old.table, nameCol: old.nameCol, phoneCol: old.phoneCol, dateFilters: old.filters ?? [], valueFilters: [] }
+    } catch { return null }
+  }
+  return null
 }
 
 const EMPTY_FORM = {
@@ -178,7 +225,7 @@ const EMPTY_FORM = {
   date_column: "",
   days_inactive: 30 as number,
   days_custom: "" as string,
-  extra_filters: [] as ExtraFilter[],
+  value_filters: [] as ValueFilter[],
   phone_column: "",
   name_column: "",
   dax_query: "",
@@ -367,7 +414,7 @@ export default function CampaignsPage() {
     const simpleFilters = parseSimpleFilters(rawDax)
 
     if (simpleFilters) {
-      const [primary, ...rest] = simpleFilters.filters
+      const [primary] = simpleFilters.dateFilters ?? []
       const primaryDays = primary?.days ?? 30
       const isPreset = DAYS_OPTIONS.some((o) => o.value === primaryDays && o.value !== 0)
       setForm({
@@ -382,10 +429,7 @@ export default function CampaignsPage() {
         date_column: primary?.column ?? "",
         days_inactive: isPreset ? primaryDays : 0,
         days_custom: !isPreset ? String(primaryDays) : "",
-        extra_filters: rest.map((f) => {
-          const preset = DAYS_OPTIONS.some((o) => o.value === f.days && o.value !== 0)
-          return { column: f.column, days: preset ? f.days : 0, days_custom: preset ? "" : String(f.days) }
-        }),
+        value_filters: simpleFilters.valueFilters ?? [],
         advanced_mode: false,
         dax_query: "",
         message_template: campaign.message_template,
@@ -516,22 +560,14 @@ export default function CampaignsPage() {
       const cron_expression = form.schedule_enabled && form.schedule_days.length > 0
         ? buildCronExpression(form.schedule_time, form.schedule_days)
         : null
-      // Build extra filters with resolved days values
-      const resolvedExtraFilters = form.extra_filters
-        .filter((f) => f.column.trim())
-        .map((f) => ({
-          column: f.column.trim(),
-          days: f.days === 0 ? (parseInt(f.days_custom, 10) || 1) : f.days,
-        }))
+      // Build value filters (generic column=value filters)
+      const resolvedValueFilters = form.value_filters.filter((f) => f.column.trim() && f.value.trim())
 
-      // When there are extra filters, generate combined DAX and clear simple-mode fields
-      const hasExtraFilters = !form.advanced_mode && hasPbFields && resolvedExtraFilters.length > 0
-      const allFilters = hasExtraFilters ? [
-        ...(form.date_column.trim() && days ? [{ column: form.date_column.trim(), days }] : []),
-        ...resolvedExtraFilters,
-      ] : []
-      const generatedDax = hasExtraFilters && allFilters.length > 0
-        ? buildSimpleFiltersDax(form.customer_table.trim(), form.name_column.trim(), form.phone_column.trim(), allFilters)
+      // When there are any filters, generate combined DAX
+      const dateFilters = form.date_column.trim() && days ? [{ column: form.date_column.trim(), days }] : []
+      const hasAnyFilters = !form.advanced_mode && hasPbFields && (dateFilters.length > 0 || resolvedValueFilters.length > 0)
+      const generatedDax = hasAnyFilters
+        ? buildSimpleFiltersDax(form.customer_table.trim(), form.name_column.trim(), form.phone_column.trim(), dateFilters, resolvedValueFilters)
         : null
 
       const payload = {
@@ -541,11 +577,11 @@ export default function CampaignsPage() {
         dataset_id: form.dataset_id.trim(),
         workspace_id: form.workspace_id.trim() || null,
         dax_query: form.advanced_mode ? (form.dax_query.trim() || null) : (generatedDax ?? null),
-        customer_table: (form.advanced_mode || hasExtraFilters) ? null : (form.customer_table.trim() || null),
-        date_column: (form.advanced_mode || hasExtraFilters) ? null : (form.date_column.trim() || null),
-        days_inactive: (form.advanced_mode || hasExtraFilters) ? null : days,
-        phone_column: (form.advanced_mode || hasExtraFilters) ? null : (form.phone_column.trim() || null),
-        name_column: (form.advanced_mode || hasExtraFilters) ? null : (form.name_column.trim() || null),
+        customer_table: (form.advanced_mode || hasAnyFilters) ? null : (form.customer_table.trim() || null),
+        date_column: (form.advanced_mode || hasAnyFilters) ? null : (form.date_column.trim() || null),
+        days_inactive: (form.advanced_mode || hasAnyFilters) ? null : days,
+        phone_column: (form.advanced_mode || hasAnyFilters) ? null : (form.phone_column.trim() || null),
+        name_column: (form.advanced_mode || hasAnyFilters) ? null : (form.name_column.trim() || null),
         message_template: form.message_template.trim(),
         image_url: form.image_url.trim() || null,
         bot_instance_id: form.bot_instance_id || null,
@@ -1062,72 +1098,69 @@ export default function CampaignsPage() {
                       {formErrors.days && <p className="text-xs text-destructive">{formErrors.days}</p>}
                     </div>
 
-                    {/* Filtros extras */}
+                    {/* Filtros de valor */}
                     <div className="flex flex-col gap-2 mb-3">
-                      {form.extra_filters.map((ef, idx) => (
-                          <div key={idx} className="flex flex-col gap-1.5 rounded-md border border-border p-2">
-                            <div className="flex items-center justify-between">
-                              <Label className="text-xs">Coluna de filtro {idx + 2}</Label>
-                              <button
-                                type="button"
-                                onClick={() => setForm((prev) => ({
-                                  ...prev,
-                                  extra_filters: prev.extra_filters.filter((_, i) => i !== idx),
-                                }))}
-                                className="text-muted-foreground hover:text-destructive"
-                              >
-                                <X className="size-3.5" />
-                              </button>
-                            </div>
-                            <ColumnSelect
-                              columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
-                              value={ef.column}
-                              onChange={(v) => setForm((prev) => ({
+                      {form.value_filters.map((vf, idx) => (
+                        <div key={idx} className="flex flex-col gap-1.5 rounded-md border border-border p-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Filtro {idx + 1}</Label>
+                            <button
+                              type="button"
+                              onClick={() => setForm((prev) => ({
                                 ...prev,
-                                extra_filters: prev.extra_filters.map((f, i) => i === idx ? { ...f, column: v } : f),
+                                value_filters: prev.value_filters.filter((_, i) => i !== idx),
                               }))}
-                              placeholder="Buscar coluna..."
-                              disabled={!form.customer_table}
-                            />
-                            <div className="flex flex-wrap gap-1.5">
-                              {DAYS_OPTIONS.map((opt) => (
-                                <button
-                                  key={opt.value}
-                                  type="button"
-                                  onClick={() => setForm((prev) => ({
-                                    ...prev,
-                                    extra_filters: prev.extra_filters.map((f, i) => i === idx ? { ...f, days: opt.value } : f),
-                                  }))}
-                                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                                    ef.days === opt.value
-                                      ? "border-primary bg-primary text-primary-foreground"
-                                      : "border-border bg-background hover:bg-accent"
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                            {ef.days === 0 && (
-                              <Input
-                                type="number"
-                                min={1}
-                                value={ef.days_custom}
-                                onChange={(e) => setForm((prev) => ({
-                                  ...prev,
-                                  extra_filters: prev.extra_filters.map((f, i) => i === idx ? { ...f, days_custom: e.target.value } : f),
-                                }))}
-                                placeholder="Ex: 45"
-                                className="w-28 mt-1"
-                              />
-                            )}
+                              className="text-muted-foreground hover:text-destructive"
+                            >
+                              <X className="size-3.5" />
+                            </button>
                           </div>
-                        ))}
+                          <ColumnSelect
+                            columns={allColumnsForTable(form.customer_table).map((c) => c.columnName)}
+                            value={vf.column}
+                            onChange={(v) => setForm((prev) => ({
+                              ...prev,
+                              value_filters: prev.value_filters.map((f, i) => i === idx ? { ...f, column: v } : f),
+                            }))}
+                            placeholder="Buscar coluna..."
+                            disabled={!form.customer_table}
+                          />
+                          <div className="flex gap-2">
+                            <Select
+                              value={vf.operator}
+                              onValueChange={(v) => setForm((prev) => ({
+                                ...prev,
+                                value_filters: prev.value_filters.map((f, i) => i === idx ? { ...f, operator: v as ValueFilter["operator"] } : f),
+                              }))}
+                            >
+                              <SelectTrigger className="w-44 text-xs h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {OPERATOR_OPTIONS.map((op) => (
+                                  <SelectItem key={op.value} value={op.value} className="text-xs">
+                                    {op.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Input
+                              value={vf.value}
+                              onChange={(e) => setForm((prev) => ({
+                                ...prev,
+                                value_filters: prev.value_filters.map((f, i) => i === idx ? { ...f, value: e.target.value } : f),
+                              }))}
+                              placeholder="Valor..."
+                              className="flex-1 h-8 text-xs"
+                            />
+                          </div>
+                        </div>
+                      ))}
                       <button
                         type="button"
                         onClick={() => setForm((prev) => ({
                           ...prev,
-                          extra_filters: [...prev.extra_filters, { ...EMPTY_EXTRA_FILTER }],
+                          value_filters: [...prev.value_filters, { ...EMPTY_VALUE_FILTER }],
                         }))}
                         disabled={!form.customer_table}
                         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit disabled:opacity-40 disabled:cursor-not-allowed"

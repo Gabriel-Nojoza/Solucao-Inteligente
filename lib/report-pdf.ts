@@ -298,7 +298,9 @@ export async function captureReportAsPdf(input: {
   viewportWidth?: number
   viewportHeight?: number
   tokenType?: "Embed" | "Aad"
+  timeoutMs?: number
 }): Promise<Buffer> {
+  const overallTimeoutMs = input.timeoutMs ?? 120_000
   const executablePath = await findChromePath()
   // A6 landscape em 96dpi: 148mm × 105mm → 559 × 397px
   const width = input.viewportWidth ?? 559
@@ -376,13 +378,11 @@ export async function captureReportAsPdf(input: {
 
   await acquireCaptureSemaphore()
 
-  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
-  let localServer: { url: string; close: () => Promise<void> } | null = null
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 
-  try {
-    localServer = await serveHtmlLocally(html)
-
-    browser = await puppeteer.launch({
+  const doCapture = async (): Promise<Buffer> => {
+    const localServer = await serveHtmlLocally(html)
+    const browser = await puppeteer.launch({
       executablePath,
       headless: true,
       args: [
@@ -392,28 +392,29 @@ export async function captureReportAsPdf(input: {
         "--disable-gpu",
         "--force-color-profile=srgb",
       ],
-      timeout: 90000,
+      timeout: 30000,
     })
-
-    const page = await browser.newPage()
-    await page.setViewport({ width, height, deviceScaleFactor: 1 })
-
-    page.on("console", (msg) => {
-      console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
-    })
-    page.on("pageerror", (err: unknown) => {
-      console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
-    })
-
-    await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
 
     try {
-      await page.waitForFunction("window._pbiRendered === true", { timeout: 120000 })
-    } catch (waitErr) {
-      const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
-      if (pbiError) throw new Error(`Power BI render error: ${pbiError}`)
-      throw waitErr
-    }
+      const page = await browser.newPage()
+      await page.setViewport({ width, height, deviceScaleFactor: 1 })
+
+      page.on("console", (msg) => {
+        console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
+      })
+      page.on("pageerror", (err: unknown) => {
+        console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
+      })
+
+      await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 15000 })
+
+      try {
+        await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
+      } catch {
+        const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
+        if (pbiError) throw new Error(`Power BI erro ao renderizar: ${pbiError}`)
+        throw new Error("Tempo esgotado aguardando renderização do Power BI (60s) — verifique autenticação e se o relatório está acessível no Power BI")
+      }
 
     await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {})
     await new Promise((r) => setTimeout(r, 2000))
@@ -493,10 +494,29 @@ export async function captureReportAsPdf(input: {
     }
     const mergedBytes = await merged.save()
     return Buffer.from(mergedBytes)
+    } finally {
+      await browser.close().catch(() => {})
+      await localServer.close().catch(() => {})
+    }
+  }
 
+  try {
+    const result = await Promise.race([
+      doCapture(),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(
+            `Tempo limite ao capturar relatório via Chrome (${Math.round(overallTimeoutMs / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
+          ))
+        }, overallTimeoutMs)
+      }),
+    ])
+    clearTimeout(timeoutHandle!)
+    return result
+  } catch (err) {
+    clearTimeout(timeoutHandle!)
+    throw err
   } finally {
-    if (browser) await browser.close().catch(() => {})
-    if (localServer) await localServer.close().catch(() => {})
     releaseCaptureSemaphore()
   }
 }
