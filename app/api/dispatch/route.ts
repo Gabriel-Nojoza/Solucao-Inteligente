@@ -27,6 +27,7 @@ import {
 } from "@/lib/powerbi-report-pdf"
 import {
   getAccessToken,
+  getAccessTokenMasterUser,
   generateReportEmbedToken,
   isPowerBiFeatureNotAvailableError,
   getReportPages,
@@ -63,17 +64,34 @@ async function exportDocumentWithFallback(input: {
     })
   } catch (err) {
     if (!isPowerBiFeatureNotAvailableError(err) || !input.embedUrl) throw err
-    console.log("[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (embed token)")
-    const embedToken = await generateReportEmbedToken(serviceToken, input.workspaceId, input.reportId)
-    const pdfBuffer = await captureReportAsPdf({
-      embedUrl: input.embedUrl,
-      embedToken,
-      reportId: input.reportId,
-      pageName: input.pageName ?? null,
-      pageNames: input.pageNames,
-      tokenType: "Embed",
-    })
-    return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
+
+    // Tenta Chrome com embed token (service principal, sem master user)
+    try {
+      console.log("[dispatch] ExportTo indisponivel — tentando Chrome com embed token")
+      const embedToken = await generateReportEmbedToken(serviceToken, input.workspaceId, input.reportId)
+      const pdfBuffer = await captureReportAsPdf({
+        embedUrl: input.embedUrl,
+        embedToken,
+        reportId: input.reportId,
+        pageName: input.pageName ?? null,
+        pageNames: input.pageNames,
+        tokenType: "Embed",
+      })
+      return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
+    } catch (embedErr) {
+      // Embed token nao suportado nesta capacidade — tenta master user (AAD)
+      console.log("[dispatch] embed token falhou — tentando Chrome com master user (AAD)", String(embedErr))
+      const masterToken = await getAccessTokenMasterUser(input.companyId)
+      const pdfBuffer = await captureReportAsPdf({
+        embedUrl: input.embedUrl,
+        embedToken: masterToken,
+        reportId: input.reportId,
+        pageName: input.pageName ?? null,
+        pageNames: input.pageNames,
+        tokenType: "Aad",
+      })
+      return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
+    }
   }
 }
 
