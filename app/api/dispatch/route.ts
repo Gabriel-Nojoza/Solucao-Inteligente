@@ -164,7 +164,7 @@ async function sendWithFallback(
   } catch (err) {
     const notConnected =
       err instanceof Error &&
-      (err.message.includes("nao conectado") || err.message.includes("not connected"))
+      (err.message.includes("nao conectado") || err.message.includes("not connected") || err.message.includes("nao autenticado"))
     if (notConnected && payload.instance_id !== fallbackInstanceId && fallbackInstanceId) {
       await sendWhatsAppBotMessage({ ...payload, instance_id: fallbackInstanceId })
     } else {
@@ -337,11 +337,9 @@ async function handleDispatch(request: NextRequest) {
 
   const originalBotInstanceId = schedule.bot_instance_id ?? null
 
-  // Only resolve to a different instance when the schedule already specifies a preference.
-  // When null, leave null so the bot service uses its default connected socket.
-  const resolvedBotInstance = originalBotInstanceId
-    ? await resolveConnectedBotInstance(supabase, companyId, originalBotInstanceId).catch(() => null)
-    : null
+  const resolvedBotInstance = await resolveConnectedBotInstance(
+    supabase, companyId, originalBotInstanceId ?? undefined
+  ).catch(() => null)
   if (resolvedBotInstance) {
     schedule.bot_instance_id = resolvedBotInstance.id
   }
