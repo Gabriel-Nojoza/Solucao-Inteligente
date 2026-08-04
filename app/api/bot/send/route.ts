@@ -85,6 +85,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Bot service strips the 9th digit from Brazilian numbers when resolving from phone.
+    // Pass jid directly so the bot uses the number as-is without normalization.
+    if (!payload.jid && payload.phone && !payload.whatsapp_group_id) {
+      payload.jid = `${payload.phone}@s.whatsapp.net`
+      payload.phone = null
+    }
+
     if (
       !payload.message &&
       !payload.caption &&
