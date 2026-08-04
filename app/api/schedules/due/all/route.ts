@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { isSameMinuteInTimeZone, matchesCronValue } from "@/lib/schedule-cron"
+import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 
 type ScheduleRow = {
   id: string
@@ -62,7 +63,21 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const { data: dispatchSettingsRows } = await supabase
+      .from("company_settings")
+      .select("company_id, value")
+      .eq("key", "dispatch_settings")
+
+    const dispatchEnabledCompanies = new Set<string>()
+    for (const row of dispatchSettingsRows ?? []) {
+      const cfg = normalizeDispatchSettings(row.value, now)
+      if (cfg.effectiveEnabled) {
+        dispatchEnabledCompanies.add(row.company_id)
+      }
+    }
+
     const dueSchedules = ((schedules ?? []) as ScheduleRow[]).filter((schedule) => {
+      if (!dispatchEnabledCompanies.has(schedule.company_id)) return false
       if (!schedule.cron_expression?.trim()) return false
 
       const timeZone = timezoneByCompany.get(schedule.company_id) ?? "America/Sao_Paulo"
