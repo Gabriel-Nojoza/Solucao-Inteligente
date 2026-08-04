@@ -449,7 +449,7 @@ async function handleDispatch(request: NextRequest) {
         try {
           await sendWithFallback({
             instance_id: schedule.bot_instance_id ?? null,
-            phone: contact.phone,
+            jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
             whatsapp_group_id: contact.whatsapp_group_id,
             message: null,
             document_url: imageUrl,
@@ -764,7 +764,7 @@ async function handleDispatch(request: NextRequest) {
 
                   await sendWithFallback({
                     instance_id: schedule.bot_instance_id ?? null,
-                    phone: contact.phone,
+                    jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
                     whatsapp_group_id: contact.whatsapp_group_id,
                     message: pageIndex === 0 ? reportMessage : null,
                     document_base64: Buffer.from(exportedFile.buffer).toString("base64"),
@@ -851,7 +851,7 @@ async function handleDispatch(request: NextRequest) {
 
                 await sendWithFallback({
                   instance_id: schedule.bot_instance_id ?? null,
-                  phone: contact.phone,
+                  jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
                   whatsapp_group_id: contact.whatsapp_group_id,
                   message: reportMessage,
                   document_base64: Buffer.from(exportedFile.buffer).toString("base64"),
