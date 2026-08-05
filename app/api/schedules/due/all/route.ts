@@ -63,6 +63,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const { data: companiesRows } = await supabase
+      .from("companies")
+      .select("id, name")
+
+    const companyNameById = new Map<string, string>(
+      (companiesRows ?? []).map((c) => [c.id, c.name])
+    )
+
     const { data: dispatchSettingsRows } = await supabase
       .from("company_settings")
       .select("company_id, value")
@@ -115,6 +123,7 @@ export async function GET(request: NextRequest) {
       schedules: dueSchedules.map((schedule) => ({
         id: schedule.id,
         company_id: schedule.company_id,
+        company_name: companyNameById.get(schedule.company_id) ?? schedule.company_id,
         name: schedule.name,
         report_id: schedule.report_id,
         cron_expression: schedule.cron_expression,

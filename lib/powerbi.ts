@@ -63,6 +63,7 @@ function applyCustomChatMeasuresToSnapshot(
 }
 
 const embedTokenCache = new Map<string, EmbedTokenCacheEntry>()
+const workspaceEmbedTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const accessTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const masterUserTokenCache = new Map<string, EmbedTokenCacheEntry>()
 const fabricTokenCache = new Map<string, EmbedTokenCacheEntry>()
@@ -598,6 +599,77 @@ export async function generateReportEmbedToken(
   embedTokenCache.set(cacheKey, embedEntry)
   const embedTtl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
   await redisSet(cacheKey, JSON.stringify(embedEntry), embedTtl)
+
+  return embedToken
+}
+
+export async function generateWorkspaceEmbedToken(
+  token: string,
+  workspaceId: string
+): Promise<string> {
+  const cacheKey = `pbi:workspace-embed:${workspaceId}`
+  const SAFETY_MARGIN_MS = 5 * 60 * 1000
+
+  const memCached = workspaceEmbedTokenCache.get(cacheKey)
+  if (memCached && memCached.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+    return memCached.token
+  }
+
+  const redisCached = await redisGet(cacheKey)
+  if (redisCached) {
+    try {
+      const parsed = JSON.parse(redisCached) as EmbedTokenCacheEntry
+      if (parsed.expiresAt - SAFETY_MARGIN_MS > Date.now()) {
+        workspaceEmbedTokenCache.set(cacheKey, parsed)
+        return parsed.token
+      }
+    } catch {}
+  }
+
+  const reportsRes = await fetch(`${PBI_API_BASE}/groups/${workspaceId}/reports`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!reportsRes.ok) {
+    await throwPowerBiApiError("Falha ao listar relatorios do workspace para token", reportsRes)
+  }
+  const reportsData = (await reportsRes.json()) as { value?: Array<{ id: string; datasetId: string }> }
+  const reports = reportsData.value ?? []
+
+  if (reports.length === 0) {
+    throw new Error("Nenhum relatorio encontrado no workspace")
+  }
+
+  const uniqueDatasetIds = [...new Set(reports.map((r) => r.datasetId).filter(Boolean))]
+
+  const response = await fetch(`${PBI_API_BASE}/GenerateToken`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      datasets: uniqueDatasetIds.map((id) => ({ id })),
+      reports: reports.map((r) => ({ id: r.id, allowEdit: false })),
+      targetWorkspaces: [{ id: workspaceId }],
+    }),
+  })
+
+  if (!response.ok) {
+    await throwPowerBiApiError("Falha ao gerar token de workspace do Power BI", response)
+  }
+
+  const data = (await response.json()) as { token?: string | null; expiration?: string | null }
+  const embedToken = typeof data.token === "string" ? data.token.trim() : ""
+
+  if (!embedToken) {
+    throw new Error("Power BI nao retornou token de workspace")
+  }
+
+  const expiresAt = data.expiration ? Date.parse(data.expiration) : Date.now() + 60 * 60 * 1000
+  const entry = { token: embedToken, expiresAt }
+  workspaceEmbedTokenCache.set(cacheKey, entry)
+  const ttl = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 300)
+  await redisSet(cacheKey, JSON.stringify(entry), ttl)
 
   return embedToken
 }

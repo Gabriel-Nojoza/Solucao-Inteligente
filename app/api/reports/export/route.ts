@@ -9,6 +9,7 @@ import {
   getExportStatus,
   isPowerBiEntityNotFoundError,
   isPowerBiFeatureNotAvailableError,
+  generateWorkspaceEmbedToken,
 } from "@/lib/powerbi"
 import {
   exportPowerBIReportDocument,
@@ -331,11 +332,16 @@ export async function POST(request: NextRequest) {
         if (format === "PDF") {
           return jsonError("Master user nao configurado. Configure em Admin > Usuarios > Power BI (Master User).", 500)
         }
-        // PNG sem master user: captura via embed token (service principal)
+        // PNG sem master user: captura via workspace embed token (1 token para todos os relatorios do workspace)
         const embedUrl = report.embed_url ||
           `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
         try {
-          const embedToken = await generateReportEmbedToken(token, workspace.pbi_workspace_id, report.pbi_report_id)
+          let embedToken: string
+          try {
+            embedToken = await generateWorkspaceEmbedToken(token, workspace.pbi_workspace_id)
+          } catch {
+            embedToken = await generateReportEmbedToken(token, workspace.pbi_workspace_id, report.pbi_report_id)
+          }
           const pngBuffer = await captureReportScreenshot({
             embedUrl,
             embedToken,
