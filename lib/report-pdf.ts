@@ -203,68 +203,80 @@ export async function captureReportScreenshot(input: {
 
   await acquireCaptureSemaphore()
 
-  const maxAttempts = 1
-  let lastError: unknown
+  const overallTimeoutMs = 120_000
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let activeBrowser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
+
+  const doCapture = async (): Promise<Buffer> => {
+    let localServer: { url: string; close: () => Promise<void> } | null = null
+    try {
+      localServer = await serveHtmlLocally(html)
+
+      activeBrowser = await puppeteer.launch({
+        executablePath,
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--force-color-profile=srgb"],
+        timeout: 90000,
+      })
+
+      const page = await activeBrowser.newPage()
+      await page.setViewport({ width, height, deviceScaleFactor: scaleFactor })
+
+      page.on("console", (msg) => {
+        console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
+      })
+      page.on("pageerror", (err: unknown) => {
+        console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
+      })
+
+      await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
+
+      try {
+        await page.waitForFunction("window._pbiRendered === true", { timeout: 100000 })
+      } catch (waitErr) {
+        const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
+        const debugPath = path.join(process.cwd(), "public", `pbi_debug_${Date.now()}.png`)
+        await page.screenshot({ path: debugPath }).catch(() => {})
+        console.log(`[captureReportScreenshot] screenshot de debug salvo: ${debugPath}`)
+        if (pbiError) {
+          throw new Error(`Power BI render error: ${pbiError}`)
+        }
+        throw waitErr
+      }
+
+      const element = await page.$("#pbi-container")
+      if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
+
+      const screenshot = await element.screenshot({ type: "png" })
+      return Buffer.from(screenshot)
+    } finally {
+      if (activeBrowser) await activeBrowser.close().catch(() => {})
+      if (localServer) await localServer.close().catch(() => {})
+    }
+  }
 
   try {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
-      let localServer: { url: string; close: () => Promise<void> } | null = null
-      try {
-        localServer = await serveHtmlLocally(html)
-
-        browser = await puppeteer.launch({
-          executablePath,
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--force-color-profile=srgb"],
-          timeout: 90000,
-        })
-
-        const page = await browser.newPage()
-        await page.setViewport({ width, height, deviceScaleFactor: scaleFactor })
-
-        page.on("console", (msg) => {
-          console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
-        })
-        page.on("pageerror", (err: unknown) => {
-          console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
-        })
-
-        await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
-
-        try {
-          await page.waitForFunction("window._pbiRendered === true", { timeout: 120000 })
-        } catch (waitErr) {
-          const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
-          const debugPath = path.join(process.cwd(), "public", `pbi_debug_${Date.now()}.png`)
-          await page.screenshot({ path: debugPath }).catch(() => {})
-          console.log(`[captureReportScreenshot] screenshot de debug salvo: ${debugPath}`)
-          if (pbiError) {
-            throw new Error(`Power BI render error: ${pbiError}`)
-          }
-          throw waitErr
-        }
-
-        const element = await page.$("#pbi-container")
-        if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
-
-        const screenshot = await element.screenshot({ type: "png" })
-        return Buffer.from(screenshot)
-      } catch (err) {
-        lastError = err
-        if (attempt < maxAttempts) {
-          console.warn(`[captureReportScreenshot] Tentativa ${attempt} falhou, retentando...`, err)
-        }
-      } finally {
-        if (browser) await browser.close().catch(() => {})
-        if (localServer) await localServer.close().catch(() => {})
-      }
-    }
+    const result = await Promise.race([
+      doCapture(),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          const pid = activeBrowser?.process()?.pid
+          activeBrowser?.close().catch(() => {})
+          if (pid) setTimeout(() => { try { process.kill(pid, "SIGKILL") } catch {} }, 1000)
+          reject(new Error(
+            `Tempo limite ao capturar screenshot via Chrome (${Math.round(overallTimeoutMs / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
+          ))
+        }, overallTimeoutMs)
+      }),
+    ])
+    clearTimeout(timeoutHandle!)
+    return result
+  } catch (err) {
+    clearTimeout(timeoutHandle!)
+    throw err
   } finally {
     releaseCaptureSemaphore()
   }
-
-  throw lastError
 }
 
 async function injectPrintColorAdjust(page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>): Promise<void> {
@@ -379,10 +391,11 @@ export async function captureReportAsPdf(input: {
   await acquireCaptureSemaphore()
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let activeBrowserPdf: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
 
   const doCapture = async (): Promise<Buffer> => {
     const localServer = await serveHtmlLocally(html)
-    const browser = await puppeteer.launch({
+    activeBrowserPdf = await puppeteer.launch({
       executablePath,
       headless: true,
       args: [
@@ -394,6 +407,7 @@ export async function captureReportAsPdf(input: {
       ],
       timeout: 30000,
     })
+    const browser = activeBrowserPdf
 
     try {
       const page = await browser.newPage()
@@ -505,6 +519,9 @@ export async function captureReportAsPdf(input: {
       doCapture(),
       new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => {
+          const pid = activeBrowserPdf?.process()?.pid
+          activeBrowserPdf?.close().catch(() => {})
+          if (pid) setTimeout(() => { try { process.kill(pid, "SIGKILL") } catch {} }, 1000)
           reject(new Error(
             `Tempo limite ao capturar relatório via Chrome (${Math.round(overallTimeoutMs / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
           ))
