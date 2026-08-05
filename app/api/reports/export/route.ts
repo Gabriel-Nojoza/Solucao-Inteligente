@@ -484,6 +484,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!exportToken) {
+      return jsonError("Master user nao configurado. Configure em Admin > Usuarios > Power BI (Master User).", 500)
+    }
+
     try {
       console.log("[reports/export] falling back to native Power BI export", {
         reportId: report.id,
