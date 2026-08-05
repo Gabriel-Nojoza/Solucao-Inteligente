@@ -326,42 +326,41 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // PNG sem master user: captura via embed token (service principal), mesmo caminho do htmlCapture
-    if (format === "PNG" && !exportToken) {
-      const embedUrl = report.embed_url ||
-        `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
-      const embedToken = await generateReportEmbedToken(token, workspace.pbi_workspace_id, report.pbi_report_id)
-      try {
-        const pngBuffer = await captureReportScreenshot({
-          embedUrl,
-          embedToken,
-          reportId: report.pbi_report_id,
-          pageName: pbiPageName ?? null,
-          deviceScaleFactor: 2,
-        })
-        return new Response(pngBuffer, {
-          status: 200,
-          headers: {
-            "Content-Type": "image/png",
-            "Content-Disposition": `inline; filename="${safeName}.png"`,
-            "Cache-Control": "no-store",
-          },
-        })
-      } catch (embedPngError) {
-        if (isPowerBiEntityNotFoundError(embedPngError)) {
-          await deactivateMissingReport(supabase, companyId, report.id)
-          return jsonError(getMissingReportMessage(), 404)
-        }
-        return jsonError(
-          `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(embedPngError) || "Tente novamente."}`,
-          500
-        )
-      }
-    }
-
     if ((format === "PDF" || format === "PNG") && !preferNativePowerBiExport) {
       if (!exportToken) {
-        return jsonError("Master user nao configurado. Configure em Admin > Usuarios > Power BI (Master User).", 500)
+        if (format === "PDF") {
+          return jsonError("Master user nao configurado. Configure em Admin > Usuarios > Power BI (Master User).", 500)
+        }
+        // PNG sem master user: captura via embed token (service principal)
+        const embedUrl = report.embed_url ||
+          `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
+        try {
+          const embedToken = await generateReportEmbedToken(token, workspace.pbi_workspace_id, report.pbi_report_id)
+          const pngBuffer = await captureReportScreenshot({
+            embedUrl,
+            embedToken,
+            reportId: report.pbi_report_id,
+            pageName: pbiPageName ?? null,
+            deviceScaleFactor: 2,
+          })
+          return new Response(pngBuffer, {
+            status: 200,
+            headers: {
+              "Content-Type": "image/png",
+              "Content-Disposition": `inline; filename="${safeName}.png"`,
+              "Cache-Control": "no-store",
+            },
+          })
+        } catch (embedPngError) {
+          if (isPowerBiEntityNotFoundError(embedPngError)) {
+            await deactivateMissingReport(supabase, companyId, report.id)
+            return jsonError(getMissingReportMessage(), 404)
+          }
+          return jsonError(
+            `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(embedPngError) || "Tente novamente."}`,
+            500
+          )
+        }
       }
       try {
         console.log("[reports/export] generating via browser capture", {
