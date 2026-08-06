@@ -327,6 +327,72 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // PNG com master user: ExportTo API primeiro (sem Chrome), Chrome como fallback
+    if (format === "PNG" && exportToken) {
+      try {
+        console.log("[reports/export] PNG via ExportTo API", {
+          reportId: report.id,
+          workspaceId: workspace.pbi_workspace_id,
+          pbiReportId: report.pbi_report_id,
+          pbiPageNames,
+        })
+        const exportedPng = await exportFileFromPowerBi({
+          token: exportToken,
+          workspaceId: workspace.pbi_workspace_id,
+          reportId: report.pbi_report_id,
+          format: "PNG",
+          pageNames: pbiPageNames,
+        })
+        return new Response(exportedPng, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Disposition": `inline; filename="${safeName}.png"`,
+            "Cache-Control": "no-store",
+          },
+        })
+      } catch (exportToPngError) {
+        if (isPowerBiEntityNotFoundError(exportToPngError)) {
+          await deactivateMissingReport(supabase, companyId, report.id)
+          return jsonError(getMissingReportMessage(), 404)
+        }
+        console.log(`[reports/export] ExportTo PNG falhou (${getErrorMessage(exportToPngError)}) — tentando Chrome screenshot`)
+      }
+
+      // Fallback: Chrome com token AAD do master user
+      const embedUrlForPng = report.embed_url ||
+        `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
+      try {
+        const chromePng = await captureReportScreenshot({
+          embedUrl: embedUrlForPng,
+          embedToken: exportToken,
+          reportId: report.pbi_report_id,
+          pageName: pbiPageName ?? null,
+          tokenType: "Aad",
+          viewportWidth: 3840,
+          viewportHeight: 2160,
+          deviceScaleFactor: 1,
+        })
+        return new Response(chromePng, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Disposition": `inline; filename="${safeName}.png"`,
+            "Cache-Control": "no-store",
+          },
+        })
+      } catch (chromePngError) {
+        if (isPowerBiEntityNotFoundError(chromePngError)) {
+          await deactivateMissingReport(supabase, companyId, report.id)
+          return jsonError(getMissingReportMessage(), 404)
+        }
+        return jsonError(
+          `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(chromePngError) || "Tente novamente."}`,
+          500
+        )
+      }
+    }
+
     if ((format === "PDF" || format === "PNG") && !preferNativePowerBiExport) {
       if (!exportToken) {
         if (format === "PDF") {
@@ -390,18 +456,6 @@ export async function POST(request: NextRequest) {
           pdfProfile,
         })
 
-        if (format === "PNG") {
-          const pngBuffer = await pdfToPng(exportedFile.buffer)
-          return new Response(pngBuffer, {
-            status: 200,
-            headers: {
-              "Content-Type": "image/png",
-              "Content-Disposition": `inline; filename="${safeName}.png"`,
-              "Cache-Control": "no-store",
-            },
-          })
-        }
-
         return new Response(exportedFile.buffer, {
           status: 200,
           headers: {
@@ -414,43 +468,6 @@ export async function POST(request: NextRequest) {
         if (isPowerBiEntityNotFoundError(browserPdfError)) {
           await deactivateMissingReport(supabase, companyId, report.id)
           return jsonError(getMissingReportMessage(), 404)
-        }
-
-        // PNG: captura screenshot em alta resolução via Chrome (1920×1080 @2x = 3840×2160)
-        if (format === "PNG") {
-          const nativePngErrMsg = getErrorMessage(browserPdfError)
-          const embedUrlForChrome = report.embed_url ||
-            `https://app.powerbi.com/reportEmbed?reportId=${report.pbi_report_id}&groupId=${workspace.pbi_workspace_id}`
-          console.log(`[reports/export] PNG via API nativa falhou (${nativePngErrMsg}) — capturando screenshot via Chrome`, { embedUrlForChrome })
-          try {
-            const chromePng = await captureReportScreenshot({
-              embedUrl: embedUrlForChrome,
-              embedToken: exportToken,
-              reportId: report.pbi_report_id,
-              pageName: pbiPageName ?? null,
-              tokenType: "Aad",
-              viewportWidth: 3840,
-              viewportHeight: 2160,
-              deviceScaleFactor: 1,
-            })
-            return new Response(chromePng, {
-              status: 200,
-              headers: {
-                "Content-Type": "image/png",
-                "Content-Disposition": `inline; filename="${safeName}.png"`,
-                "Cache-Control": "no-store",
-              },
-            })
-          } catch (chromePngError) {
-            if (isPowerBiEntityNotFoundError(chromePngError)) {
-              await deactivateMissingReport(supabase, companyId, report.id)
-              return jsonError(getMissingReportMessage(), 404)
-            }
-            return jsonError(
-              `Nao foi possivel exportar o relatorio em PNG. ${getErrorMessage(chromePngError) || "Tente novamente."}`,
-              500
-            )
-          }
         }
 
         // PDF: se nao tem capacidade Premium, tenta captura via Chrome como fallback
