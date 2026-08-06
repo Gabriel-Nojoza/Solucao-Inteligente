@@ -144,135 +144,43 @@ export async function captureReportScreenshot(input: {
   deviceScaleFactor?: number
   tokenType?: "Embed" | "Aad"
 }): Promise<Buffer> {
-  const executablePath = await findChromePath()
-  const width = input.viewportWidth ?? 1280
-  const height = input.viewportHeight ?? 1600
-  const scaleFactor = input.deviceScaleFactor ?? 2
-  const powerBiClientJs = loadPowerBiClientJs()
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: #fff; width: ${width}px; height: ${height}px; }
-    #pbi-container { width: ${width}px; height: ${height}px; }
-  </style>
-</head>
-<body>
-  <div id="pbi-container"></div>
-  <script>${powerBiClientJs}</script>
-  <script>
-    window._pbiRendered = false;
-    window._pbiError = null;
-
-    var models = window['powerbi-client'].models;
-    var container = document.getElementById('pbi-container');
-    var config = {
-      type: 'report',
-      id: ${JSON.stringify(input.reportId)},
-      embedUrl: ${JSON.stringify(input.embedUrl)},
-      accessToken: ${JSON.stringify(input.embedToken)},
-      tokenType: ${input.tokenType === "Aad" ? "models.TokenType.Aad" : "models.TokenType.Embed"},
-      ${input.pageName ? `pageName: ${JSON.stringify(input.pageName)},` : ""}
-      settings: {
-        filterPaneEnabled: false,
-        navContentPaneEnabled: false,
-        background: models.BackgroundType.Default,
-        layoutType: models.LayoutType.Custom,
-        customLayout: {
-          displayOption: models.DisplayOption.FitToPage,
-        },
-      },
-    };
-
-    var report = window['powerbi'].embed(container, config);
-
-    report.on('rendered', function() {
-      setTimeout(function() { window._pbiRendered = true; }, 3000);
-    });
-
-    report.on('error', function(event) {
-      window._pbiError = JSON.stringify(event.detail);
-      window._pbiRendered = true;
-    });
-  </script>
-</body>
-</html>`
+  const workerPath = path.join(process.cwd(), "scripts", "chrome-capture.js")
+  const captureInput = JSON.stringify({
+    embedUrl: input.embedUrl,
+    embedToken: input.embedToken,
+    reportId: input.reportId,
+    pageName: input.pageName ?? null,
+    viewportWidth: input.viewportWidth ?? 1280,
+    viewportHeight: input.viewportHeight ?? 1600,
+    deviceScaleFactor: input.deviceScaleFactor ?? 2,
+    tokenType: input.tokenType ?? "Embed",
+  })
 
   await acquireCaptureSemaphore()
-
-  const overallTimeoutMs = 120_000
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-  let activeBrowser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
-
-  const doCapture = async (): Promise<Buffer> => {
-    let localServer: { url: string; close: () => Promise<void> } | null = null
-    try {
-      localServer = await serveHtmlLocally(html)
-
-      activeBrowser = await puppeteer.launch({
-        executablePath,
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--force-color-profile=srgb"],
-        timeout: 90000,
-      })
-
-      const page = await activeBrowser.newPage()
-      await page.setViewport({ width, height, deviceScaleFactor: scaleFactor })
-
-      page.on("console", (msg) => {
-        console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
-      })
-      page.on("pageerror", (err: unknown) => {
-        console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
-      })
-
-      await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
-
-      try {
-        await page.waitForFunction("window._pbiRendered === true", { timeout: 100000 })
-      } catch (waitErr) {
-        const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
-        const debugPath = path.join(process.cwd(), "public", `pbi_debug_${Date.now()}.png`)
-        await page.screenshot({ path: debugPath }).catch(() => {})
-        console.log(`[captureReportScreenshot] screenshot de debug salvo: ${debugPath}`)
-        if (pbiError) {
-          throw new Error(`Power BI render error: ${pbiError}`)
-        }
-        throw waitErr
-      }
-
-      const element = await page.$("#pbi-container")
-      if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
-
-      const screenshot = await element.screenshot({ type: "png" })
-      return Buffer.from(screenshot)
-    } finally {
-      if (activeBrowser) await activeBrowser.close().catch(() => {})
-      if (localServer) await localServer.close().catch(() => {})
-    }
-  }
-
   try {
-    const result = await Promise.race([
-      doCapture(),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          const pid = activeBrowser?.process()?.pid
-          activeBrowser?.close().catch(() => {})
-          if (pid) setTimeout(() => { try { process.kill(pid, "SIGKILL") } catch {} }, 1000)
-          reject(new Error(
-            `Tempo limite ao capturar screenshot via Chrome (${Math.round(overallTimeoutMs / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
-          ))
-        }, overallTimeoutMs)
-      }),
-    ])
-    clearTimeout(timeoutHandle!)
-    return result
-  } catch (err) {
-    clearTimeout(timeoutHandle!)
+    console.log("[captureReportScreenshot] iniciando processo filho isolado", {
+      reportId: input.reportId,
+      tokenType: input.tokenType,
+    })
+    const { stdout } = await execFileAsync("node", [workerPath], {
+      timeout: 120_000,
+      maxBuffer: 100 * 1024 * 1024,
+      env: { ...process.env, CHROME_CAPTURE_INPUT: captureInput },
+      killSignal: "SIGKILL",
+      encoding: "utf8",
+    } as any)
+    return Buffer.from(String(stdout), "base64")
+  } catch (err: any) {
+    const stderr = err.stderr ?? ""
+    const killed = err.killed === true || err.signal === "SIGKILL"
+    if (killed) {
+      throw new Error(
+        "Tempo limite ao capturar screenshot via Chrome (120s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI."
+      )
+    }
+    if (stderr) {
+      throw new Error(`Falha ao capturar screenshot: ${stderr.trim()}`)
+    }
     throw err
   } finally {
     releaseCaptureSemaphore()
