@@ -41,6 +41,29 @@ export async function GET(request: NextRequest) {
     const supabase = createClient()
     const now = new Date()
 
+    // Expira dispatches travados a cada minuto (roda sempre)
+    {
+      const cutoff = new Date(now.getTime() - 5 * 60 * 1000).toISOString()
+      supabase
+        .from("dispatch_logs")
+        .update({
+          status: "failed",
+          error_message: "Timeout de entrega — sem confirmacao do bot apos 5 minutos",
+          completed_at: now.toISOString(),
+        })
+        .in("status", ["sending", "pending"])
+        .lt("created_at", cutoff)
+        .select("id")
+        .then(({ data }) => {
+          if (data && data.length > 0) {
+            console.log(`[due/all] expirou ${data.length} dispatch(es) travados (>5min)`)
+          }
+        })
+        .catch((err) => {
+          console.error("[due/all] erro ao expirar dispatches travados:", err)
+        })
+    }
+
     const { data: schedules, error } = await supabase
       .from("schedules")
       .select("*")
