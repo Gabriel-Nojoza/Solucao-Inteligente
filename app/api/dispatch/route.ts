@@ -643,8 +643,14 @@ async function handleDispatch(request: NextRequest) {
     )
   }
 
+  // Quando a rotina tem narracao configurada (audio/texto), a rotina precisa
+  // passar pelo n8n mesmo sendo PDF, porque a geracao de narracao (Gemini/TTS)
+  // so existe no fluxo do n8n. Sem narracao, PDF usa o caminho direto (mais
+  // rapido e confiavel, sem depender do n8n).
   const directPdfTargets =
-    normalizedScheduleExportFormat === "PDF" ? powerBiTargets : []
+    normalizedScheduleExportFormat === "PDF" && effectiveSendMode === "none"
+      ? powerBiTargets
+      : []
 
   const logs =
       directPdfTargets.length > 0
