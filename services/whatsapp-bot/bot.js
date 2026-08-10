@@ -841,6 +841,16 @@ async function sendGenericPayload(instance, input) {
     // pipeline de recompressao/thumbnail do WhatsApp, que estava corrompendo
     // relatorios PNG de forma intermitente. Como documento, os bytes vao direto.
     const isImage = false
+    console.log("[send] payload debug", {
+      jid,
+      mimeType: documentPayload.mimeType,
+      fileName: documentPayload.fileName,
+      bufferLength: documentPayload.buffer.length,
+      first8Bytes: documentPayload.buffer.subarray(0, 8).toString("hex"),
+    })
+    try {
+      fs.writeFileSync(`/root/last_bot_send_${Date.now()}.bin`, documentPayload.buffer)
+    } catch (e) {}
     await instance.socket.sendMessage(jid, isImage
       ? {
           image: documentPayload.buffer,
