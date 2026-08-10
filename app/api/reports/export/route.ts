@@ -454,6 +454,7 @@ export async function POST(request: NextRequest) {
           pageNames: pbiPageNames,
           pageName: pbiPageName,
           pdfProfile,
+          format: format as "PDF" | "PNG",
         })
 
         return new Response(exportedFile.buffer, {

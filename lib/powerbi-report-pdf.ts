@@ -90,6 +90,7 @@ export async function exportPowerBIReportDocument(input: {
   pageName?: string | null;
   pdfProfile?: PowerBiPdfProfile;
   autoUsePngForLargeReports?: boolean;
+  format?: "PDF" | "PNG";
 }) {
   const normalizedPageNames = Array.isArray(input.pageNames)
     ? [...new Set(input.pageNames.map((p) => p.trim()).filter(Boolean))]
@@ -102,20 +103,28 @@ export async function exportPowerBIReportDocument(input: {
         ? [input.pageName.trim()]
         : [];
 
+  const format = input.format ?? "PDF";
+
   const buffer = await exportFileFromPowerBi({
     token: input.token,
     workspaceId: input.workspaceId,
     reportId: input.reportId,
-    format: "PDF",
+    format,
     pageNames: selectedPageNames,
     pageName: selectedPageNames[0] ?? null,
   });
 
-  return {
-    buffer,
-    contentType: "application/pdf",
-    extension: "pdf",
-  } satisfies PowerBiExportedDocument;
+  return format === "PNG"
+    ? ({
+        buffer,
+        contentType: "image/png",
+        extension: "png",
+      } satisfies PowerBiExportedDocument)
+    : ({
+        buffer,
+        contentType: "application/pdf",
+        extension: "pdf",
+      } satisfies PowerBiExportedDocument);
 }
 
 export async function exportPowerBIReportPdf(input: {
