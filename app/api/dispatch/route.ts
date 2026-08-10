@@ -894,7 +894,7 @@ async function handleDispatch(request: NextRequest) {
                   mimetype: exportedFile.contentType,
                 }, resolvedBotInstance?.id ?? null)
               }
-            })
+            }, 4, 7000)
 
             if (currentLog) {
               await supabase
