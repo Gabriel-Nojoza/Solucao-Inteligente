@@ -643,14 +643,8 @@ async function handleDispatch(request: NextRequest) {
     )
   }
 
-  // PNG tambem usa o caminho direto (sem passar pelo n8n) quando e um unico
-  // relatorio/pagina — evita o hop extra pelo n8n, que se mostrou uma fonte
-  // adicional de instabilidade na entrega via WhatsApp.
   const directPdfTargets =
-    normalizedScheduleExportFormat === "PDF" ||
-    (normalizedScheduleExportFormat === "PNG" && !hasMultipleReports && !hasMultiplePagesInAnyReport)
-      ? powerBiTargets
-      : []
+    normalizedScheduleExportFormat === "PDF" ? powerBiTargets : []
 
   const logs =
       directPdfTargets.length > 0
