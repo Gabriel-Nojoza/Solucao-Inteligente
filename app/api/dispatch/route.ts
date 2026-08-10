@@ -30,7 +30,7 @@ import {
   isPowerBiFeatureNotAvailableError,
   getReportPages,
 } from "@/lib/powerbi"
-import { captureReportAsPdf } from "@/lib/report-pdf"
+import { captureReportAsPdf, captureReportScreenshot } from "@/lib/report-pdf"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
 import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
@@ -49,7 +49,9 @@ async function exportDocumentWithFallback(input: {
   embedUrl: string | null
   pageNames: string[] | null
   pageName: string | null | undefined
+  format?: "PDF" | "PNG"
 }): Promise<PowerBiExportedDocument> {
+  const format = input.format ?? "PDF"
   try {
     return await exportPowerBIReportDocument({
       token: input.pbiToken,
@@ -59,10 +61,24 @@ async function exportDocumentWithFallback(input: {
       embedUrl: input.embedUrl,
       pageNames: input.pageNames,
       pageName: input.pageName,
+      format,
     })
   } catch (err) {
     if (!isPowerBiFeatureNotAvailableError(err) || !input.embedUrl) throw err
-    console.log("[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (AAD)")
+    console.log(`[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (AAD, ${format})`)
+    if (format === "PNG") {
+      const pngBuffer = await captureReportScreenshot({
+        embedUrl: input.embedUrl,
+        embedToken: input.pbiToken,
+        reportId: input.reportId,
+        pageName: input.pageName ?? null,
+        tokenType: "Aad",
+        viewportWidth: 1920,
+        viewportHeight: 1080,
+        deviceScaleFactor: 1,
+      })
+      return { buffer: pngBuffer, contentType: "image/png", extension: "png" }
+    }
     const pdfBuffer = await captureReportAsPdf({
       embedUrl: input.embedUrl,
       embedToken: input.pbiToken,
@@ -627,8 +643,14 @@ async function handleDispatch(request: NextRequest) {
     )
   }
 
+  // PNG tambem usa o caminho direto (sem passar pelo n8n) quando e um unico
+  // relatorio/pagina — evita o hop extra pelo n8n, que se mostrou uma fonte
+  // adicional de instabilidade na entrega via WhatsApp.
   const directPdfTargets =
-    normalizedScheduleExportFormat === "PDF" ? powerBiTargets : []
+    normalizedScheduleExportFormat === "PDF" ||
+    (normalizedScheduleExportFormat === "PNG" && !hasMultipleReports && !hasMultiplePagesInAnyReport)
+      ? powerBiTargets
+      : []
 
   const logs =
       directPdfTargets.length > 0
@@ -855,6 +877,7 @@ async function handleDispatch(request: NextRequest) {
                   embedUrl: resolvedEmbedUrl,
                   pageNames: resolvedPageNames,
                   pageName: target.config.pbi_page_name,
+                  format: normalizedScheduleExportFormat === "PNG" ? "PNG" : "PDF",
                 })
 
                 console.log("[dispatch] sending document to bot", {
