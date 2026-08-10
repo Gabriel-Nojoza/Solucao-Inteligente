@@ -335,6 +335,24 @@ async function handleDispatch(request: NextRequest) {
     return NextResponse.json({ error: "Rotina nao encontrada" }, { status: 404 })
   }
 
+  // Se a rotina tiver varios WhatsApps vinculados (bot_instance_ids), sorteia
+  // um a cada disparo para variar o numero de envio. Caso contrario, usa o
+  // unico bot_instance_id configurado (comportamento anterior).
+  const rotationCandidates = Array.isArray((schedule as Record<string, unknown>).bot_instance_ids)
+    ? ((schedule as Record<string, unknown>).bot_instance_ids as string[]).filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0
+      )
+    : []
+  if (rotationCandidates.length > 0) {
+    const picked = rotationCandidates[Math.floor(Math.random() * rotationCandidates.length)]
+    schedule.bot_instance_id = picked
+    console.log("[dispatch] sorteado WhatsApp entre varios vinculados", {
+      scheduleId: schedule.id,
+      candidates: rotationCandidates,
+      picked,
+    })
+  }
+
   const originalBotInstanceId = schedule.bot_instance_id ?? null
 
   const resolvedBotInstance = await resolveConnectedBotInstance(
