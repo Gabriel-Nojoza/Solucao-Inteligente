@@ -837,7 +837,10 @@ async function sendGenericPayload(instance, input) {
   }
 
   if (documentPayload) {
-    const isImage = documentPayload.mimeType.startsWith("image/")
+    // Forcado para "document" (nao "image") — o envio como imagem passa pelo
+    // pipeline de recompressao/thumbnail do WhatsApp, que estava corrompendo
+    // relatorios PNG de forma intermitente. Como documento, os bytes vao direto.
+    const isImage = false
     await instance.socket.sendMessage(jid, isImage
       ? {
           image: documentPayload.buffer,
