@@ -100,7 +100,7 @@ async function main() {
       },
     };
     var report = window['powerbi'].embed(container, config);
-    report.on('rendered', function() { setTimeout(function() { window._pbiRendered = true; }, 3000); });
+    report.on('rendered', function() { setTimeout(function() { window._pbiRendered = true; }, 5000); });
     report.on('error', function(event) { window._pbiError = JSON.stringify(event.detail); window._pbiRendered = true; });
   </script>
 </body>
@@ -110,7 +110,7 @@ async function main() {
   const browser = await puppeteer.launch({
     executablePath,
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--force-color-profile=srgb'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--force-color-profile=srgb', '--use-gl=angle', '--use-angle=swiftshader-webgl', '--enable-webgl', '--ignore-gpu-blocklist'],
     timeout: 90000,
   })
 
@@ -122,6 +122,9 @@ async function main() {
 
     const pbiError = await page.evaluate(() => window._pbiError).catch(() => null)
     if (pbiError) throw new Error('Power BI render error: ' + pbiError)
+
+    await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {})
+    await new Promise(r => setTimeout(r, 2000))
 
     const element = await page.$('#pbi-container')
     if (!element) throw new Error('Container Power BI nao encontrado na pagina')

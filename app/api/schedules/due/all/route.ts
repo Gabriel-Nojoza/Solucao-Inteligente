@@ -54,14 +54,16 @@ export async function GET(request: NextRequest) {
         .in("status", ["sending", "pending"])
         .lt("created_at", cutoff)
         .select("id")
-        .then(({ data }) => {
-          if (data && data.length > 0) {
-            console.log(`[due/all] expirou ${data.length} dispatch(es) travados (>5min)`)
+        .then(
+          ({ data }) => {
+            if (data && data.length > 0) {
+              console.log(`[due/all] expirou ${data.length} dispatch(es) travados (>5min)`)
+            }
+          },
+          (err) => {
+            console.error("[due/all] erro ao expirar dispatches travados:", err)
           }
-        })
-        .catch((err) => {
-          console.error("[due/all] erro ao expirar dispatches travados:", err)
-        })
+        )
     }
 
     const { data: schedules, error } = await supabase
