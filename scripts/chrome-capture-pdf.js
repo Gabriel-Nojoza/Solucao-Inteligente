@@ -138,7 +138,7 @@ async function main() {
     });
 
     report.on('rendered', function() {
-      setTimeout(function() { window._pbiRendered = true; }, 5000);
+      setTimeout(function() { window._pbiRendered = true; }, 8000);
     });
 
     report.on('error', function(event) {
@@ -172,8 +172,8 @@ async function main() {
       throw new Error('Tempo esgotado aguardando renderizacao do Power BI (60s) — verifique autenticacao e se o relatorio esta acessivel no Power BI')
     }
 
-    await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {})
-    await new Promise(r => setTimeout(r, 2000))
+    await page.waitForNetworkIdle({ idleTime: 2500, timeout: 20000 }).catch(() => {})
+    await new Promise(r => setTimeout(r, 4000))
 
     let pagesToCapture = null
 
@@ -220,8 +220,8 @@ async function main() {
           } catch {
             // continua com pagina possivelmente nao renderizada
           }
-          await page.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 }).catch(() => {})
-          await new Promise(r => setTimeout(r, 2000))
+          await page.waitForNetworkIdle({ idleTime: 2000, timeout: 15000 }).catch(() => {})
+          await new Promise(r => setTimeout(r, 3000))
         }
 
         pagePdfs.push(await captureSinglePagePdf(page, pdfFormat))
