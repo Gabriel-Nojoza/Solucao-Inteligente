@@ -8,7 +8,7 @@ import puppeteer from "puppeteer-core"
 const execFileAsync = promisify(execFile)
 
 // Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes
-const MAX_CONCURRENT_CAPTURES = 1
+const MAX_CONCURRENT_CAPTURES = 3
 let _activeCaptures = 0
 const _captureQueue: Array<() => void> = []
 
