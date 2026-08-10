@@ -236,6 +236,18 @@ async function main() {
       pdfBuffer = Buffer.from(await merged.save())
     }
 
+    // Validacao basica de integridade — um PDF valido comeca com "%PDF-" e
+    // termina com o marcador "%%EOF". Se estiver truncado/corrompido, falha
+    // aqui para que o chamador tente novamente em vez de mandar um arquivo
+    // quebrado pro cliente.
+    const headerOk = pdfBuffer.subarray(0, 5).toString('latin1') === '%PDF-'
+    const tailSlice = pdfBuffer.subarray(Math.max(0, pdfBuffer.length - 1024)).toString('latin1')
+    const tailOk = tailSlice.includes('%%EOF')
+    if (!headerOk || !tailOk || pdfBuffer.length < 1024) {
+      try { fs.writeFileSync(`/root/bad_pdf_${Date.now()}.pdf`, pdfBuffer) } catch (e) {}
+      throw new Error(`PDF gerado parece invalido/truncado (headerOk=${headerOk}, tailOk=${tailOk}, bytes=${pdfBuffer.length})`)
+    }
+
     process.stdout.write(pdfBuffer.toString('base64'))
     process.exit(0)
   } finally {
