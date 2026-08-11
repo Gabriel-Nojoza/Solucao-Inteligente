@@ -340,6 +340,8 @@ export default function SchedulesPage() {
   >("/api/schedules", fetcher)
   const { data: reports } = useSWR<Report[]>("/api/reports", fetcher)
   const { data: botInstances } = useSWR<WhatsAppBotInstance[]>("/api/bot/instances", fetcher)
+  const { data: companyFeatures } = useSWR<{ pngExport?: boolean }>("/api/features", fetcher)
+  const pngExportEnabled = companyFeatures?.pngExport === true
   const { data: automations, isLoading: isLoadingAutomations } = useSWR<AutomationItem[]>(
     "/api/automations",
     fetcher
@@ -628,10 +630,13 @@ export default function SchedulesPage() {
     [normalizedFormReportSelections, automationList]
   )
 
-  const formatOptions = hasAutomationSelected ? AUTOMATION_FORMATS : POWERBI_FORMATS
+  const visiblePowerBiFormats = pngExportEnabled
+    ? POWERBI_FORMATS
+    : POWERBI_FORMATS.filter((f) => f !== "PNG")
+  const formatOptions = hasAutomationSelected ? AUTOMATION_FORMATS : visiblePowerBiFormats
 
   useEffect(() => {
-    const options = hasAutomationSelected ? AUTOMATION_FORMATS : POWERBI_FORMATS
+    const options = hasAutomationSelected ? AUTOMATION_FORMATS : visiblePowerBiFormats
     // eslint-disable-next-line react-hooks/exhaustive-deps
     setFormFormat((current) => (options.includes(current) ? current : options[0]))
   }, [hasAutomationSelected])
