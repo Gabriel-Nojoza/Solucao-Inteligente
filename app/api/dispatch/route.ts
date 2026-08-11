@@ -950,6 +950,13 @@ async function handleDispatch(request: NextRequest) {
             }
           }
         }
+
+        // Pausa entre contatos (numero individual ou grupo) da mesma rotina,
+        // para nao sobrecarregar a captura do Chrome. So pausa se ainda
+        // houver proximo contato — nao atrasa a resposta a toa no ultimo.
+        if (contactIndex < normalizedContacts.length - 1) {
+          await sleep(EXPORT_DELAY_MS)
+        }
       }
 
       await supabase
