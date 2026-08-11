@@ -738,6 +738,23 @@ async function handleDispatch(request: NextRequest) {
         for (const [reportIndex, target] of directPdfTargets.entries()) {
           const currentLog =
             insertedLogs?.[contactIndex * directPdfTargets.length + reportIndex]
+
+          if (currentLog) {
+            const { data: freshLog } = await supabase
+              .from("dispatch_logs")
+              .select("status")
+              .eq("company_id", companyId)
+              .eq("id", currentLog.id)
+              .single()
+            if (freshLog?.status === "failed") {
+              console.log("[dispatch] envio cancelado, pulando contato", {
+                scheduleId: schedule.id,
+                dispatchLogId: currentLog.id,
+              })
+              continue
+            }
+          }
+
           const pbiReport = target.report as Record<string, unknown>
           const pbiWorkspaceId = pbiReport.workspaces
             ? (pbiReport.workspaces as Record<string, string>).pbi_workspace_id ?? ""
