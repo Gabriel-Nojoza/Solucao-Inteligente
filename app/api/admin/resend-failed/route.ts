@@ -92,34 +92,47 @@ export async function POST(request: NextRequest) {
   )
 
   if (scheduleIds.length === 0) {
-    return NextResponse.json({ resent: 0, results: [] })
+    return NextResponse.json({ started: false, total: 0 })
   }
 
   const appUrl = getRequestOrigin(request)
-  const results: Array<{ schedule_id: string; ok: boolean; error?: string }> = []
+  const RESEND_INTERVAL_MS = 3 * 60 * 1000
 
-  for (const scheduleId of scheduleIds) {
-    try {
-      const res = await fetch(`${appUrl}/api/dispatch?secret=${encodeURIComponent(platformSecret)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schedule_id: scheduleId }),
-      })
-      const json = await res.json().catch(() => null)
-      results.push({ schedule_id: scheduleId, ok: res.ok, error: res.ok ? undefined : json?.error })
-    } catch (err) {
-      results.push({
-        schedule_id: scheduleId,
-        ok: false,
-        error: err instanceof Error ? err.message : "Erro desconhecido",
-      })
+  // Roda em segundo plano no processo do servidor — nao trava a resposta HTTP
+  // esperando todas as rotinas (com 3 min de intervalo, pode levar bastante tempo).
+  ;(async () => {
+    for (const scheduleId of scheduleIds) {
+      try {
+        const res = await fetch(`${appUrl}/api/dispatch?secret=${encodeURIComponent(platformSecret)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ schedule_id: scheduleId }),
+        })
+        const json = await res.json().catch(() => null)
+        console.log("[admin/resend-failed] resultado", {
+          companyId,
+          scheduleId,
+          ok: res.ok,
+          error: res.ok ? undefined : json?.error,
+        })
+      } catch (err) {
+        console.error("[admin/resend-failed] erro ao reenviar", {
+          companyId,
+          scheduleId,
+          error: err instanceof Error ? err.message : "Erro desconhecido",
+        })
+      }
+      await new Promise((resolve) => setTimeout(resolve, RESEND_INTERVAL_MS))
     }
-    await new Promise((resolve) => setTimeout(resolve, 8000))
-  }
+    console.log("[admin/resend-failed] concluido", { companyId, total: scheduleIds.length })
+  })().catch((err) => {
+    console.error("[admin/resend-failed] erro inesperado no processo em segundo plano", err)
+  })
 
   return NextResponse.json({
-    resent: results.filter((r) => r.ok).length,
-    total: results.length,
-    results,
+    started: true,
+    total: scheduleIds.length,
+    interval_minutes: RESEND_INTERVAL_MS / 60000,
+    estimated_minutes: Math.round((scheduleIds.length * RESEND_INTERVAL_MS) / 60000),
   })
 }

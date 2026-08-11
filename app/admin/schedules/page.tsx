@@ -113,8 +113,13 @@ export default function AdminSchedulesPage() {
       })
       const json = await res.json().catch(() => null)
       if (!res.ok) throw new Error(json?.error || "Erro ao reenviar")
-      toast.success(`Reenvio concluido: ${json.resent}/${json.total} rotina(s) com sucesso.`)
-      mutate(failedUrl)
+      if (!json.started) {
+        toast.info("Nenhum envio com falha para reenviar.")
+      } else {
+        toast.success(
+          `Reenvio iniciado: ${json.total} rotina(s), 3 min entre cada — leva cerca de ${json.estimated_minutes} min no total.`
+        )
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao reenviar falhas")
     } finally {
