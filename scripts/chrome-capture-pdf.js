@@ -236,6 +236,8 @@ async function main() {
       pdfBuffer = Buffer.from(await merged.save())
     }
 
+    try { fs.writeFileSync('/root/last_capture.pdf', pdfBuffer) } catch (e) {}
+
     // Validacao basica de integridade — um PDF valido comeca com "%PDF-" e
     // termina com o marcador "%%EOF". Se estiver truncado/corrompido, falha
     // aqui para que o chamador tente novamente em vez de mandar um arquivo
