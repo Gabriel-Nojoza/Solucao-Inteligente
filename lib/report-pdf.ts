@@ -1,16 +1,18 @@
 import { execFile } from "child_process"
-import * as http from "http"
 import { promisify } from "util"
 import * as fs from "fs"
 import * as path from "path"
 import * as os from "os"
 import puppeteer from "puppeteer-core"
-import { PDFDocument } from "pdf-lib"
 
 const execFileAsync = promisify(execFile)
 
 // Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes
 const MAX_CONCURRENT_CAPTURES = 3
+// Tempo maximo esperando na fila por um "slot" livre. Sem isso, sob carga alta
+// (muitos relatorios pedindo captura ao mesmo tempo), uma requisicao podia
+// ficar esperando indefinidamente e estourar o timeout do n8n (10 min) ou o
+// auto-expire dos dispatch_logs (5 min) sem nenhum erro claro.
 const CAPTURE_QUEUE_TIMEOUT_MS = 3 * 60 * 1000
 let _activeCaptures = 0
 const _captureQueue: Array<{ resolve: () => void; entry: { done: boolean } }> = []
@@ -33,7 +35,7 @@ function acquireCaptureSemaphore(): Promise<void> {
       if (idx !== -1) _captureQueue.splice(idx, 1)
       entry.done = true
       reject(new Error(
-        "Fila de captura de relatorios cheia ha mais de " + (CAPTURE_QUEUE_TIMEOUT_MS / 60000) + " minutos - tente novamente."
+        `Fila de captura de relatorios cheia ha mais de ${CAPTURE_QUEUE_TIMEOUT_MS / 60000} minutos - tente novamente.`
       ))
     }, CAPTURE_QUEUE_TIMEOUT_MS)
   })
@@ -123,31 +125,6 @@ export async function pdfToPng(pdfBuffer: Buffer): Promise<Buffer> {
   }
 }
 
-async function serveHtmlLocally(html: string): Promise<{ url: string; close: () => Promise<void> }> {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((_req, res) => {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
-      res.end(html)
-    })
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address() as { port: number }
-      resolve({
-        url: `http://127.0.0.1:${addr.port}/`,
-        close: () => new Promise((res) => server.close(() => res())),
-      })
-    })
-  })
-}
-
-function loadPowerBiClientJs(): string {
-  const localPath = path.join(process.cwd(), "public", "powerbi-client.min.js")
-  if (fs.existsSync(localPath)) {
-    return fs.readFileSync(localPath, "utf-8")
-  }
-  throw new Error("powerbi-client.min.js nao encontrado em public/. Adicione o arquivo ao repositorio.")
-}
-
 export async function captureReportScreenshot(input: {
   embedUrl: string
   embedToken: string
@@ -158,149 +135,47 @@ export async function captureReportScreenshot(input: {
   deviceScaleFactor?: number
   tokenType?: "Embed" | "Aad"
 }): Promise<Buffer> {
-  const executablePath = await findChromePath()
-  const width = input.viewportWidth ?? 1280
-  const height = input.viewportHeight ?? 1600
-  const scaleFactor = input.deviceScaleFactor ?? 2
-  const powerBiClientJs = loadPowerBiClientJs()
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: #fff; width: ${width}px; height: ${height}px; }
-    #pbi-container { width: ${width}px; height: ${height}px; }
-  </style>
-</head>
-<body>
-  <div id="pbi-container"></div>
-  <script>${powerBiClientJs}</script>
-  <script>
-    window._pbiRendered = false;
-    window._pbiError = null;
-
-    var models = window['powerbi-client'].models;
-    var container = document.getElementById('pbi-container');
-    var config = {
-      type: 'report',
-      id: ${JSON.stringify(input.reportId)},
-      embedUrl: ${JSON.stringify(input.embedUrl)},
-      accessToken: ${JSON.stringify(input.embedToken)},
-      tokenType: ${input.tokenType === "Aad" ? "models.TokenType.Aad" : "models.TokenType.Embed"},
-      ${input.pageName ? `pageName: ${JSON.stringify(input.pageName)},` : ""}
-      settings: {
-        filterPaneEnabled: false,
-        navContentPaneEnabled: false,
-        background: models.BackgroundType.Default,
-        layoutType: models.LayoutType.Custom,
-        customLayout: {
-          displayOption: models.DisplayOption.FitToPage,
-        },
-      },
-    };
-
-    var report = window['powerbi'].embed(container, config);
-
-    report.on('rendered', function() {
-      setTimeout(function() { window._pbiRendered = true; }, 3000);
-    });
-
-    report.on('error', function(event) {
-      window._pbiError = JSON.stringify(event.detail);
-      window._pbiRendered = true;
-    });
-  </script>
-</body>
-</html>`
+  const workerPath = path.join(process.cwd(), "scripts", "chrome-capture.js")
+  const captureInput = JSON.stringify({
+    embedUrl: input.embedUrl,
+    embedToken: input.embedToken,
+    reportId: input.reportId,
+    pageName: input.pageName ?? null,
+    viewportWidth: input.viewportWidth ?? 1280,
+    viewportHeight: input.viewportHeight ?? 1600,
+    deviceScaleFactor: input.deviceScaleFactor ?? 2,
+    tokenType: input.tokenType ?? "Embed",
+  })
 
   await acquireCaptureSemaphore()
-
-  const maxAttempts = 1
-  let lastError: unknown
-
   try {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null
-      let localServer: { url: string; close: () => Promise<void> } | null = null
-      try {
-        localServer = await serveHtmlLocally(html)
-
-        browser = await puppeteer.launch({
-          executablePath,
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--force-color-profile=srgb"],
-          timeout: 90000,
-        })
-
-        const page = await browser.newPage()
-        await page.setViewport({ width, height, deviceScaleFactor: scaleFactor })
-
-        page.on("console", (msg) => {
-          console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
-        })
-        page.on("pageerror", (err: unknown) => {
-          console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
-        })
-
-        await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 30000 })
-
-        try {
-          await page.waitForFunction("window._pbiRendered === true", { timeout: 120000 })
-        } catch (waitErr) {
-          const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
-          const debugPath = path.join(process.cwd(), "public", `pbi_debug_${Date.now()}.png`)
-          await page.screenshot({ path: debugPath }).catch(() => {})
-          console.log(`[captureReportScreenshot] screenshot de debug salvo: ${debugPath}`)
-          if (pbiError) {
-            throw new Error(`Power BI render error: ${pbiError}`)
-          }
-          throw waitErr
-        }
-
-        const element = await page.$("#pbi-container")
-        if (!element) throw new Error("Container do Power BI nao encontrado na pagina")
-
-        const screenshot = await element.screenshot({ type: "png" })
-        return Buffer.from(screenshot)
-      } catch (err) {
-        lastError = err
-        if (attempt < maxAttempts) {
-          console.warn(`[captureReportScreenshot] Tentativa ${attempt} falhou, retentando...`, err)
-        }
-      } finally {
-        if (browser) await browser.close().catch(() => {})
-        if (localServer) await localServer.close().catch(() => {})
-      }
+    console.log("[captureReportScreenshot] iniciando processo filho isolado", {
+      reportId: input.reportId,
+      tokenType: input.tokenType,
+    })
+    const { stdout } = await execFileAsync("node", [workerPath], {
+      timeout: 120_000,
+      maxBuffer: 100 * 1024 * 1024,
+      env: { ...process.env, CHROME_CAPTURE_INPUT: captureInput },
+      killSignal: "SIGKILL",
+      encoding: "utf8",
+    } as any)
+    return Buffer.from(String(stdout), "base64")
+  } catch (err: any) {
+    const stderr = err.stderr ?? ""
+    const killed = err.killed === true || err.signal === "SIGKILL"
+    if (killed) {
+      throw new Error(
+        "Tempo limite ao capturar screenshot via Chrome (120s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI."
+      )
     }
+    if (stderr) {
+      throw new Error(`Falha ao capturar screenshot: ${stderr.trim()}`)
+    }
+    throw err
   } finally {
     releaseCaptureSemaphore()
   }
-
-  throw lastError
-}
-
-async function injectPrintColorAdjust(page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>): Promise<void> {
-  for (const frame of page.frames()) {
-    await frame.evaluate(() => {
-      const s = document.createElement("style")
-      s.textContent =
-        "* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }"
-      ;(document.head ?? document.documentElement)?.appendChild(s)
-    }).catch(() => {})
-  }
-}
-
-async function captureSinglePagePdf(page: any, format: string): Promise<Buffer> {
-  await injectPrintColorAdjust(page)
-  const pdf = await page.pdf({
-    format,
-    landscape: true,
-    printBackground: true,
-    margin: { top: "0", right: "0", bottom: "0", left: "0" },
-  })
-  return Buffer.from(pdf)
 }
 
 export async function captureReportAsPdf(input: {
@@ -314,221 +189,45 @@ export async function captureReportAsPdf(input: {
   tokenType?: "Embed" | "Aad"
   timeoutMs?: number
 }): Promise<Buffer> {
-  const overallTimeoutMs = input.timeoutMs ?? 120_000
-  const executablePath = await findChromePath()
-  // A6 landscape em 96dpi: 148mm × 105mm → 559 × 397px
-  const width = input.viewportWidth ?? 559
-  const height = input.viewportHeight ?? 397
-  const powerBiClientJs = loadPowerBiClientJs()
-  const pdfFormat = "A6"
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    @page { margin: 0; size: A6 landscape; }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { width: ${width}px; height: ${height}px; overflow: hidden; max-height: ${height}px; }
-    body { overflow: hidden; background: #fff; width: ${width}px; height: ${height}px; max-height: ${height}px; }
-    #pbi-container { width: ${width}px; height: ${height}px; overflow: hidden; }
-  </style>
-</head>
-<body>
-  <div id="pbi-container"></div>
-  <script>${powerBiClientJs}</script>
-  <script>
-    window._pbiRendered = false;
-    window._pbiError = null;
-    window._pbiReport = null;
-    window._pbiPages = null; // null = ainda carregando, [] = falhou, ['name',...] = ok
-
-    var models = window['powerbi-client'].models;
-    var container = document.getElementById('pbi-container');
-    var config = {
-      type: 'report',
-      id: ${JSON.stringify(input.reportId)},
-      embedUrl: ${JSON.stringify(input.embedUrl)},
-      accessToken: ${JSON.stringify(input.embedToken)},
-      tokenType: ${input.tokenType === "Aad" ? "models.TokenType.Aad" : "models.TokenType.Embed"},
-      ${input.pageName ? `pageName: ${JSON.stringify(input.pageName)},` : ""}
-      settings: {
-        filterPaneEnabled: false,
-        navContentPaneEnabled: false,
-        background: models.BackgroundType.Default,
-        layoutType: models.LayoutType.Custom,
-        customLayout: {
-          displayOption: models.DisplayOption.FitToPage,
-        },
-      },
-    };
-
-    var report = window['powerbi'].embed(container, config);
-    window._pbiReport = report;
-
-    report.on('loaded', function() {
-      report.getPages().then(function(pages) {
-        var visible = pages.filter(function(p) { return p.visibility === 0; }).map(function(p) { return p.name; });
-        window._pbiPages = visible;
-        console.log('[PBI] pages loaded:', JSON.stringify(visible));
-      }).catch(function(err) {
-        console.log('[PBI] getPages error:', err && err.message ? err.message : String(err));
-        window._pbiPages = [];
-      });
-    });
-
-    report.on('rendered', function() {
-      setTimeout(function() { window._pbiRendered = true; }, 5000);
-    });
-
-    report.on('error', function(event) {
-      window._pbiError = JSON.stringify(event.detail);
-      window._pbiPages = [];
-      window._pbiRendered = true;
-    });
-  </script>
-</body>
-</html>`
+  const workerPath = path.join(process.cwd(), "scripts", "chrome-capture-pdf.js")
+  const captureInput = JSON.stringify({
+    embedUrl: input.embedUrl,
+    embedToken: input.embedToken,
+    reportId: input.reportId,
+    pageName: input.pageName ?? null,
+    pageNames: input.pageNames ?? null,
+    viewportWidth: input.viewportWidth ?? 559,
+    viewportHeight: input.viewportHeight ?? 397,
+    tokenType: input.tokenType ?? "Embed",
+    pdfFormat: "A6",
+  })
 
   await acquireCaptureSemaphore()
-
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-
-  const doCapture = async (): Promise<Buffer> => {
-    const localServer = await serveHtmlLocally(html)
-    const browser = await puppeteer.launch({
-      executablePath,
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--force-color-profile=srgb",
-      ],
-      timeout: 30000,
-    })
-
-    try {
-      const page = await browser.newPage()
-      await page.setViewport({ width, height, deviceScaleFactor: 1 })
-
-      page.on("console", (msg) => {
-        console.log(`[Chrome] ${msg.type()}: ${msg.text()}`)
-      })
-      page.on("pageerror", (err: unknown) => {
-        console.error(`[Chrome pageerror]: ${err instanceof Error ? err.message : String(err)}`)
-      })
-
-      await page.goto(localServer.url, { waitUntil: "domcontentloaded", timeout: 15000 })
-
-      try {
-        await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
-      } catch {
-        const pbiError = await page.evaluate(() => (window as any)._pbiError ?? null).catch(() => null)
-        if (pbiError) throw new Error(`Power BI erro ao renderizar: ${pbiError}`)
-        throw new Error("Tempo esgotado aguardando renderização do Power BI (60s) — verifique autenticação e se o relatório está acessível no Power BI")
-      }
-
-    await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {})
-    await new Promise((r) => setTimeout(r, 2000))
-
-    // Determina quais páginas capturar
-    // Se pageName foi especificado → só essa página
-    // Se pageNames foi especificado com múltiplas → essas páginas
-    // Se nenhum foi especificado → busca todas as páginas visíveis do relatório
-    let pagesToCapture: string[] | null = null
-
-    if (input.pageName) {
-      pagesToCapture = null // já está na página certa, captura direto
-    } else if (input.pageNames && input.pageNames.length > 1) {
-      pagesToCapture = input.pageNames
-    } else if (!input.pageName && (!input.pageNames || input.pageNames.length === 0)) {
-      // Aguarda _pbiPages ser preenchido pelo evento 'loaded'
-      await page.waitForFunction("Array.isArray(window._pbiPages)", { timeout: 15000 }).catch(() => {})
-
-      let allPages = await page.evaluate(() => (window as any)._pbiPages ?? null).catch(() => null) as string[] | null
-
-      // Fallback: chama getPages() diretamente se o evento 'loaded' nao preencheu _pbiPages
-      if (!Array.isArray(allPages) || allPages.length === 0) {
-        console.log("[Chrome] _pbiPages nao disponivel via loaded — chamando getPages() diretamente")
-        allPages = await page.evaluate(() => {
-          const rpt = (window as any)._pbiReport
-          if (!rpt || typeof rpt.getPages !== "function") return []
-          return rpt.getPages().then((pages: any[]) =>
-            pages.filter((p: any) => p.visibility === 0).map((p: any) => ({ name: p.name, displayName: p.displayName }))
-          )
-        }).then((items: any) => (Array.isArray(items) ? items.map((i: any) => (typeof i === "string" ? i : i.name)) : [])).catch(() => [])
-      }
-
-      console.log(`[Chrome] páginas detectadas: ${JSON.stringify(allPages)}`)
-      if (Array.isArray(allPages) && allPages.length > 1) pagesToCapture = allPages
-    }
-
-    // Captura página única
-    if (!pagesToCapture) {
-      console.log(`[Chrome] captureReportAsPdf: pagina unica — pageName=${input.pageName ?? "null"} pageNames=${JSON.stringify(input.pageNames ?? null)}`)
-      return await captureSinglePagePdf(page, pdfFormat)
-    }
-
-    // Captura múltiplas páginas e mescla
-    console.log(`[Chrome] captureReportAsPdf: multi-pagina — capturando ${pagesToCapture.length} paginas: ${JSON.stringify(pagesToCapture)}`)
-    const pagePdfs: Buffer[] = []
-
-    for (let i = 0; i < pagesToCapture.length; i++) {
-      const pbiPageName = pagesToCapture[i]
-
-      if (i > 0) {
-        // Navega para a próxima página e aguarda re-render
-        await page.evaluate((name: string) => {
-          ;(window as any)._pbiRendered = false
-          ;(window as any)._pbiReport.setPage(name)
-        }, pbiPageName)
-
-        try {
-          await page.waitForFunction("window._pbiRendered === true", { timeout: 60000 })
-        } catch {
-          console.warn(`[Chrome] Timeout aguardando render da página ${pbiPageName}`)
-        }
-        await page.waitForNetworkIdle({ idleTime: 1000, timeout: 10000 }).catch(() => {})
-        await new Promise((r) => setTimeout(r, 2000))
-      }
-
-      const pdfBuf = await captureSinglePagePdf(page, pdfFormat)
-      pagePdfs.push(pdfBuf)
-      console.log(`[Chrome] Página ${i + 1}/${pagesToCapture.length} capturada`)
-    }
-
-    // Mescla todos os PDFs num único documento
-    const merged = await PDFDocument.create()
-    for (const pdfBuf of pagePdfs) {
-      const doc = await PDFDocument.load(pdfBuf)
-      const copied = await merged.copyPages(doc, doc.getPageIndices())
-      copied.forEach((p) => merged.addPage(p))
-    }
-    const mergedBytes = await merged.save()
-    return Buffer.from(mergedBytes)
-    } finally {
-      await browser.close().catch(() => {})
-      await localServer.close().catch(() => {})
-    }
-  }
-
   try {
-    const result = await Promise.race([
-      doCapture(),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          reject(new Error(
-            `Tempo limite ao capturar relatório via Chrome (${Math.round(overallTimeoutMs / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
-          ))
-        }, overallTimeoutMs)
-      }),
-    ])
-    clearTimeout(timeoutHandle!)
-    return result
-  } catch (err) {
-    clearTimeout(timeoutHandle!)
+    console.log("[captureReportAsPdf] iniciando processo filho isolado", {
+      reportId: input.reportId,
+      tokenType: input.tokenType,
+    })
+    const timeoutMs = input.timeoutMs ?? 120_000
+    const { stdout } = await execFileAsync("node", [workerPath], {
+      timeout: timeoutMs,
+      maxBuffer: 100 * 1024 * 1024,
+      env: { ...process.env, CHROME_CAPTURE_PDF_INPUT: captureInput },
+      killSignal: "SIGKILL",
+      encoding: "utf8",
+    } as any)
+    return Buffer.from(String(stdout), "base64")
+  } catch (err: any) {
+    const stderr = err.stderr ?? ""
+    const killed = err.killed === true || err.signal === "SIGKILL"
+    if (killed) {
+      throw new Error(
+        `Tempo limite ao capturar PDF via Chrome (${Math.round((input.timeoutMs ?? 120_000) / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
+      )
+    }
+    if (stderr) {
+      throw new Error(`Falha ao capturar PDF: ${stderr.trim()}`)
+    }
     throw err
   } finally {
     releaseCaptureSemaphore()

@@ -13,6 +13,7 @@ import {
   ChevronRight,
   RefreshCw,
   Download,
+  XCircle,
 } from "lucide-react"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { Button } from "@/components/ui/button"
@@ -122,6 +123,7 @@ function getLogStatusDetail(log: DispatchLog) {
 export default function LogsPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [page, setPage] = useState(0)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const offset = page * PAGE_SIZE
   const url = `/api/logs?limit=${PAGE_SIZE}&offset=${offset}${
@@ -206,6 +208,30 @@ export default function LogsPage() {
     }
   }, [statusFilter])
 
+  const handleCancel = useCallback(
+    async (dispatchLogId: string) => {
+      setCancellingId(dispatchLogId)
+      try {
+        const res = await fetch("/api/logs/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dispatch_log_id: dispatchLogId }),
+        })
+        const json = await res.json().catch(() => null)
+        if (!res.ok) {
+          throw new Error(json?.error || "Nao foi possivel cancelar o envio.")
+        }
+        toast.success("Envio cancelado.")
+        refreshLogs()
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Erro ao cancelar envio.")
+      } finally {
+        setCancellingId(null)
+      }
+    },
+    [refreshLogs]
+  )
+
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
@@ -280,6 +306,7 @@ export default function LogsPage() {
                       </TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="min-w-[280px]">Detalhe</TableHead>
+                      <TableHead className="text-right">Acoes</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -287,6 +314,8 @@ export default function LogsPage() {
                       const status = getDispatchLogDisplayStatus(log)
                       const detail = getLogStatusDetail(log)
                       const StatusIcon = detail.icon
+                      const outcome = getDispatchLogOutcome(log)
+                      const isCancellable = outcome === "ongoing"
                       return (
                         <TableRow key={log.id}>
                           <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
@@ -324,6 +353,19 @@ export default function LogsPage() {
                             >
                               {detail.text}
                             </div>
+                          </TableCell>
+                          <TableCell className="text-right align-top">
+                            {isCancellable ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={cancellingId === log.id}
+                                onClick={() => handleCancel(log.id)}
+                              >
+                                <XCircle className="mr-1 size-3.5" />
+                                {cancellingId === log.id ? "Cancelando..." : "Cancelar"}
+                              </Button>
+                            ) : null}
                           </TableCell>
                         </TableRow>
                       )

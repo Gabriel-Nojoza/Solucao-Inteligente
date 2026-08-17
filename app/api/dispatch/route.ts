@@ -30,7 +30,7 @@ import {
   isPowerBiFeatureNotAvailableError,
   getReportPages,
 } from "@/lib/powerbi"
-import { captureReportAsPdf } from "@/lib/report-pdf"
+import { captureReportAsPdf, captureReportScreenshot } from "@/lib/report-pdf"
 import { getWorkspaceAccessScope } from "@/lib/workspace-access"
 import { normalizeDispatchSettings } from "@/lib/dispatch-config"
 import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
@@ -50,7 +50,9 @@ async function exportDocumentWithFallback(input: {
   embedUrl: string | null
   pageNames: string[] | null
   pageName: string | null | undefined
+  format?: "PDF" | "PNG"
 }): Promise<PowerBiExportedDocument> {
+  const format = input.format ?? "PDF"
   try {
     return await exportPowerBIReportDocument({
       token: input.pbiToken,
@@ -60,10 +62,24 @@ async function exportDocumentWithFallback(input: {
       embedUrl: input.embedUrl,
       pageNames: input.pageNames,
       pageName: input.pageName,
+      format,
     })
   } catch (err) {
     if (!isPowerBiFeatureNotAvailableError(err) || !input.embedUrl) throw err
-    console.log("[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (AAD)")
+    console.log(`[dispatch] ExportTo indisponivel para este workspace — usando captura via Chrome (AAD, ${format})`)
+    if (format === "PNG") {
+      const pngBuffer = await captureReportScreenshot({
+        embedUrl: input.embedUrl,
+        embedToken: input.pbiToken,
+        reportId: input.reportId,
+        pageName: input.pageName ?? null,
+        tokenType: "Aad",
+        viewportWidth: 1920,
+        viewportHeight: 1080,
+        deviceScaleFactor: 1,
+      })
+      return { buffer: pngBuffer, contentType: "image/png", extension: "png" }
+    }
     const pdfBuffer = await captureReportAsPdf({
       embedUrl: input.embedUrl,
       embedToken: input.pbiToken,
@@ -336,6 +352,9 @@ async function handleDispatch(request: NextRequest) {
     return NextResponse.json({ error: "Rotina nao encontrada" }, { status: 404 })
   }
 
+  // Se a rotina tiver varios WhatsApps vinculados (bot_instance_ids), sorteia
+  // um a cada disparo para variar o numero de envio. Caso contrario, usa o
+  // unico bot_instance_id configurado (comportamento anterior).
   const rotationCandidates = Array.isArray((schedule as Record<string, unknown>).bot_instance_ids)
     ? ((schedule as Record<string, unknown>).bot_instance_ids as string[]).filter(
         (id): id is string => typeof id === "string" && id.trim().length > 0
@@ -659,6 +678,10 @@ async function handleDispatch(request: NextRequest) {
     )
   }
 
+  // Quando a rotina tem narracao configurada (audio/texto), a rotina precisa
+  // passar pelo n8n mesmo sendo PDF, porque a geracao de narracao (Gemini/TTS)
+  // so existe no fluxo do n8n. Sem narracao, PDF usa o caminho direto (mais
+  // rapido e confiavel, sem depender do n8n).
   const directPdfTargets =
     normalizedScheduleExportFormat === "PDF" && effectiveSendMode === "none"
       ? powerBiTargets
@@ -750,6 +773,23 @@ async function handleDispatch(request: NextRequest) {
         for (const [reportIndex, target] of directPdfTargets.entries()) {
           const currentLog =
             insertedLogs?.[contactIndex * directPdfTargets.length + reportIndex]
+
+          if (currentLog) {
+            const { data: freshLog } = await supabase
+              .from("dispatch_logs")
+              .select("status")
+              .eq("company_id", companyId)
+              .eq("id", currentLog.id)
+              .single()
+            if (freshLog?.status === "failed") {
+              console.log("[dispatch] envio cancelado, pulando contato", {
+                scheduleId: schedule.id,
+                dispatchLogId: currentLog.id,
+              })
+              continue
+            }
+          }
+
           const pbiReport = target.report as Record<string, unknown>
           const pbiWorkspaceId = pbiReport.workspaces
             ? (pbiReport.workspaces as Record<string, string>).pbi_workspace_id ?? ""
@@ -889,6 +929,7 @@ async function handleDispatch(request: NextRequest) {
                   embedUrl: resolvedEmbedUrl,
                   pageNames: resolvedPageNames,
                   pageName: target.config.pbi_page_name,
+                  format: normalizedScheduleExportFormat === "PNG" ? "PNG" : "PDF",
                 })
 
                 console.log("[dispatch] sending document to bot", {
@@ -911,7 +952,7 @@ async function handleDispatch(request: NextRequest) {
                   mimetype: exportedFile.contentType,
                 }, resolvedBotInstance?.id ?? null)
               }
-            })
+            }, 4, 7000)
 
             if (currentLog) {
               await supabase

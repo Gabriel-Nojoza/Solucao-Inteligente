@@ -837,7 +837,17 @@ async function sendGenericPayload(instance, input) {
   }
 
   if (documentPayload) {
-    const isImage = documentPayload.mimeType.startsWith("image/")
+    // Forcado para "document" (nao "image") — o envio como imagem passa pelo
+    // pipeline de recompressao/thumbnail do WhatsApp, que estava corrompendo
+    // relatorios PNG de forma intermitente. Como documento, os bytes vao direto.
+    const isImage = false
+    // Mimetype de imagem (image/*) faz alguns clientes do WhatsApp tentarem
+    // gerar preview/thumbnail mesmo em mensagens de documento. Usamos um
+    // mimetype generico para esses casos, evitando qualquer processamento
+    // especial de imagem do lado de quem recebe.
+    const sendMimeType = documentPayload.mimeType.startsWith("image/")
+      ? "application/octet-stream"
+      : documentPayload.mimeType
     await instance.socket.sendMessage(jid, isImage
       ? {
           image: documentPayload.buffer,
@@ -845,7 +855,7 @@ async function sendGenericPayload(instance, input) {
         }
       : {
           document: documentPayload.buffer,
-          mimetype: documentPayload.mimeType,
+          mimetype: sendMimeType,
           fileName: documentPayload.fileName,
           caption: caption || message || undefined,
         }
