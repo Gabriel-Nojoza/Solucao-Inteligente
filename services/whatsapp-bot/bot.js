@@ -988,6 +988,7 @@ async function listarGrupos(instance) {
   console.log("=== Fim da lista de grupos ===\n")
 
   void syncContactsToDb(instance)
+  await writeRuntimeState(instance.id, { contacts_ready: true })
 }
 
 async function getLatestPdfPath(moment, group) {
@@ -1156,6 +1157,7 @@ function bindSocketEvents(instance, saveCreds) {
 
     if (connection === "open") {
       console.log(`\nConectado ao WhatsApp (${instance.id}).`)
+      instance.reconnectAttempts = 0
       const identity = getSocketIdentity(instance.socket)
 
       await writeRuntimeState(instance.id, {
@@ -1203,11 +1205,17 @@ function bindSocketEvents(instance, saveCreds) {
         return
       }
 
+      const MAX_RECONNECT_ATTEMPTS = 5
+      instance.reconnectAttempts = (instance.reconnectAttempts || 0) + 1
+      const giveUp = !wasLoggedOut && instance.reconnectAttempts > MAX_RECONNECT_ATTEMPTS
+
       await writeRuntimeState(instance.id, {
-        status: wasLoggedOut ? "offline" : "reconnecting",
+        status: wasLoggedOut || giveUp ? "offline" : "reconnecting",
         qr_code_data_url: "",
         connected_at: null,
-        last_error: errorMessage,
+        last_error: giveUp
+          ? `Desistiu de reconectar apos ${MAX_RECONNECT_ATTEMPTS} tentativas. Gere um novo QR manualmente. Ultimo erro: ${errorMessage ?? "desconhecido"}`
+          : errorMessage,
         phone_number: null,
         display_name: null,
         jid: null,
@@ -1218,8 +1226,10 @@ function bindSocketEvents(instance, saveCreds) {
         const label = instance.label || instance.id
         if (wasLoggedOut) {
           notifyTelegramAlert(`🚫 *WhatsApp Desconectado*\n📱 *${label}*\n❌ Sessão encerrada pelo WhatsApp (conta banida ou deslogada)\n🕐 ${now}`)
+        } else if (giveUp) {
+          notifyTelegramAlert(`🚫 *WhatsApp Desconectado*\n📱 *${label}*\n❌ Desistiu apos ${MAX_RECONNECT_ATTEMPTS} tentativas de reconexao — acao manual necessaria (gerar QR)\n🕐 ${now}`)
         } else {
-          notifyTelegramAlert(`⚠️ *WhatsApp Desconectado*\n📱 *${label}*\n🔄 Conexão perdida, tentando reconectar...${errorMessage ? `\n🔍 ${errorMessage}` : ""}\n🕐 ${now}`)
+          notifyTelegramAlert(`⚠️ *WhatsApp Desconectado*\n📱 *${label}*\n🔄 Conexão perdida, tentando reconectar (${instance.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...${errorMessage ? `\n🔍 ${errorMessage}` : ""}\n🕐 ${now}`)
         }
       }
 
@@ -1228,7 +1238,12 @@ function bindSocketEvents(instance, saveCreds) {
         return
       }
 
-      console.log(`Conexao fechada (${instance.id}). Tentando reconectar em 3 segundos...`)
+      if (giveUp) {
+        console.log(`Desistindo de reconectar (${instance.id}) apos ${MAX_RECONNECT_ATTEMPTS} tentativas. Aguardando acao manual (gerar QR).`)
+        return
+      }
+
+      console.log(`Conexao fechada (${instance.id}). Tentando reconectar em 3 segundos... (tentativa ${instance.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
       scheduleBotStart(instance.id, 3000)
     }
   })

@@ -10,25 +10,39 @@ import { PDFDocument } from "pdf-lib"
 const execFileAsync = promisify(execFile)
 
 // Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes
-const MAX_CONCURRENT_CAPTURES = 1
+const MAX_CONCURRENT_CAPTURES = 3
+const CAPTURE_QUEUE_TIMEOUT_MS = 3 * 60 * 1000
 let _activeCaptures = 0
-const _captureQueue: Array<() => void> = []
+const _captureQueue: Array<{ resolve: () => void; entry: { done: boolean } }> = []
 
 function acquireCaptureSemaphore(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (_activeCaptures < MAX_CONCURRENT_CAPTURES) {
       _activeCaptures++
       resolve()
-    } else {
-      _captureQueue.push(() => { _activeCaptures++; resolve() })
+      return
     }
+
+    const entry = { done: false }
+    const resolveEntry = () => { entry.done = true; resolve() }
+    _captureQueue.push({ resolve: resolveEntry, entry })
+
+    setTimeout(() => {
+      if (entry.done) return
+      const idx = _captureQueue.findIndex((q) => q.entry === entry)
+      if (idx !== -1) _captureQueue.splice(idx, 1)
+      entry.done = true
+      reject(new Error(
+        "Fila de captura de relatorios cheia ha mais de " + (CAPTURE_QUEUE_TIMEOUT_MS / 60000) + " minutos - tente novamente."
+      ))
+    }, CAPTURE_QUEUE_TIMEOUT_MS)
   })
 }
 
 function releaseCaptureSemaphore(): void {
   const next = _captureQueue.shift()
   if (next) {
-    next()
+    next.resolve()
   } else {
     _activeCaptures--
   }

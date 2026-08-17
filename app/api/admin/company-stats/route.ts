@@ -41,6 +41,7 @@ export type CompanyStatItem = {
   excelExportEnabled: boolean
   hideZeroRowsEnabled: boolean
   campaignClientPreviewEnabled: boolean
+  pngExportEnabled: boolean
   sendingHours: { enabled: boolean; mode: "allowed" | "blocked"; allowedWindows: Array<{ startTime: string; endTime: string }>; blockedWindows: Array<{ startTime: string; endTime: string }> } | null
   pbiPlan: "pro" | "premium" | "fabric" | null
   hasMasterUser: boolean
@@ -306,6 +307,7 @@ export async function GET(request: Request) {
         excelExportEnabled: features?.excel_export === true,
         hideZeroRowsEnabled: features?.hide_zero_rows === true,
         campaignClientPreviewEnabled: features?.campaign_client_preview === true,
+        pngExportEnabled: features?.png_export === true,
         sendingHours,
         pbiPlan,
         hasMasterUser,

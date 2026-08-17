@@ -106,7 +106,11 @@ export async function POST() {
     let removedCatalogDatasets = 0
     const warnings: string[] = []
 
-    for (const ws of currentDbWorkspaces) {
+    const reportSyncWorkspaces = currentDbWorkspaces.filter(
+    (ws) => (ws.name ?? "").trim().toLowerCase() !== "microsoft fabric capacity metrics"
+  )
+
+  for (const ws of reportSyncWorkspaces) {
       let reports: Awaited<ReturnType<typeof listReports>> | null = null
 
       try {

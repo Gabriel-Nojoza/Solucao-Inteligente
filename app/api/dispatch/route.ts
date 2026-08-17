@@ -37,6 +37,7 @@ import { sendWhatsAppBotMessage } from "@/lib/whatsapp-bot"
 import { resolveConnectedBotInstance } from "@/lib/whatsapp-bot-instances"
 import { runStoredAutomation } from "@/lib/automation-runner"
 import { retryAsync } from "@/lib/utils"
+import { getTimePartsInTimeZone } from "@/lib/schedule-cron"
 
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
 
@@ -335,6 +336,21 @@ async function handleDispatch(request: NextRequest) {
     return NextResponse.json({ error: "Rotina nao encontrada" }, { status: 404 })
   }
 
+  const rotationCandidates = Array.isArray((schedule as Record<string, unknown>).bot_instance_ids)
+    ? ((schedule as Record<string, unknown>).bot_instance_ids as string[]).filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0
+      )
+    : []
+  if (rotationCandidates.length > 0) {
+    const picked = rotationCandidates[Math.floor(Math.random() * rotationCandidates.length)]
+    schedule.bot_instance_id = picked
+    console.log("[dispatch] sorteado WhatsApp entre varios vinculados", {
+      scheduleId: schedule.id,
+      candidates: rotationCandidates,
+      picked,
+    })
+  }
+
   const originalBotInstanceId = schedule.bot_instance_id ?? null
 
   const resolvedBotInstance = await resolveConnectedBotInstance(
@@ -366,7 +382,41 @@ async function handleDispatch(request: NextRequest) {
       : "none"
   }
 
-  const effectiveSendMode: "audio" | "text" | "none" = scheduleSendMode !== "none" ? scheduleSendMode : companySendMode
+  let effectiveSendMode: "audio" | "text" | "none" = scheduleSendMode !== "none" ? scheduleSendMode : companySendMode
+
+  if (effectiveSendMode !== "none") {
+    const { data: limitRow } = await supabase
+      .from("company_settings")
+      .select("value")
+      .eq("company_id", companyId)
+      .eq("key", "narration_limit")
+      .maybeSingle()
+
+    const limitValue = limitRow?.value as Record<string, unknown> | null
+    const dailyLimit =
+      typeof limitValue?.daily_limit === "number" && limitValue.daily_limit > 0
+        ? limitValue.daily_limit
+        : 230
+
+    const nowParts = getTimePartsInTimeZone(new Date(), "America/Sao_Paulo")
+    const todayKey = `${nowParts.year}-${String(nowParts.month).padStart(2, "0")}-${String(nowParts.day).padStart(2, "0")}`
+
+    const { data: allowed, error: narrationLimitError } = await supabase.rpc(
+      "increment_narration_usage",
+      { p_company_id: companyId, p_date: todayKey, p_limit: dailyLimit }
+    )
+
+    if (narrationLimitError) {
+      console.error("[dispatch] erro ao checar limite de narracao", narrationLimitError)
+    } else if (allowed === false) {
+      console.log("[dispatch] limite diario de narracao atingido - enviando sem audio/texto", {
+        companyId,
+        dailyLimit,
+        todayKey,
+      })
+      effectiveSendMode = "none"
+    }
+  }
 
   // ── Verificar limite mensal de relatórios ──
   const { data: limitsRow } = await supabase
@@ -610,7 +660,9 @@ async function handleDispatch(request: NextRequest) {
   }
 
   const directPdfTargets =
-    normalizedScheduleExportFormat === "PDF" ? powerBiTargets : []
+    normalizedScheduleExportFormat === "PDF" && effectiveSendMode === "none"
+      ? powerBiTargets
+      : []
 
   const logs =
       directPdfTargets.length > 0
@@ -891,6 +943,13 @@ async function handleDispatch(request: NextRequest) {
                 .eq("id", currentLog.id)
             }
           }
+        }
+
+        // Pausa entre contatos (numero individual ou grupo) da mesma rotina,
+        // para nao sobrecarregar a captura do Chrome. So pausa se ainda
+        // houver proximo contato — nao atrasa a resposta a toa no ultimo.
+        if (contactIndex < normalizedContacts.length - 1) {
+          await sleep(EXPORT_DELAY_MS)
         }
       }
 

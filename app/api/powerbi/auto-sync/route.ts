@@ -58,7 +58,11 @@ async function runPowerBiSync(companyId: string) {
   let totalReports = 0
   const warnings: string[] = []
 
-  for (const ws of currentDbWorkspaces) {
+  const reportSyncWorkspaces = currentDbWorkspaces.filter(
+    (ws) => (ws.name ?? "").trim().toLowerCase() !== "microsoft fabric capacity metrics"
+  )
+
+  for (const ws of reportSyncWorkspaces) {
     let reports: Awaited<ReturnType<typeof listReports>> | null = null
     try {
       reports = await listReports(token, ws.pbi_workspace_id)

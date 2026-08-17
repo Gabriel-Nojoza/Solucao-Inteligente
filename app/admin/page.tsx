@@ -311,6 +311,7 @@ export default function AdminDashboardPage() {
   const [campaignsOverrides, setCampaignsOverrides] = useState<Record<string, boolean>>({})
   const [excelOverrides, setExcelOverrides] = useState<Record<string, boolean>>({})
   const [hideZeroOverrides, setHideZeroOverrides] = useState<Record<string, boolean>>({})
+  const [pngOverrides, setPngOverrides] = useState<Record<string, boolean>>({})
 
   type TimeWindow = { startTime: string; endTime: string }
   type SendingHoursDialog = {
@@ -427,6 +428,7 @@ export default function AdminDashboardPage() {
     campaignsEnabled?: boolean
     excelExportEnabled?: boolean
     hideZeroRowsEnabled?: boolean
+    pngExportEnabled?: boolean
   }) {
     if (fields.reportBuilderEnabled !== undefined) {
       setBuilderOverrides((prev) => ({ ...prev, [companyId]: fields.reportBuilderEnabled! }))
@@ -439,6 +441,9 @@ export default function AdminDashboardPage() {
     }
     if (fields.hideZeroRowsEnabled !== undefined) {
       setHideZeroOverrides((prev) => ({ ...prev, [companyId]: fields.hideZeroRowsEnabled! }))
+    }
+    if (fields.pngExportEnabled !== undefined) {
+      setPngOverrides((prev) => ({ ...prev, [companyId]: fields.pngExportEnabled! }))
     }
     setSavingLimitFor(companyId)
     try {
@@ -473,6 +478,13 @@ export default function AdminDashboardPage() {
         }
         if (fields.hideZeroRowsEnabled !== undefined) {
           setHideZeroOverrides((prev) => {
+            const next = { ...prev }
+            delete next[companyId]
+            return next
+          })
+        }
+        if (fields.pngExportEnabled !== undefined) {
+          setPngOverrides((prev) => {
             const next = { ...prev }
             delete next[companyId]
             return next
@@ -771,6 +783,7 @@ export default function AdminDashboardPage() {
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Campanhas</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Excel</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Ocultar Zeros</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">PNG</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Horário</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Taxa</th>
                       </tr>
@@ -904,6 +917,22 @@ export default function AdminDashboardPage() {
                                     <Switch
                                       checked={enabled}
                                       onCheckedChange={() => saveLimit(c.companyId, { hideZeroRowsEnabled: !enabled })}
+                                    />
+                                    <span className={`text-xs font-medium ${enabled ? "text-blue-500" : "text-muted-foreground"}`}>
+                                      {enabled ? "Ativado" : "Desativado"}
+                                    </span>
+                                  </div>
+                                )
+                              })()}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {(() => {
+                                const enabled = pngOverrides[c.companyId] ?? c.pngExportEnabled
+                                return (
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <Switch
+                                      checked={enabled}
+                                      onCheckedChange={() => saveLimit(c.companyId, { pngExportEnabled: !enabled })}
                                     />
                                     <span className={`text-xs font-medium ${enabled ? "text-blue-500" : "text-muted-foreground"}`}>
                                       {enabled ? "Ativado" : "Desativado"}
