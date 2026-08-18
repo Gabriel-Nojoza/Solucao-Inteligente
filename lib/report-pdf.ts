@@ -1,4 +1,4 @@
-import { execFile } from "child_process"
+import { execFile, spawn, exec } from "child_process"
 import { promisify } from "util"
 import * as fs from "fs"
 import * as path from "path"
@@ -6,6 +6,80 @@ import * as os from "os"
 import puppeteer from "puppeteer-core"
 
 const execFileAsync = promisify(execFile)
+
+class CaptureTimeoutError extends Error {}
+
+// Mata a árvore de processos inteira (node worker + Chrome + subprocessos do Chrome).
+// Necessário porque matar só o processo node com SIGKILL deixa o Chrome órfão rodando
+// indefinidamente na VPS — foi essa a causa da cascata de "ERR_INSUFFICIENT_RESOURCES" /
+// "Failed to launch the browser process" observada quando muitos Chromes travados se
+// acumulam depois de timeouts.
+function killProcessTree(pid: number): void {
+  if (process.platform === "win32") {
+    exec(`taskkill /PID ${pid} /T /F`, () => {})
+    return
+  }
+  try {
+    process.kill(-pid, "SIGKILL")
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch {}
+  }
+}
+
+// Roda o worker de captura em processo filho isolado, garantindo que o grupo de
+// processos inteiro (incluindo o Chrome lançado pelo worker) seja encerrado tanto em
+// timeout quanto ao final normal da execução — evita Chromes órfãos acumulando na VPS.
+function runIsolatedWorker(workerPath: string, envVar: string, payload: string, timeoutMs: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("node", [workerPath], {
+      env: { ...process.env, [envVar]: payload },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    })
+
+    const stdoutChunks: Buffer[] = []
+    let stderr = ""
+    let settled = false
+    let timedOut = false
+
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (child.pid) killProcessTree(child.pid)
+    }, timeoutMs)
+
+    child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk))
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+
+    child.once("error", (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err)
+    })
+
+    child.once("close", (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      // Rede de segurança: garante que nenhum Chrome sobreviva ao worker, mesmo em saída normal
+      if (child.pid) killProcessTree(child.pid)
+
+      if (timedOut) {
+        reject(new CaptureTimeoutError(`Timeout apos ${timeoutMs}ms`))
+        return
+      }
+      if (code === 0) {
+        resolve(Buffer.concat(stdoutChunks))
+      } else {
+        reject(new Error(stderr.trim() || `Processo de captura saiu com codigo ${code}`))
+      }
+    })
+  })
+}
 
 // Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes
 const MAX_CONCURRENT_CAPTURES = 3
@@ -153,24 +227,16 @@ export async function captureReportScreenshot(input: {
       reportId: input.reportId,
       tokenType: input.tokenType,
     })
-    const { stdout } = await execFileAsync("node", [workerPath], {
-      timeout: 120_000,
-      maxBuffer: 100 * 1024 * 1024,
-      env: { ...process.env, CHROME_CAPTURE_INPUT: captureInput },
-      killSignal: "SIGKILL",
-      encoding: "utf8",
-    } as any)
-    return Buffer.from(String(stdout), "base64")
+    const stdout = await runIsolatedWorker(workerPath, "CHROME_CAPTURE_INPUT", captureInput, 120_000)
+    return Buffer.from(stdout.toString("utf8"), "base64")
   } catch (err: any) {
-    const stderr = err.stderr ?? ""
-    const killed = err.killed === true || err.signal === "SIGKILL"
-    if (killed) {
+    if (err instanceof CaptureTimeoutError) {
       throw new Error(
         "Tempo limite ao capturar screenshot via Chrome (120s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI."
       )
     }
-    if (stderr) {
-      throw new Error(`Falha ao capturar screenshot: ${stderr.trim()}`)
+    if (err?.message) {
+      throw new Error(`Falha ao capturar screenshot: ${err.message}`)
     }
     throw err
   } finally {
@@ -202,31 +268,23 @@ export async function captureReportAsPdf(input: {
     pdfFormat: "A6",
   })
 
+  const timeoutMs = input.timeoutMs ?? 120_000
   await acquireCaptureSemaphore()
   try {
     console.log("[captureReportAsPdf] iniciando processo filho isolado", {
       reportId: input.reportId,
       tokenType: input.tokenType,
     })
-    const timeoutMs = input.timeoutMs ?? 120_000
-    const { stdout } = await execFileAsync("node", [workerPath], {
-      timeout: timeoutMs,
-      maxBuffer: 100 * 1024 * 1024,
-      env: { ...process.env, CHROME_CAPTURE_PDF_INPUT: captureInput },
-      killSignal: "SIGKILL",
-      encoding: "utf8",
-    } as any)
-    return Buffer.from(String(stdout), "base64")
+    const stdout = await runIsolatedWorker(workerPath, "CHROME_CAPTURE_PDF_INPUT", captureInput, timeoutMs)
+    return Buffer.from(stdout.toString("utf8"), "base64")
   } catch (err: any) {
-    const stderr = err.stderr ?? ""
-    const killed = err.killed === true || err.signal === "SIGKILL"
-    if (killed) {
+    if (err instanceof CaptureTimeoutError) {
       throw new Error(
-        `Tempo limite ao capturar PDF via Chrome (${Math.round((input.timeoutMs ?? 120_000) / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
+        `Tempo limite ao capturar PDF via Chrome (${Math.round(timeoutMs / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
       )
     }
-    if (stderr) {
-      throw new Error(`Falha ao capturar PDF: ${stderr.trim()}`)
+    if (err?.message) {
+      throw new Error(`Falha ao capturar PDF: ${err.message}`)
     }
     throw err
   } finally {
