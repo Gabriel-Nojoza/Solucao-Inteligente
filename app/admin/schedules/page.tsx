@@ -29,9 +29,26 @@ interface AdminSchedule {
   companies: { name: string } | null
 }
 
+interface FailedEntry {
+  report_name: string
+  time: string
+  count: number
+}
+
 interface FailedSummary {
   total_failed: number
   schedules: Array<{ schedule_id: string; report_name: string; count: number }>
+  by_period: {
+    manha: FailedEntry[]
+    tarde: FailedEntry[]
+    noite: FailedEntry[]
+  }
+}
+
+const PERIOD_LABELS: Record<keyof FailedSummary["by_period"], string> = {
+  manha: "Manhã",
+  tarde: "Tarde",
+  noite: "Noite",
 }
 
 interface CompanyNarration {
@@ -238,27 +255,64 @@ export default function AdminSchedulesPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 rounded-md border p-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">Reenviar relatórios falhados</span>
-              <span className="text-xs text-muted-foreground">
-                {failedLoading
-                  ? "Verificando..."
-                  : failedSummary && failedSummary.total_failed > 0
-                    ? `${failedSummary.total_failed} envio(s) com falha nas últimas 24h, em ${failedSummary.schedules.length} rotina(s).`
-                    : "Nenhum envio com falha nas últimas 24h."}
-              </span>
+          <div className="flex flex-col gap-4 rounded-md border p-4">
+            <div className="flex items-center gap-4">
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium">Reenviar relatórios falhados</span>
+                <span className="text-xs text-muted-foreground">
+                  {failedLoading
+                    ? "Verificando..."
+                    : failedSummary && failedSummary.total_failed > 0
+                      ? `${failedSummary.total_failed} envio(s) com falha nas últimas 24h, em ${failedSummary.schedules.length} rotina(s).`
+                      : "Nenhum envio com falha nas últimas 24h."}
+                </span>
+              </div>
+              <div className="ml-auto">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={resending || !failedSummary || failedSummary.total_failed === 0}
+                  onClick={handleResendFailed}
+                >
+                  {resending ? "Reenviando..." : "Reenviar falhas"}
+                </Button>
+              </div>
             </div>
-            <div className="ml-auto">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={resending || !failedSummary || failedSummary.total_failed === 0}
-                onClick={handleResendFailed}
-              >
-                {resending ? "Reenviando..." : "Reenviar falhas"}
-              </Button>
-            </div>
+
+            {failedSummary && failedSummary.total_failed > 0 && (
+              <div className="grid grid-cols-1 gap-4 border-t pt-4 sm:grid-cols-3">
+                {(Object.keys(PERIOD_LABELS) as Array<keyof FailedSummary["by_period"]>).map((period) => {
+                  const entries = failedSummary.by_period[period]
+                  return (
+                    <div key={period} className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase text-muted-foreground">
+                        {PERIOD_LABELS[period]} ({entries.length})
+                      </span>
+                      {entries.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">Sem falhas</span>
+                      ) : (
+                        <ul className="flex flex-col gap-1">
+                          {entries.map((entry) => (
+                            <li
+                              key={`${entry.report_name}-${entry.time}`}
+                              className="flex items-center justify-between gap-2 text-xs"
+                            >
+                              <span className="truncate" title={entry.report_name}>
+                                {entry.report_name}
+                              </span>
+                              <span className="shrink-0 text-muted-foreground">
+                                {entry.time}
+                                {entry.count > 1 ? ` (x${entry.count})` : ""}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           <div className="rounded-md border">

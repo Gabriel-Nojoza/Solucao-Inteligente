@@ -18,7 +18,35 @@ function getRequestOrigin(request: NextRequest) {
   )
 }
 
-// Lista, por empresa, quantos disparos falharam nas ultimas 24h (agrupado por rotina).
+const TIME_ZONE = "America/Sao_Paulo"
+
+const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
+  timeZone: TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+})
+
+const hourFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: TIME_ZONE,
+  hour: "2-digit",
+  hourCycle: "h23",
+})
+
+type Period = "manha" | "tarde" | "noite"
+
+// Manha: 00h-11h59, Tarde: 12h-17h59, Noite: 18h-23h59 (horario de Brasilia).
+function getPeriod(hour: number): Period {
+  if (hour < 12) return "manha"
+  if (hour < 18) return "tarde"
+  return "noite"
+}
+
+function sortByTime(entries: { report_name: string; time: string; count: number }[]) {
+  return entries.sort((a, b) => a.time.localeCompare(b.time))
+}
+
+// Lista, por empresa, quantos disparos falharam nas ultimas 24h (agrupado por rotina e por horario/periodo do dia).
 export async function GET(request: NextRequest) {
   await requireAdminContext()
   const supabase = getAdminClient()
@@ -32,7 +60,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabase
     .from("dispatch_logs")
-    .select("schedule_id, report_name, created_at")
+    .select("schedule_id, report_name, dispatched_at, created_at")
     .eq("company_id", companyId)
     .eq("status", "failed")
     .gte("created_at", since)
@@ -40,23 +68,50 @@ export async function GET(request: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const bySchedule = new Map<string, { schedule_id: string; report_name: string; count: number }>()
+  const byPeriod: Record<Period, Map<string, { report_name: string; time: string; count: number }>> = {
+    manha: new Map(),
+    tarde: new Map(),
+    noite: new Map(),
+  }
+
   for (const row of data ?? []) {
-    if (!row.schedule_id) continue
-    const existing = bySchedule.get(row.schedule_id)
-    if (existing) {
-      existing.count += 1
+    const reportName = row.report_name ?? "Desconhecido"
+
+    if (row.schedule_id) {
+      const existing = bySchedule.get(row.schedule_id)
+      if (existing) {
+        existing.count += 1
+      } else {
+        bySchedule.set(row.schedule_id, { schedule_id: row.schedule_id, report_name: reportName, count: 1 })
+      }
+    }
+
+    const timestamp = row.dispatched_at ?? row.created_at
+    if (!timestamp) continue
+    const date = new Date(timestamp)
+    if (Number.isNaN(date.getTime())) continue
+
+    const hour = Number(hourFormatter.format(date))
+    const time = timeFormatter.format(date)
+    const period = getPeriod(hour)
+    const key = `${reportName}|${time}`
+
+    const existingEntry = byPeriod[period].get(key)
+    if (existingEntry) {
+      existingEntry.count += 1
     } else {
-      bySchedule.set(row.schedule_id, {
-        schedule_id: row.schedule_id,
-        report_name: row.report_name ?? "Desconhecido",
-        count: 1,
-      })
+      byPeriod[period].set(key, { report_name: reportName, time, count: 1 })
     }
   }
 
   return NextResponse.json({
     total_failed: data?.length ?? 0,
     schedules: Array.from(bySchedule.values()),
+    by_period: {
+      manha: sortByTime(Array.from(byPeriod.manha.values())),
+      tarde: sortByTime(Array.from(byPeriod.tarde.values())),
+      noite: sortByTime(Array.from(byPeriod.noite.values())),
+    },
   })
 }
 
