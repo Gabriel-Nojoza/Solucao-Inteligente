@@ -130,7 +130,12 @@ async function main() {
     if (!element) throw new Error('Container Power BI nao encontrado na pagina')
 
     const screenshot = await element.screenshot({ type: 'png' })
-    process.stdout.write(Buffer.from(screenshot).toString('base64'))
+    await new Promise((resolve, reject) => {
+      process.stdout.write(Buffer.from(screenshot).toString('base64'), (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
     process.exit(0)
   } finally {
     await browser.close().catch(() => {})

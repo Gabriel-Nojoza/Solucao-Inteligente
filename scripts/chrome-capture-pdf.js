@@ -250,7 +250,12 @@ async function main() {
       throw new Error(`PDF gerado parece invalido/truncado (headerOk=${headerOk}, tailOk=${tailOk}, bytes=${pdfBuffer.length})`)
     }
 
-    process.stdout.write(pdfBuffer.toString('base64'))
+    await new Promise((resolve, reject) => {
+      process.stdout.write(pdfBuffer.toString('base64'), (err) => {
+        if (err) reject(err)
+        else resolve()
+      })
+    })
     process.exit(0)
   } finally {
     await browser.close().catch(() => {})
