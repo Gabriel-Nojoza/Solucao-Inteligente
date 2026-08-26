@@ -136,7 +136,6 @@ async function main() {
         else resolve()
       })
     })
-    process.exit(0)
   } finally {
     await browser.close().catch(() => {})
     await localServer.close().catch(() => {})
