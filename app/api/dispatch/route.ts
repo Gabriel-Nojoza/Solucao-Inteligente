@@ -38,6 +38,7 @@ import { resolveConnectedBotInstance } from "@/lib/whatsapp-bot-instances"
 import { runStoredAutomation } from "@/lib/automation-runner"
 import { retryAsync } from "@/lib/utils"
 import { getTimePartsInTimeZone } from "@/lib/schedule-cron"
+import { sendTelegramNotification } from "@/lib/telegram-notify"
 
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
 
@@ -51,6 +52,8 @@ async function exportDocumentWithFallback(input: {
   pageNames: string[] | null
   pageName: string | null | undefined
   format?: "PDF" | "PNG"
+  pdfPageFormat?: string
+  pdfLandscape?: boolean
 }): Promise<PowerBiExportedDocument> {
   const format = input.format ?? "PDF"
   try {
@@ -87,6 +90,8 @@ async function exportDocumentWithFallback(input: {
       pageName: input.pageName ?? null,
       pageNames: input.pageNames,
       tokenType: "Aad",
+      pdfFormat: input.pdfPageFormat,
+      pdfLandscape: input.pdfLandscape,
     })
     return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
   }
@@ -727,12 +732,18 @@ async function handleDispatch(request: NextRequest) {
     primaryReport?.name ?? "relatorio"
   )
 
-  const { data: n8nSettings } = await supabase
-    .from("company_settings")
-    .select("value")
-    .eq("company_id", companyId)
-    .eq("key", "n8n")
-    .single()
+  const [{ data: n8nSettings }, { data: pdfSettings }] = await Promise.all([
+    supabase.from("company_settings").select("value").eq("company_id", companyId).eq("key", "n8n").single(),
+    supabase.from("company_settings").select("value").eq("company_id", companyId).eq("key", "pdf_settings").maybeSingle(),
+  ])
+
+  const pdfSettingsValue = pdfSettings?.value as Record<string, unknown> | null
+  const pdfPageFormat = (pdfSettingsValue?.format as string | undefined) ?? process.env.PDF_PAGE_FORMAT_OVERRIDE
+  const pdfLandscape: boolean = pdfSettingsValue?.landscape !== undefined
+    ? Boolean(pdfSettingsValue.landscape)
+    : process.env.PDF_LANDSCAPE_OVERRIDE !== undefined
+    ? process.env.PDF_LANDSCAPE_OVERRIDE !== "false"
+    : true
 
   const normalizedN8nSettings = normalizeN8nSettings(n8nSettings?.value)
   const webhookUrl =
@@ -768,6 +779,9 @@ async function handleDispatch(request: NextRequest) {
     if (directPdfTargets.length > 0) {
       const pbiToken = await getAccessTokenMasterUser(companyId)
       let exportCount = 0
+      let deliveredCount = 0
+      let failedCount = 0
+      const failureDetails: string[] = []
 
       for (const [contactIndex, contact] of normalizedContacts.entries()) {
         for (const [reportIndex, target] of directPdfTargets.entries()) {
@@ -813,6 +827,10 @@ async function handleDispatch(request: NextRequest) {
           }
 
           try {
+            // 3 tentativas no total (era 5). Sob rajada, com a CPU saturada, a
+            // 4a/5a tentativa de captura nunca ajudava — só prendia o slot do
+            // semaforo por ~2min cada e matava de fome os envios que dariam
+            // certo. Um relatorio que falhou 3x nao vai renderizar na 5a.
             await retryAsync(async () => {
               if (selectedPageNames.length > 1) {
                 for (const [pageIndex, pageName] of selectedPageNames.entries()) {
@@ -837,6 +855,8 @@ async function handleDispatch(request: NextRequest) {
                     embedUrl: pbiEmbedUrl,
                     pageNames: [pageName],
                     pageName,
+                    pdfPageFormat,
+                    pdfLandscape,
                   })
 
                   console.log("[dispatch] sending document to bot", {
@@ -930,6 +950,8 @@ async function handleDispatch(request: NextRequest) {
                   pageNames: resolvedPageNames,
                   pageName: target.config.pbi_page_name,
                   format: normalizedScheduleExportFormat === "PNG" ? "PNG" : "PDF",
+                  pdfPageFormat,
+                  pdfLandscape,
                 })
 
                 console.log("[dispatch] sending document to bot", {
@@ -952,7 +974,9 @@ async function handleDispatch(request: NextRequest) {
                   mimetype: exportedFile.contentType,
                 }, resolvedBotInstance?.id ?? null)
               }
-            }, 4, 7000)
+            }, 2, 7000)
+
+            deliveredCount++
 
             if (currentLog) {
               await supabase
@@ -972,6 +996,10 @@ async function handleDispatch(request: NextRequest) {
               reportName: target.report.name,
               error: errMsg,
             })
+            failedCount++
+            failureDetails.push(
+              `- ${target.report.name} -> ${getDispatchLogTarget(contact)}: ${errMsg.slice(0, 140)}`
+            )
             if (currentLog) {
               await supabase
                 .from("dispatch_logs")
@@ -1000,9 +1028,32 @@ async function handleDispatch(request: NextRequest) {
         .eq("company_id", companyId)
         .eq("id", schedule_id)
 
+      // Notificacao de envio de PDF (caminho direto nao passa pelo n8n, entao
+      // a notificacao de sucesso/erro do fluxo n8n nunca cobre estes envios).
+      if (deliveredCount + failedCount > 0) {
+        const reportLabel = [...new Set(directPdfTargets.map((t) => t.report.name))].join(", ")
+        const statusLine =
+          failedCount === 0
+            ? `OK ${deliveredCount} entregue(s)`
+            : `${deliveredCount} entregue(s) / ${failedCount} falha(s)`
+        const emoji = failedCount === 0 ? "📄✅" : deliveredCount === 0 ? "📄❌" : "📄⚠️"
+        const notifyLines = [
+          `${emoji} Envio PDF concluido`,
+          `Empresa: ${companyName}`,
+          `Rotina: ${schedule.name} — ${reportLabel}`,
+          statusLine,
+        ]
+        if (failureDetails.length > 0) {
+          notifyLines.push("", ...failureDetails.slice(0, 10))
+        }
+        void sendTelegramNotification(notifyLines.join("\n"))
+      }
+
       return NextResponse.json({
         success: true,
         logs_created: (insertedLogs ?? []).length,
+        delivered: deliveredCount,
+        failed: failedCount,
         attachment_mode:
           hasMultipleReports
             ? "multiple_reports"

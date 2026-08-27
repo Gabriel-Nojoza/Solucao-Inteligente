@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 
-const STUCK_TIMEOUT_MINUTES = 5
+// Tempo que um disparo pode ficar em "sending"/"pending" antes de ser dado
+// como falho. Precisa ser >= ao pior caso de uma captura + retries
+// (ver retryAsync em app/api/dispatch/route.ts). Ajustavel por env.
+const STUCK_TIMEOUT_MINUTES = Number(process.env.DISPATCH_STUCK_TIMEOUT_MINUTES) || 8
 
 export async function GET(request: NextRequest) {
   try {

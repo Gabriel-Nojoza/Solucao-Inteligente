@@ -81,8 +81,18 @@ function runIsolatedWorker(workerPath: string, envVar: string, payload: string, 
   })
 }
 
-// Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes
-const MAX_CONCURRENT_CAPTURES = 3
+// Limita capturas simultâneas para evitar sobrecarga de CPU com múltiplos Chromes.
+// Cada captura sobe um Chrome que renderiza o Power BI em WebGL por software
+// (swiftshader) — pesado de CPU. Auto-ajusta pelo nº de vCPUs da máquina (um
+// render usa ~1–2 cores); pode ser fixado pela env MAX_CONCURRENT_CAPTURES.
+// PNG (captureReportScreenshot) e PDF (captureReportAsPdf) dividem esse mesmo
+// limite — as duas rotas competem pelos mesmos slots.
+const MAX_CONCURRENT_CAPTURES = (() => {
+  const fromEnv = Number(process.env.MAX_CONCURRENT_CAPTURES)
+  if (Number.isFinite(fromEnv) && fromEnv >= 1) return Math.floor(fromEnv)
+  const cpuCount = os.cpus()?.length ?? 2
+  return Math.max(1, Math.min(3, Math.floor(cpuCount / 2)))
+})()
 // Tempo maximo esperando na fila por um "slot" livre. Sem isso, sob carga alta
 // (muitos relatorios pedindo captura ao mesmo tempo), uma requisicao podia
 // ficar esperando indefinidamente e estourar o timeout do n8n (10 min) ou o
@@ -254,7 +264,23 @@ export async function captureReportAsPdf(input: {
   viewportHeight?: number
   tokenType?: "Embed" | "Aad"
   timeoutMs?: number
+  pdfFormat?: string
+  pdfLandscape?: boolean
 }): Promise<Buffer> {
+  const pdfFormat = input.pdfFormat ?? "A6"
+  const pdfLandscape = input.pdfLandscape ?? true
+  // Dimensões em pixels (96dpi) para cada formato, portrait e landscape
+  const FORMAT_VIEWPORTS: Record<string, { portrait: { width: number; height: number }; landscape: { width: number; height: number } }> = {
+    A0: { portrait: { width: 3179, height: 4494 }, landscape: { width: 4494, height: 3179 } },
+    A1: { portrait: { width: 2245, height: 3179 }, landscape: { width: 3179, height: 2245 } },
+    A2: { portrait: { width: 1587, height: 2245 }, landscape: { width: 2245, height: 1587 } },
+    A3: { portrait: { width: 1123, height: 1587 }, landscape: { width: 1587, height: 1123 } },
+    A4: { portrait: { width: 794,  height: 1123 }, landscape: { width: 1123, height: 794  } },
+    A5: { portrait: { width: 559,  height: 794  }, landscape: { width: 794,  height: 559  } },
+    A6: { portrait: { width: 397,  height: 559  }, landscape: { width: 559,  height: 397  } },
+  }
+  const orientKey = pdfLandscape ? "landscape" : "portrait"
+  const defaultViewport = FORMAT_VIEWPORTS[pdfFormat]?.[orientKey] ?? FORMAT_VIEWPORTS["A6"][orientKey]
   const workerPath = path.join(process.cwd(), "scripts", "chrome-capture-pdf.js")
   const captureInput = JSON.stringify({
     embedUrl: input.embedUrl,
@@ -262,10 +288,11 @@ export async function captureReportAsPdf(input: {
     reportId: input.reportId,
     pageName: input.pageName ?? null,
     pageNames: input.pageNames ?? null,
-    viewportWidth: input.viewportWidth ?? 559,
-    viewportHeight: input.viewportHeight ?? 397,
+    viewportWidth: input.viewportWidth ?? defaultViewport.width,
+    viewportHeight: input.viewportHeight ?? defaultViewport.height,
     tokenType: input.tokenType ?? "Embed",
-    pdfFormat: "A6",
+    pdfFormat,
+    landscape: pdfLandscape,
   })
 
   const timeoutMs = input.timeoutMs ?? 120_000

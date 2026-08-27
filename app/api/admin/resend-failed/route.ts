@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { requireAdminContext } from "@/lib/tenant"
+import { resolveCompanyByName } from "@/lib/company-lookup"
 
 function getAdminClient() {
   return createClient(
@@ -116,19 +117,63 @@ export async function GET(request: NextRequest) {
 }
 
 // Reenvia todas as rotinas que tiveram falha nas ultimas 24h para a empresa.
+// Autenticacao: login de admin OU secret da plataforma (header x-callback-secret
+// ou ?secret=), para permitir que o bot do Telegram / n8n dispare o reenvio.
 export async function POST(request: NextRequest) {
-  await requireAdminContext()
-  const supabase = getAdminClient()
-  const body = await request.json().catch(() => null)
-  const companyId = typeof body?.company_id === "string" ? body.company_id.trim() : ""
+  const platformSecret = process.env.PLATFORM_SCHEDULER_SECRET?.trim()
+  const incomingSecret =
+    request.headers.get("x-callback-secret")?.trim() ||
+    new URL(request.url).searchParams.get("secret")?.trim() ||
+    ""
+  const viaSecret = !!platformSecret && incomingSecret === platformSecret
 
-  if (!companyId) {
-    return NextResponse.json({ error: "company_id obrigatorio" }, { status: 400 })
+  if (!viaSecret) {
+    try {
+      await requireAdminContext()
+    } catch {
+      return NextResponse.json({ error: "Nao autorizado" }, { status: 401 })
+    }
   }
 
-  const platformSecret = process.env.PLATFORM_SCHEDULER_SECRET?.trim()
   if (!platformSecret) {
     return NextResponse.json({ error: "PLATFORM_SCHEDULER_SECRET nao configurado" }, { status: 500 })
+  }
+
+  const supabase = getAdminClient()
+  const body = await request.json().catch(() => null)
+
+  let companyId = typeof body?.company_id === "string" ? body.company_id.trim() : ""
+  let companyName = ""
+
+  // Alternativa a company_id: trecho do nome da empresa (fuzzy).
+  if (!companyId && typeof body?.company === "string" && body.company.trim()) {
+    const companyInput = body.company.trim()
+    const resolved = await resolveCompanyByName(supabase, companyInput)
+    if (resolved.candidates) {
+      return NextResponse.json(
+        {
+          error: "ambiguous_company",
+          message: `"${companyInput}" casa com mais de uma empresa. Seja mais especifico.`,
+          candidates: resolved.candidates,
+        },
+        { status: 409 }
+      )
+    }
+    if (!resolved.match) {
+      return NextResponse.json(
+        {
+          error: "company_not_found",
+          message: `Nenhuma empresa encontrada para "${companyInput}".`,
+        },
+        { status: 404 }
+      )
+    }
+    companyId = resolved.match.id
+    companyName = resolved.match.name
+  }
+
+  if (!companyId) {
+    return NextResponse.json({ error: "company_id ou company obrigatorio" }, { status: 400 })
   }
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -147,7 +192,12 @@ export async function POST(request: NextRequest) {
   )
 
   if (scheduleIds.length === 0) {
-    return NextResponse.json({ started: false, total: 0 })
+    return NextResponse.json({
+      started: false,
+      total: 0,
+      company_id: companyId,
+      company_name: companyName || undefined,
+    })
   }
 
   const appUrl = getRequestOrigin(request)
@@ -186,6 +236,8 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     started: true,
+    company_id: companyId,
+    company_name: companyName || undefined,
     total: scheduleIds.length,
     interval_minutes: RESEND_INTERVAL_MS / 60000,
     estimated_minutes: Math.round((scheduleIds.length * RESEND_INTERVAL_MS) / 60000),

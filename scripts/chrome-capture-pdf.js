@@ -57,11 +57,11 @@ async function injectPrintColorAdjust(page) {
   }
 }
 
-async function captureSinglePagePdf(page, format) {
+async function captureSinglePagePdf(page, format, landscape) {
   await injectPrintColorAdjust(page)
   const pdf = await page.pdf({
     format,
-    landscape: true,
+    landscape: landscape !== false,
     printBackground: true,
     margin: { top: '0', right: '0', bottom: '0', left: '0' },
   })
@@ -80,6 +80,7 @@ async function main() {
     viewportHeight = 397,
     tokenType = 'Embed',
     pdfFormat = 'A6',
+    landscape = true,
   } = input
 
   const executablePath = findChromePath()
@@ -91,7 +92,7 @@ async function main() {
 <head>
   <meta charset="utf-8">
   <style>
-    @page { margin: 0; size: A6 landscape; }
+    @page { margin: 0; size: ${pdfFormat} ${landscape ? 'landscape' : 'portrait'}; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html { width: ${viewportWidth}px; height: ${viewportHeight}px; overflow: hidden; max-height: ${viewportHeight}px; }
     body { overflow: hidden; background: #fff; width: ${viewportWidth}px; height: ${viewportHeight}px; max-height: ${viewportHeight}px; }
@@ -202,7 +203,7 @@ async function main() {
     let pdfBuffer
 
     if (!pagesToCapture) {
-      pdfBuffer = await captureSinglePagePdf(page, pdfFormat)
+      pdfBuffer = await captureSinglePagePdf(page, pdfFormat, landscape)
     } else {
       const pagePdfs = []
 
@@ -224,7 +225,7 @@ async function main() {
           await new Promise(r => setTimeout(r, 3000))
         }
 
-        pagePdfs.push(await captureSinglePagePdf(page, pdfFormat))
+        pagePdfs.push(await captureSinglePagePdf(page, pdfFormat, landscape))
       }
 
       const merged = await PDFDocument.create()

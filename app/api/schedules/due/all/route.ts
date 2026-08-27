@@ -41,14 +41,17 @@ export async function GET(request: NextRequest) {
     const supabase = createClient()
     const now = new Date()
 
-    // Expira dispatches travados a cada minuto (roda sempre)
+    // Expira dispatches travados a cada minuto (roda sempre).
+    // Precisa cobrir o pior caso de captura + retries (retryAsync em
+    // app/api/dispatch/route.ts). Ajustavel por env DISPATCH_STUCK_TIMEOUT_MINUTES.
     {
-      const cutoff = new Date(now.getTime() - 5 * 60 * 1000).toISOString()
+      const stuckMinutes = Number(process.env.DISPATCH_STUCK_TIMEOUT_MINUTES) || 8
+      const cutoff = new Date(now.getTime() - stuckMinutes * 60 * 1000).toISOString()
       supabase
         .from("dispatch_logs")
         .update({
           status: "failed",
-          error_message: "Timeout de entrega — sem confirmacao do bot apos 5 minutos",
+          error_message: `Timeout de entrega — sem confirmacao do bot apos ${stuckMinutes} minutos`,
           completed_at: now.toISOString(),
         })
         .in("status", ["sending", "pending"])
@@ -57,7 +60,7 @@ export async function GET(request: NextRequest) {
         .then(
           ({ data }) => {
             if (data && data.length > 0) {
-              console.log(`[due/all] expirou ${data.length} dispatch(es) travados (>5min)`)
+              console.log(`[due/all] expirou ${data.length} dispatch(es) travados (>${stuckMinutes}min)`)
             }
           },
           (err) => {
