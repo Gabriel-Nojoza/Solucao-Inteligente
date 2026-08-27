@@ -137,12 +137,26 @@ async function main() {
       })
     })
   } finally {
-    await browser.close().catch(() => {})
-    await localServer.close().catch(() => {})
+    // Limpeza com teto de tempo: browser.close() pode travar indefinidamente
+    // se o Chrome ficou wedged. Se estourar 5s, seguimos — o processo pai
+    // ainda mata o process group inteiro (runIsolatedWorker/killProcessTree).
+    await Promise.race([
+      (async () => {
+        await browser.close().catch(() => {})
+        await localServer.close().catch(() => {})
+      })(),
+      new Promise(r => setTimeout(r, 5000)),
+    ])
   }
 }
 
-main().catch(err => {
-  process.stderr.write(err && err.message ? err.message : String(err))
-  process.exit(1)
-})
+// Rede de seguranca: se algo pendurar o event loop, sai antes do SIGKILL
+// do pai (120s) para nao deixar Chrome reparentado no init.
+setTimeout(() => process.exit(3), 110000).unref()
+
+main()
+  .then(() => process.exit(0)) // output ja foi escrito e drenado dentro de main()
+  .catch(err => {
+    process.stderr.write(err && err.message ? err.message : String(err))
+    process.exit(1)
+  })
