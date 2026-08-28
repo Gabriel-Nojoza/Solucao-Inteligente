@@ -93,11 +93,13 @@ const MAX_CONCURRENT_CAPTURES = (() => {
   const cpuCount = os.cpus()?.length ?? 2
   return Math.max(1, Math.min(3, Math.floor(cpuCount / 2)))
 })()
-// Tempo maximo esperando na fila por um "slot" livre. Sem isso, sob carga alta
-// (muitos relatorios pedindo captura ao mesmo tempo), uma requisicao podia
-// ficar esperando indefinidamente e estourar o timeout do n8n (10 min) ou o
-// auto-expire dos dispatch_logs (5 min) sem nenhum erro claro.
-const CAPTURE_QUEUE_TIMEOUT_MS = 3 * 60 * 1000
+// Tempo maximo esperando na fila por um "slot" livre. Sob rajada (muitos
+// relatorios pedindo captura ao mesmo tempo) com concorrencia baixa, a fila
+// fica funda e os ultimos batem nesse teto ("fila cheia"). Deve ser menor que
+// o auto-expire dos dispatch_logs (DISPATCH_STUCK_TIMEOUT_MINUTES, default 8min)
+// menos o tempo de uma captura. Ajustavel por env CAPTURE_QUEUE_TIMEOUT_MINUTES.
+const CAPTURE_QUEUE_TIMEOUT_MS =
+  (Number(process.env.CAPTURE_QUEUE_TIMEOUT_MINUTES) || 5) * 60 * 1000
 let _activeCaptures = 0
 const _captureQueue: Array<{ resolve: () => void; entry: { done: boolean } }> = []
 

@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     // Precisa cobrir o pior caso de captura + retries (retryAsync em
     // app/api/dispatch/route.ts). Ajustavel por env DISPATCH_STUCK_TIMEOUT_MINUTES.
     {
-      const stuckMinutes = Number(process.env.DISPATCH_STUCK_TIMEOUT_MINUTES) || 8
+      const stuckMinutes = Number(process.env.DISPATCH_STUCK_TIMEOUT_MINUTES) || 10
       const cutoff = new Date(now.getTime() - stuckMinutes * 60 * 1000).toISOString()
       supabase
         .from("dispatch_logs")
