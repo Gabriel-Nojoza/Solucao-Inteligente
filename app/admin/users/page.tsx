@@ -175,6 +175,7 @@ export default function UsersPage() {
   const [formDispatchTrialEndsAt, setFormDispatchTrialEndsAt] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [showN8nCallbackSecret, setShowN8nCallbackSecret] = useState(false)
+  const [showPbiSecrets, setShowPbiSecrets] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [loadingEditDetails, setLoadingEditDetails] = useState(false)
@@ -861,19 +862,29 @@ export default function UsersPage() {
                       </div>
                       <div className="flex flex-col gap-2">
                         <Label>Client Secret *</Label>
-                        <Input
-                          type="password"
-                          value={formPbiClientSecret}
-                          onChange={(e) => {
-                            setFormPbiClientSecret(e.target.value)
-                            setPowerbiPreview(null)
-                            setPowerbiPreviewError(null)
-                            setWorkspaceOptions([])
-                            setSelectedPbiWorkspaceIds([])
-                            setSelectedPbiDatasetIds([])
-                          }}
-                          placeholder="Client secret"
-                        />
+                        <div className="relative">
+                          <Input
+                            type={showPbiSecrets ? "text" : "password"}
+                            value={formPbiClientSecret}
+                            onChange={(e) => {
+                              setFormPbiClientSecret(e.target.value)
+                              setPowerbiPreview(null)
+                              setPowerbiPreviewError(null)
+                              setWorkspaceOptions([])
+                              setSelectedPbiWorkspaceIds([])
+                              setSelectedPbiDatasetIds([])
+                            }}
+                            placeholder="Client secret"
+                            className="pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPbiSecrets(!showPbiSecrets)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          >
+                            {showPbiSecrets ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                          </button>
+                        </div>
                       </div>
                       <div className="flex flex-col gap-2">
                         <Label>Email Master User (PPU)</Label>
@@ -886,12 +897,22 @@ export default function UsersPage() {
                       </div>
                       <div className="flex flex-col gap-2">
                         <Label>Senha Master User (PPU)</Label>
-                        <Input
-                          type="password"
-                          value={formPbiMasterUserPassword}
-                          onChange={(e) => setFormPbiMasterUserPassword(e.target.value)}
-                          placeholder="Senha da conta SAC"
-                        />
+                        <div className="relative">
+                          <Input
+                            type={showPbiSecrets ? "text" : "password"}
+                            value={formPbiMasterUserPassword}
+                            onChange={(e) => setFormPbiMasterUserPassword(e.target.value)}
+                            placeholder="Senha da conta SAC"
+                            className="pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPbiSecrets(!showPbiSecrets)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          >
+                            {showPbiSecrets ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                          </button>
+                        </div>
                       </div>
                       <Button
                         type="button"
