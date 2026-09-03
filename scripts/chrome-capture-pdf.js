@@ -286,9 +286,12 @@ async function main() {
     : useCustomSize
       ? `${pageWidthMm}mm ${pageHeightMm}mm`
       : `${pdfFormat} ${landscape ? 'landscape' : 'portrait'}`
-  // Container alto quando fit=width, pra o Power BI renderizar TODAS as linhas
-  // sem scroll interno. O page.pdf depois corta na altura real do conteudo.
-  const pbiContainerHeightPx = fitWidth ? 14000 : viewportHeight
+  // Container alto quando fit=width, pra o Power BI renderizar mais linhas sem
+  // scroll interno. Limitado a ~4800px: acima disso o Chrome com swiftshader
+  // estoura memoria e a conexao cai ("Connection Closed"). Relatorio maior que
+  // isso e cortado no fim, mas nao derruba o browser.
+  const FIT_WIDTH_MAX_PX = 4800
+  const pbiContainerHeightPx = fitWidth ? FIT_WIDTH_MAX_PX : viewportHeight
   let pdfOpts = fitWidth
     ? { width: `${viewportWidth}px`, height: `${viewportHeight}px` } // recalculado apos render
     : useCustomSize
@@ -419,7 +422,7 @@ async function main() {
     const optsForCurrentPage = async () => {
       if (!fitWidth) return pdfOpts
       const h = await measureFitWidthHeight(page, viewportWidth)
-      const finalH = h && h > 120 ? Math.min(h + 24, 19000) : viewportHeight
+      const finalH = h && h > 120 ? Math.min(h + 24, FIT_WIDTH_MAX_PX - 40) : viewportHeight
       return { width: `${viewportWidth}px`, height: `${finalH}px` }
     }
 
