@@ -219,6 +219,31 @@ async function injectPrintColorAdjust(page) {
   }
 }
 
+// Altura (px) do conteudo de dados renderizado sob FitToWidth, para a folha do
+// PDF ter exatamente o tamanho do relatorio (sem branco embaixo).
+async function measureFitWidthHeight(page, vpW) {
+  return page.evaluate(async (vpW) => {
+    try {
+      const rpt = window._pbiReport
+      if (!rpt) return null
+      const pages = await rpt.getPages()
+      const active = pages.find(p => p.isActive) || pages.find(p => p.visibility === 0) || pages[0]
+      let size = active && active.defaultSize
+      if (!size || !size.width || !size.height) size = { width: 1280, height: 720 }
+      const visuals = active ? await active.getVisuals() : []
+      const skip = new Set(['shape', 'image', 'textbox', 'actionButton', 'basicShape',
+        'bookmarkNavigator', 'pageNavigator'])
+      let y1 = 0
+      for (const v of visuals) {
+        if (!v.layout || skip.has(v.type)) continue
+        y1 = Math.max(y1, (v.layout.y || 0) + (v.layout.height || 0))
+      }
+      if (!y1) y1 = size.height
+      return Math.ceil(y1 * (vpW / size.width))
+    } catch (e) { return null }
+  }, vpW).catch(() => null)
+}
+
 async function captureSinglePagePdf(page, pdfOpts) {
   await injectPrintColorAdjust(page)
   const pdf = await page.pdf({
@@ -246,16 +271,29 @@ async function main() {
     pageHeightMm = null,
     autocrop = false,
     crop = null,
+    fit = null,
   } = input
+
+  // fit=width: relatorio preenche a LARGURA da folha (colunas legiveis) e a
+  // folha fica alta o quanto o conteudo precisar — sem encolher nem cortar.
+  const fitWidth = fit === 'width'
 
   // Tamanho de pagina customizado tem prioridade sobre o formato A-series.
   const useCustomSize = Number(pageWidthMm) > 0 && Number(pageHeightMm) > 0
-  const pageSizeCss = useCustomSize
-    ? `${pageWidthMm}mm ${pageHeightMm}mm`
-    : `${pdfFormat} ${landscape ? 'landscape' : 'portrait'}`
-  const pdfOpts = useCustomSize
-    ? { width: `${pageWidthMm}mm`, height: `${pageHeightMm}mm` }
-    : { format: pdfFormat, landscape: landscape !== false }
+  // (com fit=width o page.pdf usa width/height explicitos e ignora o @page)
+  const pageSizeCss = fitWidth
+    ? `${viewportWidth}px ${viewportHeight}px`
+    : useCustomSize
+      ? `${pageWidthMm}mm ${pageHeightMm}mm`
+      : `${pdfFormat} ${landscape ? 'landscape' : 'portrait'}`
+  // Container alto quando fit=width, pra o Power BI renderizar TODAS as linhas
+  // sem scroll interno. O page.pdf depois corta na altura real do conteudo.
+  const pbiContainerHeightPx = fitWidth ? 14000 : viewportHeight
+  let pdfOpts = fitWidth
+    ? { width: `${viewportWidth}px`, height: `${viewportHeight}px` } // recalculado apos render
+    : useCustomSize
+      ? { width: `${pageWidthMm}mm`, height: `${pageHeightMm}mm` }
+      : { format: pdfFormat, landscape: landscape !== false }
 
   const executablePath = findChromePath()
   const powerBiClientJs = loadPowerBiClientJs()
@@ -268,9 +306,9 @@ async function main() {
   <style>
     @page { margin: 0; size: ${pageSizeCss}; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { width: ${viewportWidth}px; height: ${viewportHeight}px; overflow: hidden; max-height: ${viewportHeight}px; }
-    body { overflow: hidden; background: #fff; width: ${viewportWidth}px; height: ${viewportHeight}px; max-height: ${viewportHeight}px; }
-    #pbi-container { width: ${viewportWidth}px; height: ${viewportHeight}px; overflow: hidden; }
+    html { width: ${viewportWidth}px; height: ${pbiContainerHeightPx}px; overflow: hidden; max-height: ${pbiContainerHeightPx}px; }
+    body { overflow: hidden; background: #fff; width: ${viewportWidth}px; height: ${pbiContainerHeightPx}px; max-height: ${pbiContainerHeightPx}px; }
+    #pbi-container { width: ${viewportWidth}px; height: ${pbiContainerHeightPx}px; overflow: hidden; }
   </style>
 </head>
 <body>
@@ -296,7 +334,7 @@ async function main() {
         navContentPaneEnabled: false,
         background: models.BackgroundType.Default,
         layoutType: models.LayoutType.Custom,
-        customLayout: { displayOption: models.DisplayOption.FitToPage },
+        customLayout: { displayOption: ${fitWidth ? 'models.DisplayOption.FitToWidth' : 'models.DisplayOption.FitToPage'} },
       },
     };
 
@@ -335,7 +373,7 @@ async function main() {
 
   try {
     const page = await browser.newPage()
-    await page.setViewport({ width: viewportWidth, height: viewportHeight, deviceScaleFactor: 1 })
+    await page.setViewport({ width: viewportWidth, height: pbiContainerHeightPx, deviceScaleFactor: 1 })
 
     await page.goto(localServer.url, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
@@ -377,9 +415,17 @@ async function main() {
     let pdfBuffer
     const contentBoxes = [] // caixa de conteudo por pagina (para autocrop)
 
+    // Sob fit=width, a folha do PDF tem a altura real do relatorio (medida por pagina).
+    const optsForCurrentPage = async () => {
+      if (!fitWidth) return pdfOpts
+      const h = await measureFitWidthHeight(page, viewportWidth)
+      const finalH = h && h > 120 ? Math.min(h + 24, 19000) : viewportHeight
+      return { width: `${viewportWidth}px`, height: `${finalH}px` }
+    }
+
     if (!pagesToCapture) {
       if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
-      pdfBuffer = await captureSinglePagePdf(page, pdfOpts)
+      pdfBuffer = await captureSinglePagePdf(page, await optsForCurrentPage())
     } else {
       const pagePdfs = []
 
@@ -402,7 +448,7 @@ async function main() {
         }
 
         if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
-        pagePdfs.push(await captureSinglePagePdf(page, pdfOpts))
+        pagePdfs.push(await captureSinglePagePdf(page, await optsForCurrentPage()))
       }
 
       const merged = await PDFDocument.create()

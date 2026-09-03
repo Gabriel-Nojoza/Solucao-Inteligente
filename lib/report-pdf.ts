@@ -279,6 +279,9 @@ export async function captureReportAsPdf(input: {
   // Recorte por % fixa de cada borda (top_pct/bottom_pct/left_pct/right_pct).
   // Deterministico — para layouts sempre iguais em que o autocrop falha.
   crop?: { top_pct?: number; bottom_pct?: number; left_pct?: number; right_pct?: number } | null
+  // "width" = FitToWidth: relatorio preenche a largura da folha e a folha fica
+  // alta o quanto o conteudo precisar (sem encolher). Bom p/ relatorio grande no celular.
+  fit?: "width" | null
 }): Promise<Buffer> {
   const pdfFormat = input.pdfFormat ?? "A6"
   const pdfLandscape = input.pdfLandscape ?? true
@@ -323,6 +326,7 @@ export async function captureReportAsPdf(input: {
     pageHeightMm: hasCustomSize ? input.pageHeightMm : null,
     autocrop: input.autocrop ?? false,
     crop: input.crop ?? null,
+    fit: input.fit ?? null,
   })
 
   const timeoutMs = input.timeoutMs ?? 120_000
