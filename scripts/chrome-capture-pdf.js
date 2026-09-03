@@ -27,6 +27,39 @@ function getPdfBBoxes(pdfPath) {
   })
 }
 
+// Recorte por porcentagem fixa de cada borda. Deterministico — bom para
+// relatorios com layout sempre igual (tabela no topo, resto vazio) em que o
+// autocrop falha por causa de elementos decorativos (barra lateral etc).
+async function cropPdfByPercent(pdfBuffer, crop) {
+  try {
+    const pct = (v) => {
+      const n = Number(v)
+      return Number.isFinite(n) && n > 0 && n < 95 ? n / 100 : 0
+    }
+    const l = pct(crop.left_pct)
+    const r = pct(crop.right_pct)
+    const t = pct(crop.top_pct)
+    const b = pct(crop.bottom_pct)
+    if (l + r + t + b === 0) return pdfBuffer
+
+    const doc = await PDFDocument.load(pdfBuffer)
+    for (const page of doc.getPages()) {
+      const mb = page.getMediaBox()
+      const x0 = mb.x + mb.width * l
+      const y0 = mb.y + mb.height * b // origem do PDF e no canto inferior esquerdo
+      const w = mb.width * (1 - l - r)
+      const h = mb.height * (1 - t - b)
+      if (w > 20 && h > 20) {
+        page.setCropBox(x0, y0, w, h)
+        page.setMediaBox(x0, y0, w, h)
+      }
+    }
+    return Buffer.from(await doc.save())
+  } catch (e) {
+    return pdfBuffer
+  }
+}
+
 async function cropPdfWhitespace(pdfBuffer) {
   const tmp = path.join(os.tmpdir(), `crop_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`)
   try {
@@ -138,6 +171,7 @@ async function main() {
     pageWidthMm = null,
     pageHeightMm = null,
     autocrop = false,
+    crop = null,
   } = input
 
   // Tamanho de pagina customizado tem prioridade sobre o formato A-series.
@@ -303,6 +337,9 @@ async function main() {
       pdfBuffer = Buffer.from(await merged.save())
     }
 
+    if (crop && typeof crop === 'object') {
+      pdfBuffer = await cropPdfByPercent(pdfBuffer, crop)
+    }
     if (autocrop) {
       pdfBuffer = await cropPdfWhitespace(pdfBuffer)
     }

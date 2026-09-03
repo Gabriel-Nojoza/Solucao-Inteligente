@@ -276,6 +276,9 @@ export async function captureReportAsPdf(input: {
   // Recorta o branco em volta do conteudo depois de gerar o PDF (via Ghostscript
   // bbox). Util quando o relatorio Power BI tem canvas maior que a tabela.
   autocrop?: boolean
+  // Recorte por % fixa de cada borda (top_pct/bottom_pct/left_pct/right_pct).
+  // Deterministico — para layouts sempre iguais em que o autocrop falha.
+  crop?: { top_pct?: number; bottom_pct?: number; left_pct?: number; right_pct?: number } | null
 }): Promise<Buffer> {
   const pdfFormat = input.pdfFormat ?? "A6"
   const pdfLandscape = input.pdfLandscape ?? true
@@ -319,6 +322,7 @@ export async function captureReportAsPdf(input: {
     pageWidthMm: hasCustomSize ? input.pageWidthMm : null,
     pageHeightMm: hasCustomSize ? input.pageHeightMm : null,
     autocrop: input.autocrop ?? false,
+    crop: input.crop ?? null,
   })
 
   const timeoutMs = input.timeoutMs ?? 120_000
