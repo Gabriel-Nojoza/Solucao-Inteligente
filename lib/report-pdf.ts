@@ -273,6 +273,9 @@ export async function captureReportAsPdf(input: {
   // uma folha A-series deixa muito espaco vazio e encolhe o conteudo.
   pageWidthMm?: number | null
   pageHeightMm?: number | null
+  // Recorta o branco em volta do conteudo depois de gerar o PDF (via Ghostscript
+  // bbox). Util quando o relatorio Power BI tem canvas maior que a tabela.
+  autocrop?: boolean
 }): Promise<Buffer> {
   const pdfFormat = input.pdfFormat ?? "A6"
   const pdfLandscape = input.pdfLandscape ?? true
@@ -315,6 +318,7 @@ export async function captureReportAsPdf(input: {
     landscape: pdfLandscape,
     pageWidthMm: hasCustomSize ? input.pageWidthMm : null,
     pageHeightMm: hasCustomSize ? input.pageHeightMm : null,
+    autocrop: input.autocrop ?? false,
   })
 
   const timeoutMs = input.timeoutMs ?? 120_000

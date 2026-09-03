@@ -5,8 +5,63 @@
 const puppeteer = require('puppeteer-core')
 const http = require('http')
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
+const { execFile } = require('child_process')
 const { PDFDocument } = require('pdf-lib')
+
+// Detecta a caixa de conteudo de cada pagina do PDF via Ghostscript (device bbox)
+// e recorta o branco em volta (CropBox + MediaBox). Usado quando o relatorio
+// Power BI tem canvas maior que a tabela — sem isso o PDF sai com metade da
+// folha em branco e o conteudo minusculo.
+function getPdfBBoxes(pdfPath) {
+  return new Promise((resolve) => {
+    execFile('gs', ['-dNOPAUSE', '-dBATCH', '-dSAFER', '-q', '-sDEVICE=bbox', pdfPath], (_err, stdout, stderr) => {
+      const out = `${stderr || ''}${stdout || ''}`
+      const boxes = []
+      const re = /%%HiResBoundingBox:\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)/g
+      let m
+      while ((m = re.exec(out))) boxes.push([Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])])
+      resolve(boxes)
+    })
+  })
+}
+
+async function cropPdfWhitespace(pdfBuffer) {
+  const tmp = path.join(os.tmpdir(), `crop_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`)
+  try {
+    fs.writeFileSync(tmp, pdfBuffer)
+    const boxes = await getPdfBBoxes(tmp)
+    if (!boxes.length) return pdfBuffer
+
+    const doc = await PDFDocument.load(pdfBuffer)
+    const pages = doc.getPages()
+    const PAD = 6 // pontos de margem em volta do conteudo
+
+    pages.forEach((page, i) => {
+      const bb = boxes[i] || boxes[boxes.length - 1]
+      if (!bb) return
+      const mb = page.getMediaBox()
+      const x0 = Math.max(mb.x, bb[0] - PAD)
+      const y0 = Math.max(mb.y, bb[1] - PAD)
+      const x1 = Math.min(mb.x + mb.width, bb[2] + PAD)
+      const y1 = Math.min(mb.y + mb.height, bb[3] + PAD)
+      const w = x1 - x0
+      const h = y1 - y0
+      // so recorta se sobrou conteudo real (evita PDF vazio se o bbox falhar)
+      if (w > 20 && h > 20 && (w < mb.width - 2 || h < mb.height - 2)) {
+        page.setCropBox(x0, y0, w, h)
+        page.setMediaBox(x0, y0, w, h)
+      }
+    })
+
+    return Buffer.from(await doc.save())
+  } catch (e) {
+    return pdfBuffer // qualquer falha: devolve o PDF original
+  } finally {
+    fs.unlink(tmp, () => {})
+  }
+}
 
 const CHROME_PATHS = [
   '/usr/bin/google-chrome',
@@ -82,6 +137,7 @@ async function main() {
     landscape = true,
     pageWidthMm = null,
     pageHeightMm = null,
+    autocrop = false,
   } = input
 
   // Tamanho de pagina customizado tem prioridade sobre o formato A-series.
@@ -245,6 +301,10 @@ async function main() {
         copied.forEach(p => merged.addPage(p))
       }
       pdfBuffer = Buffer.from(await merged.save())
+    }
+
+    if (autocrop) {
+      pdfBuffer = await cropPdfWhitespace(pdfBuffer)
     }
 
     try { fs.writeFileSync('/root/last_capture.pdf', pdfBuffer) } catch (e) {}

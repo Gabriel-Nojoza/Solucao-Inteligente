@@ -56,6 +56,7 @@ async function exportDocumentWithFallback(input: {
   pdfLandscape?: boolean
   pdfPageWidthMm?: number | null
   pdfPageHeightMm?: number | null
+  pdfAutocrop?: boolean
 }): Promise<PowerBiExportedDocument> {
   const format = input.format ?? "PDF"
   try {
@@ -96,6 +97,7 @@ async function exportDocumentWithFallback(input: {
       pdfLandscape: input.pdfLandscape,
       pageWidthMm: input.pdfPageWidthMm,
       pageHeightMm: input.pdfPageHeightMm,
+      autocrop: input.pdfAutocrop,
     })
     return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
   }
@@ -761,6 +763,7 @@ async function handleDispatch(request: NextRequest) {
   const pdfPageHeightMm = toPositiveNumber(
     pdfSettingsValue?.page_height_mm ?? pdfSettingsValue?.height_mm
   )
+  const pdfAutocrop = pdfSettingsValue?.autocrop === true
 
   const normalizedN8nSettings = normalizeN8nSettings(n8nSettings?.value)
   const webhookUrl =
@@ -876,6 +879,7 @@ async function handleDispatch(request: NextRequest) {
                     pdfLandscape,
                     pdfPageWidthMm,
                     pdfPageHeightMm,
+                    pdfAutocrop,
                   })
 
                   console.log("[dispatch] sending document to bot", {
@@ -973,6 +977,7 @@ async function handleDispatch(request: NextRequest) {
                   pdfLandscape,
                   pdfPageWidthMm,
                   pdfPageHeightMm,
+                  pdfAutocrop,
                 })
 
                 console.log("[dispatch] sending document to bot", {
