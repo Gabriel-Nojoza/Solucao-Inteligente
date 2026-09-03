@@ -60,6 +60,80 @@ async function cropPdfByPercent(pdfBuffer, crop) {
   }
 }
 
+// Pergunta ao Power BI a posicao exata dos visuais de DADOS na pagina ativa
+// (ignora shapes/imagens decorativas como a barra lateral) e devolve a caixa de
+// conteudo como fracao do viewport (= fracao da folha do PDF, ja considerando a
+// escala/centralizacao do FitToPage).
+async function getSmartContentBox(page, vpW, vpH) {
+  return page.evaluate(async (vpW, vpH) => {
+    try {
+      const rpt = window._pbiReport
+      if (!rpt) return null
+      const pages = await rpt.getPages()
+      const active = pages.find(p => p.isActive) || pages.find(p => p.visibility === 0) || pages[0]
+      if (!active) return null
+      let size = active.defaultSize
+      if (!size || !size.width || !size.height) size = { width: 1280, height: 720 }
+
+      const visuals = await active.getVisuals()
+      const skip = new Set(['shape', 'image', 'textbox', 'actionButton', 'basicShape',
+        'bookmarkNavigator', 'pageNavigator'])
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, n = 0
+      for (const v of visuals) {
+        if (!v.layout || skip.has(v.type)) continue
+        n++
+        x0 = Math.min(x0, v.layout.x || 0)
+        y0 = Math.min(y0, v.layout.y || 0)
+        x1 = Math.max(x1, (v.layout.x || 0) + (v.layout.width || 0))
+        y1 = Math.max(y1, (v.layout.y || 0) + (v.layout.height || 0))
+      }
+      if (!n || !isFinite(x0)) return null
+
+      // FitToPage: canvas (size) escalado pra caber em vpW x vpH, centralizado
+      const scale = Math.min(vpW / size.width, vpH / size.height)
+      const ox = (vpW - size.width * scale) / 2
+      const oy = (vpH - size.height * scale) / 2
+      const clamp = v => Math.max(0, Math.min(1, v))
+      return {
+        left: clamp((ox + x0 * scale) / vpW),
+        top: clamp((oy + y0 * scale) / vpH),
+        right: clamp((ox + x1 * scale) / vpW),
+        bottom: clamp((oy + y1 * scale) / vpH),
+      }
+    } catch (e) { return null }
+  }, vpW, vpH).catch(() => null)
+}
+
+// Recorta cada pagina do PDF para a caixa de conteudo (fracoes top-left) medida
+// no Power BI. boxes[i] === null pula a pagina.
+async function cropPdfToBoxes(pdfBuffer, boxes) {
+  try {
+    const doc = await PDFDocument.load(pdfBuffer)
+    const pages = doc.getPages()
+    const PAD = 0.012 // ~1.2% de folga em volta
+    pages.forEach((page, i) => {
+      const b = boxes[i]
+      if (!b) return
+      const mb = page.getMediaBox()
+      const l = Math.max(0, b.left - PAD)
+      const r = Math.min(1, b.right + PAD)
+      const t = Math.max(0, b.top - PAD)
+      const bot = Math.min(1, b.bottom + PAD)
+      const w = mb.width * (r - l)
+      const h = mb.height * (bot - t)
+      const x = mb.x + mb.width * l
+      const y = mb.y + mb.height * (1 - bot) // PDF: origem no canto inferior esquerdo
+      if (w > 20 && h > 20 && (w < mb.width - 2 || h < mb.height - 2)) {
+        page.setCropBox(x, y, w, h)
+        page.setMediaBox(x, y, w, h)
+      }
+    })
+    return Buffer.from(await doc.save())
+  } catch (e) {
+    return pdfBuffer
+  }
+}
+
 async function cropPdfWhitespace(pdfBuffer) {
   const tmp = path.join(os.tmpdir(), `crop_${Date.now()}_${Math.random().toString(36).slice(2)}.pdf`)
   try {
@@ -301,8 +375,10 @@ async function main() {
     }
 
     let pdfBuffer
+    const contentBoxes = [] // caixa de conteudo por pagina (para autocrop)
 
     if (!pagesToCapture) {
+      if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
       pdfBuffer = await captureSinglePagePdf(page, pdfOpts)
     } else {
       const pagePdfs = []
@@ -325,6 +401,7 @@ async function main() {
           await new Promise(r => setTimeout(r, 3000))
         }
 
+        if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
         pagePdfs.push(await captureSinglePagePdf(page, pdfOpts))
       }
 
@@ -341,7 +418,13 @@ async function main() {
       pdfBuffer = await cropPdfByPercent(pdfBuffer, crop)
     }
     if (autocrop) {
-      pdfBuffer = await cropPdfWhitespace(pdfBuffer)
+      if (contentBoxes.some(Boolean)) {
+        // corte preciso pela posicao dos visuais no Power BI
+        pdfBuffer = await cropPdfToBoxes(pdfBuffer, contentBoxes)
+      } else {
+        // fallback: bbox via Ghostscript
+        pdfBuffer = await cropPdfWhitespace(pdfBuffer)
+      }
     }
 
     try { fs.writeFileSync('/root/last_capture.pdf', pdfBuffer) } catch (e) {}
