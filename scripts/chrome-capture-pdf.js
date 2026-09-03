@@ -57,11 +57,10 @@ async function injectPrintColorAdjust(page) {
   }
 }
 
-async function captureSinglePagePdf(page, format, landscape) {
+async function captureSinglePagePdf(page, pdfOpts) {
   await injectPrintColorAdjust(page)
   const pdf = await page.pdf({
-    format,
-    landscape: landscape !== false,
+    ...pdfOpts,
     printBackground: true,
     margin: { top: '0', right: '0', bottom: '0', left: '0' },
   })
@@ -81,7 +80,18 @@ async function main() {
     tokenType = 'Embed',
     pdfFormat = 'A6',
     landscape = true,
+    pageWidthMm = null,
+    pageHeightMm = null,
   } = input
+
+  // Tamanho de pagina customizado tem prioridade sobre o formato A-series.
+  const useCustomSize = Number(pageWidthMm) > 0 && Number(pageHeightMm) > 0
+  const pageSizeCss = useCustomSize
+    ? `${pageWidthMm}mm ${pageHeightMm}mm`
+    : `${pdfFormat} ${landscape ? 'landscape' : 'portrait'}`
+  const pdfOpts = useCustomSize
+    ? { width: `${pageWidthMm}mm`, height: `${pageHeightMm}mm` }
+    : { format: pdfFormat, landscape: landscape !== false }
 
   const executablePath = findChromePath()
   const powerBiClientJs = loadPowerBiClientJs()
@@ -92,7 +102,7 @@ async function main() {
 <head>
   <meta charset="utf-8">
   <style>
-    @page { margin: 0; size: ${pdfFormat} ${landscape ? 'landscape' : 'portrait'}; }
+    @page { margin: 0; size: ${pageSizeCss}; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html { width: ${viewportWidth}px; height: ${viewportHeight}px; overflow: hidden; max-height: ${viewportHeight}px; }
     body { overflow: hidden; background: #fff; width: ${viewportWidth}px; height: ${viewportHeight}px; max-height: ${viewportHeight}px; }
@@ -203,7 +213,7 @@ async function main() {
     let pdfBuffer
 
     if (!pagesToCapture) {
-      pdfBuffer = await captureSinglePagePdf(page, pdfFormat, landscape)
+      pdfBuffer = await captureSinglePagePdf(page, pdfOpts)
     } else {
       const pagePdfs = []
 
@@ -225,7 +235,7 @@ async function main() {
           await new Promise(r => setTimeout(r, 3000))
         }
 
-        pagePdfs.push(await captureSinglePagePdf(page, pdfFormat, landscape))
+        pagePdfs.push(await captureSinglePagePdf(page, pdfOpts))
       }
 
       const merged = await PDFDocument.create()

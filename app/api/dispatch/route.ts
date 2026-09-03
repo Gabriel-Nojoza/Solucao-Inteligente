@@ -54,6 +54,8 @@ async function exportDocumentWithFallback(input: {
   format?: "PDF" | "PNG"
   pdfPageFormat?: string
   pdfLandscape?: boolean
+  pdfPageWidthMm?: number | null
+  pdfPageHeightMm?: number | null
 }): Promise<PowerBiExportedDocument> {
   const format = input.format ?? "PDF"
   try {
@@ -92,6 +94,8 @@ async function exportDocumentWithFallback(input: {
       tokenType: "Aad",
       pdfFormat: input.pdfPageFormat,
       pdfLandscape: input.pdfLandscape,
+      pageWidthMm: input.pdfPageWidthMm,
+      pageHeightMm: input.pdfPageHeightMm,
     })
     return { buffer: pdfBuffer, contentType: "application/pdf", extension: "pdf" }
   }
@@ -744,6 +748,19 @@ async function handleDispatch(request: NextRequest) {
     : process.env.PDF_LANDSCAPE_OVERRIDE !== undefined
     ? process.env.PDF_LANDSCAPE_OVERRIDE !== "false"
     : true
+  // Tamanho de pagina customizado (mm) — aceita page_width_mm/page_height_mm ou
+  // width_mm/height_mm no company_settings.pdf_settings. Quando ambos > 0, o
+  // caminho de captura Chrome usa esse tamanho no lugar do formato A-series.
+  const toPositiveNumber = (v: unknown) => {
+    const n = typeof v === "number" ? v : Number(v)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+  const pdfPageWidthMm = toPositiveNumber(
+    pdfSettingsValue?.page_width_mm ?? pdfSettingsValue?.width_mm
+  )
+  const pdfPageHeightMm = toPositiveNumber(
+    pdfSettingsValue?.page_height_mm ?? pdfSettingsValue?.height_mm
+  )
 
   const normalizedN8nSettings = normalizeN8nSettings(n8nSettings?.value)
   const webhookUrl =
@@ -857,6 +874,8 @@ async function handleDispatch(request: NextRequest) {
                     pageName,
                     pdfPageFormat,
                     pdfLandscape,
+                    pdfPageWidthMm,
+                    pdfPageHeightMm,
                   })
 
                   console.log("[dispatch] sending document to bot", {
@@ -952,6 +971,8 @@ async function handleDispatch(request: NextRequest) {
                   format: normalizedScheduleExportFormat === "PNG" ? "PNG" : "PDF",
                   pdfPageFormat,
                   pdfLandscape,
+                  pdfPageWidthMm,
+                  pdfPageHeightMm,
                 })
 
                 console.log("[dispatch] sending document to bot", {

@@ -268,9 +268,24 @@ export async function captureReportAsPdf(input: {
   timeoutMs?: number
   pdfFormat?: string
   pdfLandscape?: boolean
+  // Tamanho de pagina customizado (mm). Quando ambos definidos, tem prioridade
+  // sobre pdfFormat/pdfLandscape — util para relatorios largos e baixos, em que
+  // uma folha A-series deixa muito espaco vazio e encolhe o conteudo.
+  pageWidthMm?: number | null
+  pageHeightMm?: number | null
 }): Promise<Buffer> {
   const pdfFormat = input.pdfFormat ?? "A6"
   const pdfLandscape = input.pdfLandscape ?? true
+  const MM_TO_PX = 3.7795
+  const hasCustomSize =
+    typeof input.pageWidthMm === "number" && input.pageWidthMm > 0 &&
+    typeof input.pageHeightMm === "number" && input.pageHeightMm > 0
+  const customViewport = hasCustomSize
+    ? {
+        width: Math.round((input.pageWidthMm as number) * MM_TO_PX),
+        height: Math.round((input.pageHeightMm as number) * MM_TO_PX),
+      }
+    : null
   // Dimensões em pixels (96dpi) para cada formato, portrait e landscape
   const FORMAT_VIEWPORTS: Record<string, { portrait: { width: number; height: number }; landscape: { width: number; height: number } }> = {
     A0: { portrait: { width: 3179, height: 4494 }, landscape: { width: 4494, height: 3179 } },
@@ -282,7 +297,10 @@ export async function captureReportAsPdf(input: {
     A6: { portrait: { width: 397,  height: 559  }, landscape: { width: 559,  height: 397  } },
   }
   const orientKey = pdfLandscape ? "landscape" : "portrait"
-  const defaultViewport = FORMAT_VIEWPORTS[pdfFormat]?.[orientKey] ?? FORMAT_VIEWPORTS["A6"][orientKey]
+  const defaultViewport =
+    customViewport ??
+    FORMAT_VIEWPORTS[pdfFormat]?.[orientKey] ??
+    FORMAT_VIEWPORTS["A6"][orientKey]
   const workerPath = path.join(process.cwd(), "scripts", "chrome-capture-pdf.js")
   const captureInput = JSON.stringify({
     embedUrl: input.embedUrl,
@@ -295,6 +313,8 @@ export async function captureReportAsPdf(input: {
     tokenType: input.tokenType ?? "Embed",
     pdfFormat,
     landscape: pdfLandscape,
+    pageWidthMm: hasCustomSize ? input.pageWidthMm : null,
+    pageHeightMm: hasCustomSize ? input.pageHeightMm : null,
   })
 
   const timeoutMs = input.timeoutMs ?? 120_000
