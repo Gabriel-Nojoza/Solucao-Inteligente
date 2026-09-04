@@ -10,6 +10,11 @@ const path = require('path')
 const { execFile } = require('child_process')
 const { PDFDocument } = require('pdf-lib')
 
+// Timeout de espera pelo evento "rendered" do Power BI. Sob CPU roubada (throttle
+// de host), a renderizacao ainda progride, so mais devagar — subir isso evita
+// falhar cedo demais. Ajustavel por env sem precisar mexer no codigo de novo.
+const PBI_RENDER_TIMEOUT_MS = Number(process.env.PBI_RENDER_TIMEOUT_MS) || 120000
+
 // Detecta a caixa de conteudo de cada pagina do PDF via Ghostscript (device bbox)
 // e recorta o branco em volta (CropBox + MediaBox). Usado quando o relatorio
 // Power BI tem canvas maior que a tabela — sem isso o PDF sai com metade da
@@ -381,11 +386,11 @@ async function main() {
     await page.goto(localServer.url, { waitUntil: 'domcontentloaded', timeout: 15000 })
 
     try {
-      await page.waitForFunction('window._pbiRendered === true', { timeout: 60000 })
+      await page.waitForFunction('window._pbiRendered === true', { timeout: PBI_RENDER_TIMEOUT_MS })
     } catch {
       const pbiError = await page.evaluate(() => window._pbiError ?? null).catch(() => null)
       if (pbiError) throw new Error('Power BI erro ao renderizar: ' + pbiError)
-      throw new Error('Tempo esgotado aguardando renderizacao do Power BI (60s) — verifique autenticacao e se o relatorio esta acessivel no Power BI')
+      throw new Error(`Tempo esgotado aguardando renderizacao do Power BI (${Math.round(PBI_RENDER_TIMEOUT_MS / 1000)}s) — verifique autenticacao e se o relatorio esta acessivel no Power BI`)
     }
 
     await page.waitForNetworkIdle({ idleTime: 2500, timeout: 20000 }).catch(() => {})
@@ -442,7 +447,7 @@ async function main() {
           }, pbiPageName)
 
           try {
-            await page.waitForFunction('window._pbiRendered === true', { timeout: 60000 })
+            await page.waitForFunction('window._pbiRendered === true', { timeout: PBI_RENDER_TIMEOUT_MS })
           } catch {
             // continua com pagina possivelmente nao renderizada
           }

@@ -7,6 +7,11 @@ const http = require('http')
 const fs = require('fs')
 const path = require('path')
 
+// Timeout de espera pelo evento "rendered" do Power BI. Sob CPU roubada (throttle
+// de host), a renderizacao ainda progride, so mais devagar — subir isso evita
+// falhar cedo demais. Ajustavel por env sem precisar mexer no codigo de novo.
+const PBI_RENDER_TIMEOUT_MS = Number(process.env.PBI_RENDER_TIMEOUT_MS) || 120000
+
 const CHROME_PATHS = [
   '/usr/bin/google-chrome',
   '/usr/bin/google-chrome-stable',
@@ -118,7 +123,7 @@ async function main() {
     const page = await browser.newPage()
     await page.setViewport({ width: viewportWidth, height: viewportHeight, deviceScaleFactor })
     await page.goto(localServer.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await page.waitForFunction('window._pbiRendered === true', { timeout: 90000 })
+    await page.waitForFunction('window._pbiRendered === true', { timeout: PBI_RENDER_TIMEOUT_MS })
 
     const pbiError = await page.evaluate(() => window._pbiError).catch(() => null)
     if (pbiError) throw new Error('Power BI render error: ' + pbiError)
