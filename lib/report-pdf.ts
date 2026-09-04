@@ -9,6 +9,16 @@ const execFileAsync = promisify(execFile)
 
 class CaptureTimeoutError extends Error {}
 
+// Timeout do processo filho INTEIRO (worker node + Chrome), aplicado via
+// runIsolatedWorker abaixo. Precisa ser MAIOR que o timeout interno de espera
+// pela renderizacao do Power BI (PBI_RENDER_TIMEOUT_MS, usado dentro de
+// scripts/chrome-capture*.js) + folga pra gerar o PDF/PNG e recortar depois
+// de renderizar — senao esse timeout externo mata o processo antes do
+// interno sequer poder reportar seu proprio erro mais especifico.
+const PBI_RENDER_TIMEOUT_MS = Number(process.env.PBI_RENDER_TIMEOUT_MS) || 120_000
+const CAPTURE_WORKER_TIMEOUT_MS =
+  Number(process.env.CAPTURE_WORKER_TIMEOUT_MS) || PBI_RENDER_TIMEOUT_MS + 90_000
+
 // Mata a árvore de processos inteira (node worker + Chrome + subprocessos do Chrome).
 // Necessário porque matar só o processo node com SIGKILL deixa o Chrome órfão rodando
 // indefinidamente na VPS — foi essa a causa da cascata de "ERR_INSUFFICIENT_RESOURCES" /
@@ -239,12 +249,12 @@ export async function captureReportScreenshot(input: {
       reportId: input.reportId,
       tokenType: input.tokenType,
     })
-    const stdout = await runIsolatedWorker(workerPath, "CHROME_CAPTURE_INPUT", captureInput, 120_000)
+    const stdout = await runIsolatedWorker(workerPath, "CHROME_CAPTURE_INPUT", captureInput, CAPTURE_WORKER_TIMEOUT_MS)
     return Buffer.from(stdout.toString("utf8"), "base64")
   } catch (err: any) {
     if (err instanceof CaptureTimeoutError) {
       throw new Error(
-        "Tempo limite ao capturar screenshot via Chrome (120s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI."
+        `Tempo limite ao capturar screenshot via Chrome (${Math.round(CAPTURE_WORKER_TIMEOUT_MS / 1000)}s) — o relatório não renderizou. Verifique autenticação e acesso no Power BI.`
       )
     }
     if (err?.message) {
@@ -329,7 +339,7 @@ export async function captureReportAsPdf(input: {
     fit: input.fit ?? null,
   })
 
-  const timeoutMs = input.timeoutMs ?? 120_000
+  const timeoutMs = input.timeoutMs ?? CAPTURE_WORKER_TIMEOUT_MS
   await acquireCaptureSemaphore()
   try {
     console.log("[captureReportAsPdf] iniciando processo filho isolado", {
