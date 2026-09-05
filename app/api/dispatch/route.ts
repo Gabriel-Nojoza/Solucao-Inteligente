@@ -737,6 +737,38 @@ async function handleDispatch(request: NextRequest) {
     )
   }
 
+  // ── Pula a captura se nenhum WhatsApp da empresa estiver conectado ──
+  // Sem instancia conectada nao ha como entregar o relatorio, entao gerar a
+  // captura (Chrome/Power BI) so queima CPU a toa — e sob carga isso alimenta
+  // o throttle da Hostinger. Marca os logs como falha (aparecem em "nao
+  // enviados", da pra reenviar quando o WhatsApp voltar) e sai antes do
+  // trabalho pesado. Nao mexe em last_run_at (ja foi reivindicado pelo
+  // /api/schedules/due/all; disparo manual nao afeta o agendamento).
+  if (!resolvedBotInstance || resolvedBotInstance.status !== "connected") {
+    const skipReason = "WhatsApp desconectado — captura nao realizada"
+    console.log("[dispatch] pulando captura — nenhuma instancia WhatsApp conectada", {
+      companyId,
+      scheduleId: schedule.id,
+      instanceStatus: resolvedBotInstance?.status ?? "sem-instancia",
+    })
+    if (insertedLogs && insertedLogs.length > 0) {
+      await supabase
+        .from("dispatch_logs")
+        .update({
+          status: "failed",
+          error_message: skipReason,
+          completed_at: new Date().toISOString(),
+        })
+        .in("id", insertedLogs.map((log) => log.id))
+    }
+    return NextResponse.json({
+      success: false,
+      skipped: true,
+      reason: skipReason,
+      logs_created: insertedLogs?.length ?? 0,
+    })
+  }
+
   const message = applyMessageTemplate(
     schedule.message_template,
     primaryReport?.name ?? "relatorio"
