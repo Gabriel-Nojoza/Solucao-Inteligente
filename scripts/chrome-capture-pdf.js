@@ -516,8 +516,10 @@ async function main() {
 }
 
 // Rede de seguranca: se algo pendurar o event loop, sai antes do SIGKILL
-// do pai (120s) para nao deixar Chrome reparentado no init.
-setTimeout(() => process.exit(3), 110000).unref()
+// do pai (CAPTURE_WORKER_TIMEOUT_MS em lib/report-pdf.ts, ~210s) para nao
+// deixar Chrome reparentado no init. Precisa ser MAIOR que o wait de render
+// (PBI_RENDER_TIMEOUT_MS) + folga pra gerar/recortar o PDF, senao mata cedo demais.
+setTimeout(() => process.exit(3), PBI_RENDER_TIMEOUT_MS + 60000).unref()
 
 main()
   .then(() => process.exit(0)) // output ja foi escrito e drenado dentro de main()
