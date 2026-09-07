@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { isSameMinuteInTimeZone, matchesCronValue } from "@/lib/schedule-cron"
 import { normalizeDispatchSettings } from "@/lib/dispatch-config"
+import { resolveConnectedBotInstance } from "@/lib/whatsapp-bot-instances"
 
 type ScheduleRow = {
   id: string
@@ -128,10 +129,39 @@ export async function GET(request: NextRequest) {
       return !isSameMinuteInTimeZone(lastRunAt, now, timeZone)
     })
 
-    if (dueSchedules.length > 0) {
+    // ── Filtra empresas sem WhatsApp conectado ──
+    // Sem instancia conectada nao ha como entregar; disparar so gera captura
+    // (CPU) e log de erro. Filtra aqui pra o n8n nem ser acionado. O
+    // last_run_at NAO e reivindicado pras puladas — se o WhatsApp voltar
+    // dentro da mesma janela de cron, a rotina ainda dispara no proximo poll.
+    // /api/dispatch tem a mesma checagem como rede de seguranca.
+    const companiesWithDue = [...new Set(dueSchedules.map((s) => s.company_id))]
+    const connectedByCompany = new Map<string, boolean>()
+    await Promise.all(
+      companiesWithDue.map(async (cid) => {
+        try {
+          const inst = await resolveConnectedBotInstance(supabase, cid)
+          connectedByCompany.set(cid, inst?.status === "connected")
+        } catch {
+          connectedByCompany.set(cid, true) // nao deu pra checar — deixa passar
+        }
+      })
+    )
+    const skippedCompanies = companiesWithDue.filter((cid) => !connectedByCompany.get(cid))
+    if (skippedCompanies.length > 0) {
+      console.log(
+        "[due/all] pulando empresas sem WhatsApp conectado:",
+        skippedCompanies.map((cid) => companyNameById.get(cid) ?? cid).join(", ")
+      )
+    }
+    const deliverableDueSchedules = dueSchedules.filter((s) =>
+      connectedByCompany.get(s.company_id)
+    )
+
+    if (deliverableDueSchedules.length > 0) {
       const claimedAt = now.toISOString()
       await Promise.all(
-        dueSchedules.map((schedule) =>
+        deliverableDueSchedules.map((schedule) =>
           supabase
             .from("schedules")
             .update({ last_run_at: claimedAt })
@@ -147,8 +177,9 @@ export async function GET(request: NextRequest) {
       source: "platform",
       evaluated_at: now.toISOString(),
       dispatch_url: `${appUrl}/api/dispatch?secret=${encodeURIComponent(platformSecret)}`,
-      total_due: dueSchedules.length,
-      schedules: dueSchedules.map((schedule) => ({
+      total_due: deliverableDueSchedules.length,
+      skipped_no_whatsapp: skippedCompanies.length,
+      schedules: deliverableDueSchedules.map((schedule) => ({
         id: schedule.id,
         company_id: schedule.company_id,
         company_name: companyNameById.get(schedule.company_id) ?? schedule.company_id,
