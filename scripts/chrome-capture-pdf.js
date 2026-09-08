@@ -292,10 +292,11 @@ async function main() {
       ? `${pageWidthMm}mm ${pageHeightMm}mm`
       : `${pdfFormat} ${landscape ? 'landscape' : 'portrait'}`
   // Container alto quando fit=width, pra o Power BI renderizar mais linhas sem
-  // scroll interno. Limitado a ~4800px: acima disso o Chrome com swiftshader
-  // estoura memoria e a conexao cai ("Connection Closed"). Relatorio maior que
-  // isso e cortado no fim, mas nao derruba o browser.
-  const FIT_WIDTH_MAX_PX = 4800
+  // scroll interno. Acima do limite o Chrome com swiftshader pode estourar
+  // memoria ("Connection Closed"); relatorio maior que isso e cortado no fim.
+  // Ajustavel por env FIT_WIDTH_MAX_PX (subiu de 4800 pra 9000 quando o
+  // throttle da Hostinger saiu — a maquina aguenta mais agora).
+  const FIT_WIDTH_MAX_PX = Number(process.env.FIT_WIDTH_MAX_PX) || 9000
   const pbiContainerHeightPx = fitWidth ? FIT_WIDTH_MAX_PX : viewportHeight
   let pdfOpts = fitWidth
     ? { width: `${viewportWidth}px`, height: `${viewportHeight}px` } // recalculado apos render
@@ -423,11 +424,16 @@ async function main() {
     let pdfBuffer
     const contentBoxes = [] // caixa de conteudo por pagina (para autocrop)
 
-    // Sob fit=width, a folha do PDF tem a altura real do relatorio (medida por pagina).
+    // Sob fit=width: relatorio pequeno vira 1 folha do tamanho exato do
+    // conteudo; relatorio grande quebra em varias folhas legiveis (~1.35x a
+    // largura cada) em vez de espremer tudo numa folha gigante minuscula.
     const optsForCurrentPage = async () => {
       if (!fitWidth) return pdfOpts
       const h = await measureFitWidthHeight(page, viewportWidth)
-      const finalH = h && h > 120 ? Math.min(h + 24, FIT_WIDTH_MAX_PX - 40) : viewportHeight
+      if (!h || h <= 120) return { width: `${viewportWidth}px`, height: `${viewportHeight}px` }
+      const measured = Math.min(h + 24, FIT_WIDTH_MAX_PX - 40)
+      const singlePageLimit = Math.round(viewportWidth * 2.4)
+      const finalH = measured <= singlePageLimit ? measured : Math.round(viewportWidth * 1.35)
       return { width: `${viewportWidth}px`, height: `${finalH}px` }
     }
 
