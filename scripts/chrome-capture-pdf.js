@@ -274,11 +274,13 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
   })
 
   const dbg = (m) => { try { fs.appendFileSync('/tmp/fitw-debug.log', `${new Date().toISOString()} ${m}\n`) } catch {} }
+
+  // Acha a 1a e a ultima linha com pixel nao-branco (ignorando os ~8% da
+  // esquerda = barra lateral decorativa). NAO mexe no PNG — so serve pra
+  // recortar a PAGINA do PDF nessa faixa.
+  let contentTop = null, contentBot = null
   if (sharp) {
     try {
-      // Varredura manual: acha a 1a e a ultima linha com pixel nao-branco,
-      // IGNORANDO os ~8% da esquerda (a barra lateral decorativa laranja que
-      // faz o sharp.trim desistir). Recorta a folha nesse intervalo.
       const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
       const buf = g.data, W = g.info.width, H = g.info.height
       const skipLeft = Math.round(W * 0.08)
@@ -293,17 +295,12 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
       let bot = H - 1
       while (bot > top && !rowHasInk(bot)) bot--
       dbg(`screenshot ${W}x${H} skipLeft=${skipLeft} -> top=${top} bot=${bot}`)
-      const pad = 16
-      const cy = Math.max(0, top - pad)
-      const ch = Math.min(H, bot + 1 + pad) - cy
-      if (ch > 100 && ch < H - 20) {
-        png = await sharp(png).extract({ left: 0, top: cy, width: W, height: ch }).png().toBuffer()
-        dbg(`recorte OK: ${H} -> ${ch}`)
-      } else {
-        dbg(`recorte PULADO: ch=${ch} (fora do range 100..${H - 20})`)
+      if (bot > top && (top > 4 || bot < H - 5)) {
+        contentTop = top
+        contentBot = bot
       }
     } catch (e) {
-      dbg(`recorte ERRO: ${e && e.message}`)
+      dbg(`scan ERRO: ${e && e.message}`)
     }
   } else {
     dbg('sem sharp')
@@ -313,6 +310,21 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
   const img = await doc.embedPng(png)
   const p = doc.addPage([img.width, img.height])
   p.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height })
+
+  // Recorta so a PAGINA (CropBox+MediaBox) na faixa do conteudo. PNG fica
+  // inteiro; origem do PDF e no canto inferior esquerdo, entao converte y.
+  if (contentTop != null) {
+    const pad = 18
+    const yTopImg = Math.max(0, contentTop - pad)
+    const yBotImg = Math.min(img.height, contentBot + 1 + pad)
+    const pdfY = img.height - yBotImg
+    const pdfH = yBotImg - yTopImg
+    if (pdfH > 80) {
+      p.setMediaBox(0, pdfY, img.width, pdfH)
+      p.setCropBox(0, pdfY, img.width, pdfH)
+      dbg(`pagina recortada: ${img.height} -> ${Math.round(pdfH)}`)
+    }
+  }
   return Buffer.from(await doc.save())
 }
 
