@@ -259,6 +259,49 @@ async function captureSinglePagePdf(page, pdfOpts) {
   return Buffer.from(pdf)
 }
 
+// fit=width: em vez de page.pdf() (que pagina quando o conteudo passa da altura
+// da folha), tira UM screenshot longo do container e embrulha numa folha PDF do
+// tamanho exato. Imagem nao pagina -> 1 folha unica, alta o quanto precisar.
+// Depois apara o branco do fim via Ghostscript (bbox).
+async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
+  await injectPrintColorAdjust(page)
+  const png = await page.screenshot({
+    type: 'png',
+    clip: { x: 0, y: 0, width: vpW, height: maxH },
+    captureBeyondViewport: true,
+  })
+  const doc = await PDFDocument.create()
+  const img = await doc.embedPng(png)
+  const p = doc.addPage([img.width, img.height])
+  p.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height })
+  let out = Buffer.from(await doc.save())
+
+  // apara o branco em volta (principalmente o fim da folha)
+  const tmp = path.join(os.tmpdir(), `fitw-${process.pid}-${Date.now()}.pdf`)
+  try {
+    fs.writeFileSync(tmp, out)
+    const boxes = await getPdfBBoxes(tmp)
+    const b = boxes && boxes[0]
+    if (b) {
+      const pad = 10
+      const nx = Math.max(0, b[0] - pad)
+      const ny = Math.max(0, b[1] - pad)
+      const nw = Math.min(img.width, b[2] + pad) - nx
+      const nh = Math.min(img.height, b[3] + pad) - ny
+      if (nw > 40 && nh > 40 && (nw < img.width - 1 || nh < img.height - 1)) {
+        const d2 = await PDFDocument.load(out)
+        const pg = d2.getPages()[0]
+        pg.setCropBox(nx, ny, nw, nh)
+        pg.setMediaBox(nx, ny, nw, nh)
+        out = Buffer.from(await d2.save())
+      }
+    }
+  } catch { /* fica com a folha inteira se o bbox falhar */ }
+  finally { try { fs.unlinkSync(tmp) } catch {} }
+
+  return out
+}
+
 async function main() {
   const input = JSON.parse(process.env.CHROME_CAPTURE_PDF_INPUT || '{}')
   const {
@@ -433,8 +476,13 @@ async function main() {
     }
 
     if (!pagesToCapture) {
-      if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
-      pdfBuffer = await captureSinglePagePdf(page, await optsForCurrentPage())
+      if (fitWidth) {
+        // folha unica via screenshot (nao pagina), branco do fim aparado
+        pdfBuffer = await captureFitWidthSinglePagePdf(page, viewportWidth, pbiContainerHeightPx)
+      } else {
+        if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
+        pdfBuffer = await captureSinglePagePdf(page, await optsForCurrentPage())
+      }
     } else {
       const pagePdfs = []
 
@@ -456,8 +504,12 @@ async function main() {
           await new Promise(r => setTimeout(r, 3000))
         }
 
-        if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
-        pagePdfs.push(await captureSinglePagePdf(page, await optsForCurrentPage()))
+        if (fitWidth) {
+          pagePdfs.push(await captureFitWidthSinglePagePdf(page, viewportWidth, pbiContainerHeightPx))
+        } else {
+          if (autocrop) contentBoxes.push(await getSmartContentBox(page, viewportWidth, viewportHeight))
+          pagePdfs.push(await captureSinglePagePdf(page, await optsForCurrentPage()))
+        }
       }
 
       const merged = await PDFDocument.create()
