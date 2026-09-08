@@ -1149,6 +1149,28 @@ function bindSocketEvents(instance, saveCreds) {
         return
       }
 
+      // Baileys emite "qr" a cada ~20s enquanto ninguem escaneia. Depois de
+      // MAX_QR_CYCLES sem parear (~2 min), encerra o socket e marca offline —
+      // evita a instancia ficar gerando QR eternamente gastando CPU.
+      const MAX_QR_CYCLES = 6
+      instance.qrCycles = (instance.qrCycles || 0) + 1
+      if (instance.qrCycles > MAX_QR_CYCLES) {
+        console.log(`QR nao escaneado (${instance.id}) apos ${MAX_QR_CYCLES} tentativas — encerrando socket.`)
+        instance.qrCycles = 0
+        try { instance.socket?.end?.(new Error("qr timeout")) } catch {}
+        instance.socket = null
+        await writeRuntimeState(instance.id, {
+          status: "offline",
+          qr_code_data_url: "",
+          connected_at: null,
+          last_error: "QR nao escaneado a tempo — gere um novo QR para conectar",
+          phone_number: null,
+          display_name: null,
+          jid: null,
+        }).catch(() => {})
+        return
+      }
+
       const qrCodeDataUrl = await QRCode.toDataURL(qr, { width: 512, margin: 1 })
 
       console.log(`\nLeia este QR (${instance.id}) com o WhatsApp em Dispositivos conectados:\n`)
@@ -1168,6 +1190,7 @@ function bindSocketEvents(instance, saveCreds) {
     if (connection === "open") {
       console.log(`\nConectado ao WhatsApp (${instance.id}).`)
       instance.reconnectAttempts = 0
+      instance.qrCycles = 0
       const identity = getSocketIdentity(instance.socket)
 
       await writeRuntimeState(instance.id, {
@@ -1268,6 +1291,7 @@ async function startBot(instanceId = DEFAULT_INSTANCE_KEY) {
 
   instance.isStarting = true
   instance.allowAuthStateWrites = true
+  instance.qrCycles = 0
   clearRestartTimer(instance)
 
   await writeRuntimeState(instance.id, {
@@ -1353,19 +1377,61 @@ function listKnownInstanceIds() {
   return [...known]
 }
 
+// Uma instancia so tem sessao valida se o creds.json tem o "me" (JID registrado).
+// Sem isso, subir o socket so gera QR em loop (evento "qr" a cada ~20s) sem
+// ninguem escanear — puro desperdicio de CPU quando ha varias instancias mortas.
+function instanceHasPairedCreds(instanceId) {
+  try {
+    const authDir =
+      instanceId === DEFAULT_INSTANCE_KEY
+        ? AUTH_DIR
+        : path.join(AUTH_INSTANCES_DIR, normalizeInstanceId(instanceId))
+    const credsPath = path.join(authDir, "creds.json")
+    if (!fs.existsSync(credsPath)) return false
+    const creds = JSON.parse(fs.readFileSync(credsPath, "utf8"))
+    return Boolean(creds?.me?.id || creds?.registered)
+  } catch {
+    return false
+  }
+}
+
 async function bootstrapKnownInstances() {
   const knownInstanceIds = listKnownInstanceIds()
 
   for (const instanceId of knownInstanceIds) {
     const runtimeState = await readRuntimeState(instanceId)
-    if (
-      instanceId === DEFAULT_INSTANCE_KEY ||
-      runtimeState?.status === "connected" ||
-      runtimeState?.status === "reconnecting" ||
-      runtimeState?.status === "awaiting_qr" ||
-      runtimeState?.status === "starting"
-    ) {
+    const paired = instanceHasPairedCreds(instanceId)
+
+    // So auto-inicia quem tem sessao pareada de verdade. Instancia sem creds
+    // (nunca pareada, sessao resetada, ou banida) fica offline ate o usuario
+    // gerar QR manualmente — nao adianta ficar tentando reconectar o que nao
+    // tem sessao. `awaiting_qr` nunca auto-inicia (precisa de acao manual).
+    const shouldStart =
+      paired &&
+      (instanceId === DEFAULT_INSTANCE_KEY ||
+        runtimeState?.status === "connected" ||
+        runtimeState?.status === "reconnecting" ||
+        runtimeState?.status === "starting")
+
+    if (shouldStart) {
       scheduleBotStart(instanceId, 100)
+    } else if (
+      !paired &&
+      runtimeState &&
+      runtimeState.status !== "offline" &&
+      runtimeState.status !== "connected"
+    ) {
+      // Marca como offline pra parar de aparecer "reconnecting/awaiting_qr"
+      // eternamente e o app saber que precisa de QR.
+      await writeRuntimeState(instanceId, {
+        status: "offline",
+        qr_code_data_url: "",
+        connected_at: null,
+        last_error: "Sessao ausente — gere um novo QR para conectar",
+        phone_number: null,
+        display_name: null,
+        jid: null,
+      }).catch(() => {})
     }
   }
 }
