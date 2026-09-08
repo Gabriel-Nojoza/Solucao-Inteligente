@@ -273,33 +273,40 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
     captureBeyondViewport: true,
   })
 
+  const dbg = (m) => { try { fs.appendFileSync('/tmp/fitw-debug.log', `${new Date().toISOString()} ${m}\n`) } catch {} }
   if (sharp) {
     try {
       // Varredura manual: acha a 1a e a ultima linha com pixel nao-branco,
-      // IGNORANDO os ~6% da esquerda (a barra lateral decorativa laranja que
+      // IGNORANDO os ~8% da esquerda (a barra lateral decorativa laranja que
       // faz o sharp.trim desistir). Recorta a folha nesse intervalo.
       const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
       const buf = g.data, W = g.info.width, H = g.info.height
-      const skipLeft = Math.round(W * 0.06)
+      const skipLeft = Math.round(W * 0.08)
+      const THRESH = 240
       const rowHasInk = (y) => {
         const base = y * W
-        for (let x = skipLeft; x < W; x++) if (buf[base + x] < 245) return true
+        for (let x = skipLeft; x < W; x++) if (buf[base + x] < THRESH) return true
         return false
       }
       let top = 0
       while (top < H && !rowHasInk(top)) top++
       let bot = H - 1
       while (bot > top && !rowHasInk(bot)) bot--
+      dbg(`screenshot ${W}x${H} skipLeft=${skipLeft} -> top=${top} bot=${bot}`)
       const pad = 16
       const cy = Math.max(0, top - pad)
       const ch = Math.min(H, bot + 1 + pad) - cy
       if (ch > 100 && ch < H - 20) {
         png = await sharp(png).extract({ left: 0, top: cy, width: W, height: ch }).png().toBuffer()
-        console.error(`[fit=width] recorte: ${H} -> ${ch} (top=${top} bot=${bot})`)
+        dbg(`recorte OK: ${H} -> ${ch}`)
+      } else {
+        dbg(`recorte PULADO: ch=${ch} (fora do range 100..${H - 20})`)
       }
     } catch (e) {
-      console.error(`[fit=width] recorte falhou: ${e && e.message}`)
+      dbg(`recorte ERRO: ${e && e.message}`)
     }
+  } else {
+    dbg('sem sharp')
   }
 
   const doc = await PDFDocument.create()
