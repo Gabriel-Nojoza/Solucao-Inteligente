@@ -9,6 +9,8 @@ const os = require('os')
 const path = require('path')
 const { execFile } = require('child_process')
 const { PDFDocument } = require('pdf-lib')
+let sharp = null
+try { sharp = require('sharp') } catch { /* opcional — sem sharp, nao apara o branco */ }
 
 // Timeout de espera pelo evento "rendered" do Power BI. Sob CPU roubada (throttle
 // de host), a renderizacao ainda progride, so mais devagar — subir isso evita
@@ -260,46 +262,32 @@ async function captureSinglePagePdf(page, pdfOpts) {
 }
 
 // fit=width: em vez de page.pdf() (que pagina quando o conteudo passa da altura
-// da folha), tira UM screenshot longo do container e embrulha numa folha PDF do
-// tamanho exato. Imagem nao pagina -> 1 folha unica, alta o quanto precisar.
-// Depois apara o branco do fim via Ghostscript (bbox).
+// da folha), tira UM screenshot longo do container, apara o branco em volta
+// (sharp.trim) e embrulha numa folha PDF do tamanho exato da imagem aparada.
+// Imagem nao pagina -> 1 folha unica, do tamanho do conteudo, sem branco.
 async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
   await injectPrintColorAdjust(page)
-  const png = await page.screenshot({
+  let png = await page.screenshot({
     type: 'png',
     clip: { x: 0, y: 0, width: vpW, height: maxH },
     captureBeyondViewport: true,
   })
+
+  if (sharp) {
+    try {
+      // apara bordas de cor uniforme (branco em cima/baixo/lados)
+      png = await sharp(png)
+        .trim({ background: '#ffffff', threshold: 12 })
+        .png()
+        .toBuffer()
+    } catch { /* fica com o screenshot inteiro se o trim falhar */ }
+  }
+
   const doc = await PDFDocument.create()
   const img = await doc.embedPng(png)
   const p = doc.addPage([img.width, img.height])
   p.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height })
-  let out = Buffer.from(await doc.save())
-
-  // apara o branco em volta (principalmente o fim da folha)
-  const tmp = path.join(os.tmpdir(), `fitw-${process.pid}-${Date.now()}.pdf`)
-  try {
-    fs.writeFileSync(tmp, out)
-    const boxes = await getPdfBBoxes(tmp)
-    const b = boxes && boxes[0]
-    if (b) {
-      const pad = 10
-      const nx = Math.max(0, b[0] - pad)
-      const ny = Math.max(0, b[1] - pad)
-      const nw = Math.min(img.width, b[2] + pad) - nx
-      const nh = Math.min(img.height, b[3] + pad) - ny
-      if (nw > 40 && nh > 40 && (nw < img.width - 1 || nh < img.height - 1)) {
-        const d2 = await PDFDocument.load(out)
-        const pg = d2.getPages()[0]
-        pg.setCropBox(nx, ny, nw, nh)
-        pg.setMediaBox(nx, ny, nw, nh)
-        out = Buffer.from(await d2.save())
-      }
-    }
-  } catch { /* fica com a folha inteira se o bbox falhar */ }
-  finally { try { fs.unlinkSync(tmp) } catch {} }
-
-  return out
+  return Buffer.from(await doc.save())
 }
 
 async function main() {
