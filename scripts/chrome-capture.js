@@ -6,6 +6,36 @@ const puppeteer = require('puppeteer-core')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
+let sharp = null
+try { sharp = require('sharp') } catch { /* opcional */ }
+
+// Apara as margens brancas em volta do screenshot (relatorio Power BI com
+// canvas maior que o conteudo sai pequeno no topo com muito branco). Varre
+// os 4 lados ate achar pixel nao-branco. Conservador: so corta se sobrar
+// conteudo com tamanho razoavel; senao devolve a imagem original.
+async function trimWhitespace(png) {
+  if (!sharp) return png
+  try {
+    const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
+    const buf = g.data, W = g.info.width, H = g.info.height
+    const T = 244
+    const rowInk = (y) => { const b = y * W; for (let x = 0; x < W; x++) if (buf[b + x] < T) return true; return false }
+    const colInk = (x) => { for (let y = 0; y < H; y++) if (buf[y * W + x] < T) return true; return false }
+    let top = 0; while (top < H && !rowInk(top)) top++
+    let bot = H - 1; while (bot > top && !rowInk(bot)) bot--
+    let left = 0; while (left < W && !colInk(left)) left++
+    let right = W - 1; while (right > left && !colInk(right)) right--
+    const pad = 12
+    const x0 = Math.max(0, left - pad)
+    const y0 = Math.max(0, top - pad)
+    const w = Math.min(W, right + 1 + pad) - x0
+    const h = Math.min(H, bot + 1 + pad) - y0
+    if (w > 120 && h > 80 && (w < W - 4 || h < H - 4)) {
+      return await sharp(png).extract({ left: x0, top: y0, width: w, height: h }).png().toBuffer()
+    }
+  } catch { /* devolve original */ }
+  return png
+}
 
 // Timeout de espera pelo evento "rendered" do Power BI. Sob CPU roubada (throttle
 // de host), a renderizacao ainda progride, so mais devagar — subir isso evita
@@ -134,7 +164,8 @@ async function main() {
     const element = await page.$('#pbi-container')
     if (!element) throw new Error('Container Power BI nao encontrado na pagina')
 
-    const screenshot = await element.screenshot({ type: 'png' })
+    let screenshot = await element.screenshot({ type: 'png' })
+    screenshot = await trimWhitespace(screenshot)
     await new Promise((resolve, reject) => {
       process.stdout.write(Buffer.from(screenshot).toString('base64'), (err) => {
         if (err) reject(err)
