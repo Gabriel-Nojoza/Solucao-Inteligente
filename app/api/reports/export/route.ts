@@ -403,7 +403,9 @@ export async function POST(request: NextRequest) {
           tokenType: "Aad",
           viewportWidth: 1920,
           viewportHeight: 1080,
-          deviceScaleFactor: 1,
+          // 3x: canvas Power BI grande escala pra caber no viewport e sai
+          // pequeno; renderizar em 3x mantem legivel apos o trim de branco.
+          deviceScaleFactor: 3,
         })
         return new Response(chromePng, {
           status: 200,
