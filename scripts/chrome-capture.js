@@ -14,7 +14,8 @@ try { sharp = require('sharp') } catch { /* opcional */ }
 // os 4 lados ate achar pixel nao-branco. Conservador: so corta se sobrar
 // conteudo com tamanho razoavel; senao devolve a imagem original.
 async function trimWhitespace(png) {
-  if (!sharp) return png
+  const dbg = (m) => { try { fs.appendFileSync('/tmp/png-trim-debug.log', `${new Date().toISOString()} ${m}\n`) } catch {} }
+  if (!sharp) { dbg('sem sharp'); return png }
   try {
     const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
     const buf = g.data, W = g.info.width, H = g.info.height
@@ -30,10 +31,12 @@ async function trimWhitespace(png) {
     const y0 = Math.max(0, top - pad)
     const w = Math.min(W, right + 1 + pad) - x0
     const h = Math.min(H, bot + 1 + pad) - y0
+    dbg(`img ${W}x${H} -> box L${left} R${right} T${top} B${bot} -> extract ${x0},${y0} ${w}x${h}`)
     if (w > 120 && h > 80 && (w < W - 4 || h < H - 4)) {
       return await sharp(png).extract({ left: x0, top: y0, width: w, height: h }).png().toBuffer()
     }
-  } catch { /* devolve original */ }
+    dbg('recorte pulado')
+  } catch (e) { dbg(`erro: ${e && e.message}`) }
   return png
 }
 
