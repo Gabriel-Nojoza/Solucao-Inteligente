@@ -291,12 +291,11 @@ async function main() {
     : useCustomSize
       ? `${pageWidthMm}mm ${pageHeightMm}mm`
       : `${pdfFormat} ${landscape ? 'landscape' : 'portrait'}`
-  // Container alto quando fit=width, pra o Power BI renderizar mais linhas sem
-  // scroll interno. Acima do limite o Chrome com swiftshader pode estourar
-  // memoria ("Connection Closed"); relatorio maior que isso e cortado no fim.
-  // Ajustavel por env FIT_WIDTH_MAX_PX (subiu de 4800 pra 9000 quando o
-  // throttle da Hostinger saiu — a maquina aguenta mais agora).
-  const FIT_WIDTH_MAX_PX = Number(process.env.FIT_WIDTH_MAX_PX) || 9000
+  // Container alto quando fit=width, pra o Power BI renderizar TODAS as linhas
+  // numa folha unica (sem paginar — o usuario rola no celular). Acima do limite
+  // o Chrome com swiftshader pode estourar memoria ("Connection Closed") e o
+  // fim do relatorio e cortado. Ajustavel por env FIT_WIDTH_MAX_PX.
+  const FIT_WIDTH_MAX_PX = Number(process.env.FIT_WIDTH_MAX_PX) || 16000
   const pbiContainerHeightPx = fitWidth ? FIT_WIDTH_MAX_PX : viewportHeight
   let pdfOpts = fitWidth
     ? { width: `${viewportWidth}px`, height: `${viewportHeight}px` } // recalculado apos render
@@ -424,16 +423,12 @@ async function main() {
     let pdfBuffer
     const contentBoxes = [] // caixa de conteudo por pagina (para autocrop)
 
-    // Sob fit=width: relatorio pequeno vira 1 folha do tamanho exato do
-    // conteudo; relatorio grande quebra em varias folhas legiveis (~1.35x a
-    // largura cada) em vez de espremer tudo numa folha gigante minuscula.
+    // Sob fit=width: UMA folha unica, alta o quanto o relatorio precisar
+    // (rola no celular). Sem paginar. Altura medida pelo conteudo real.
     const optsForCurrentPage = async () => {
       if (!fitWidth) return pdfOpts
       const h = await measureFitWidthHeight(page, viewportWidth)
-      if (!h || h <= 120) return { width: `${viewportWidth}px`, height: `${viewportHeight}px` }
-      const measured = Math.min(h + 24, FIT_WIDTH_MAX_PX - 40)
-      const singlePageLimit = Math.round(viewportWidth * 2.4)
-      const finalH = measured <= singlePageLimit ? measured : Math.round(viewportWidth * 1.35)
+      const finalH = h && h > 120 ? Math.min(h + 24, FIT_WIDTH_MAX_PX - 40) : viewportHeight
       return { width: `${viewportWidth}px`, height: `${finalH}px` }
     }
 
