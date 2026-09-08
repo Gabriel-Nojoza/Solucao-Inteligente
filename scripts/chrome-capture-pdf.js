@@ -275,12 +275,18 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
 
   if (sharp) {
     try {
+      const before = await sharp(png).metadata()
       // apara bordas de cor uniforme (branco em cima/baixo/lados)
-      png = await sharp(png)
-        .trim({ background: '#ffffff', threshold: 12 })
+      const trimmed = await sharp(png)
+        .trim({ background: '#ffffff', threshold: 20 })
         .png()
         .toBuffer()
-    } catch { /* fica com o screenshot inteiro se o trim falhar */ }
+      const after = await sharp(trimmed).metadata()
+      console.error(`[fit=width] trim: ${before.width}x${before.height} -> ${after.width}x${after.height}`)
+      png = trimmed
+    } catch (e) {
+      console.error(`[fit=width] sharp.trim falhou: ${e && e.message}`)
+    }
   }
 
   const doc = await PDFDocument.create()
