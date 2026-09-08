@@ -275,17 +275,30 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
 
   if (sharp) {
     try {
-      const before = await sharp(png).metadata()
-      // apara bordas de cor uniforme (branco em cima/baixo/lados)
-      const trimmed = await sharp(png)
-        .trim({ background: '#ffffff', threshold: 20 })
-        .png()
-        .toBuffer()
-      const after = await sharp(trimmed).metadata()
-      console.error(`[fit=width] trim: ${before.width}x${before.height} -> ${after.width}x${after.height}`)
-      png = trimmed
+      // Varredura manual: acha a 1a e a ultima linha com pixel nao-branco,
+      // IGNORANDO os ~6% da esquerda (a barra lateral decorativa laranja que
+      // faz o sharp.trim desistir). Recorta a folha nesse intervalo.
+      const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
+      const buf = g.data, W = g.info.width, H = g.info.height
+      const skipLeft = Math.round(W * 0.06)
+      const rowHasInk = (y) => {
+        const base = y * W
+        for (let x = skipLeft; x < W; x++) if (buf[base + x] < 245) return true
+        return false
+      }
+      let top = 0
+      while (top < H && !rowHasInk(top)) top++
+      let bot = H - 1
+      while (bot > top && !rowHasInk(bot)) bot--
+      const pad = 16
+      const cy = Math.max(0, top - pad)
+      const ch = Math.min(H, bot + 1 + pad) - cy
+      if (ch > 100 && ch < H - 20) {
+        png = await sharp(png).extract({ left: 0, top: cy, width: W, height: ch }).png().toBuffer()
+        console.error(`[fit=width] recorte: ${H} -> ${ch} (top=${top} bot=${bot})`)
+      }
     } catch (e) {
-      console.error(`[fit=width] sharp.trim falhou: ${e && e.message}`)
+      console.error(`[fit=width] recorte falhou: ${e && e.message}`)
     }
   }
 
