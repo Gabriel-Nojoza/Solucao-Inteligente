@@ -28,7 +28,15 @@ async function trimWhitespace(png) {
     const rowInk = (y) => { const b = y * W; let c = 0; for (let x = IN; x < W - IN; x++) if (buf[b + x] < T) { if (++c >= minX) return true } return false }
     const colInk = (x) => { let c = 0; for (let y = IN; y < H - IN; y++) if (buf[y * W + x] < T) { if (++c >= minY) return true } return false }
     let top = IN; while (top < H - IN && !rowInk(top)) top++
-    let bot = H - IN - 1; while (bot > top && !rowInk(bot)) bot--
+    // bottom: varre do topo pra baixo guardando a ultima linha com conteudo;
+    // para depois de um vao grande de branco (fim real da tabela, ignora o
+    // scrollbar/borda que fica la embaixo do visual).
+    const GAP = Math.max(80, Math.round(H * 0.05))
+    let bot = top, whiteRun = 0
+    for (let y = top; y < H - IN; y++) {
+      if (rowInk(y)) { bot = y; whiteRun = 0 }
+      else if (++whiteRun > GAP) break
+    }
     let left = IN; while (left < W - IN && !colInk(left)) left++
     let right = W - IN - 1; while (right > left && !colInk(right)) right--
     const pad = 12

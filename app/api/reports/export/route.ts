@@ -401,11 +401,12 @@ export async function POST(request: NextRequest) {
           reportId: report.pbi_report_id,
           pageName: pbiPageName ?? null,
           tokenType: "Aad",
-          viewportWidth: 1920,
-          viewportHeight: 1080,
-          // 3x: canvas Power BI grande escala pra caber no viewport e sai
-          // pequeno; renderizar em 3x mantem legivel apos o trim de branco.
-          deviceScaleFactor: 3,
+          // Viewport grande e quadrado: FitToPage escala o canvas (que pode
+          // ser alto tipo 905x2200) pra caber sem encolher demais. + 2x de
+          // densidade. O trim de branco recorta pro conteudo depois.
+          viewportWidth: 2200,
+          viewportHeight: 2200,
+          deviceScaleFactor: 2,
         })
         return new Response(chromePng, {
           status: 200,
