@@ -20,12 +20,17 @@ async function trimWhitespace(png) {
     const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
     const buf = g.data, W = g.info.width, H = g.info.height
     const T = 244
-    const rowInk = (y) => { const b = y * W; for (let x = 0; x < W; x++) if (buf[b + x] < T) return true; return false }
-    const colInk = (x) => { for (let y = 0; y < H; y++) if (buf[y * W + x] < T) return true; return false }
-    let top = 0; while (top < H && !rowInk(top)) top++
-    let bot = H - 1; while (bot > top && !rowInk(bot)) bot--
-    let left = 0; while (left < W && !colInk(left)) left++
-    let right = W - 1; while (right > left && !colInk(right)) right--
+    // Ignora ~16px de borda (moldura/border do container) e exige um minimo
+    // de pixels com tinta por linha/coluna, senao borda fina de 1px conta.
+    const IN = 16
+    const minX = Math.max(8, Math.round(W * 0.03))
+    const minY = Math.max(8, Math.round(H * 0.03))
+    const rowInk = (y) => { const b = y * W; let c = 0; for (let x = IN; x < W - IN; x++) if (buf[b + x] < T) { if (++c >= minX) return true } return false }
+    const colInk = (x) => { let c = 0; for (let y = IN; y < H - IN; y++) if (buf[y * W + x] < T) { if (++c >= minY) return true } return false }
+    let top = IN; while (top < H - IN && !rowInk(top)) top++
+    let bot = H - IN - 1; while (bot > top && !rowInk(bot)) bot--
+    let left = IN; while (left < W - IN && !colInk(left)) left++
+    let right = W - IN - 1; while (right > left && !colInk(right)) right--
     const pad = 12
     const x0 = Math.max(0, left - pad)
     const y0 = Math.max(0, top - pad)
