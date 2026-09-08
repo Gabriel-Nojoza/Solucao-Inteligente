@@ -194,6 +194,38 @@ export async function POST(request: NextRequest) {
       return jsonError("Callback secret invalido", 401)
     }
 
+    // pdf_settings da empresa — tamanho/fit customizado da pagina no fallback
+    // Chrome (mesma config que o /api/dispatch usa). Sem isso, disparo que passa
+    // pelo n8n ignorava o pdf_settings e saia sempre no formato padrao.
+    const { data: pdfSettingsRow } = await supabase
+      .from("company_settings")
+      .select("value")
+      .eq("company_id", companyId)
+      .eq("key", "pdf_settings")
+      .maybeSingle()
+    const pdfCfg = (pdfSettingsRow?.value ?? null) as Record<string, unknown> | null
+    const toPositiveMm = (v: unknown) => {
+      const n = typeof v === "number" ? v : Number(v)
+      return Number.isFinite(n) && n > 0 ? n : null
+    }
+    const pdfChromeOpts = {
+      pdfFormat: typeof pdfCfg?.format === "string" ? pdfCfg.format : undefined,
+      pdfLandscape: pdfCfg?.landscape !== undefined ? Boolean(pdfCfg.landscape) : undefined,
+      pageWidthMm: toPositiveMm(pdfCfg?.page_width_mm ?? pdfCfg?.width_mm),
+      pageHeightMm: toPositiveMm(pdfCfg?.page_height_mm ?? pdfCfg?.height_mm),
+      autocrop: pdfCfg?.autocrop === true,
+      crop:
+        pdfCfg?.crop && typeof pdfCfg.crop === "object"
+          ? (pdfCfg.crop as {
+              top_pct?: number
+              bottom_pct?: number
+              left_pct?: number
+              right_pct?: number
+            })
+          : null,
+      fit: pdfCfg?.fit === "width" ? ("width" as const) : null,
+    }
+
     const reportId = String(body?.report_id ?? "").trim()
     const format = String(body?.format ?? "PDF").trim().toUpperCase()
     const htmlCapture = body?.html_capture === true || body?.html_capture === "true" || format === "HTML"
@@ -482,7 +514,9 @@ export async function POST(request: NextRequest) {
               embedToken: exportToken,
               reportId: report.pbi_report_id,
               pageName: pbiPageName ?? null,
+              pageNames: pbiPageNames,
               tokenType: "Aad",
+              ...pdfChromeOpts,
             })
             return new Response(chromePdf, {
               status: 200,
