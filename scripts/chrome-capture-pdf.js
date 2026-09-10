@@ -273,29 +273,51 @@ async function captureFitWidthSinglePagePdf(page, vpW, maxH) {
     captureBeyondViewport: true,
   })
 
-  const dbg = (m) => { try { fs.appendFileSync('/tmp/fitw-debug.log', `${new Date().toISOString()} ${m}\n`) } catch {} }
+  const dbgDir = process.env.FITW_DEBUG_DIR || os.tmpdir()
+  const dbg = (m) => { try { fs.appendFileSync(path.join(dbgDir, 'fitw-debug.log'), `${new Date().toISOString()} ${m}\n`) } catch {} }
+  if (process.env.FITW_DEBUG_DIR) {
+    try { fs.writeFileSync(path.join(dbgDir, `fitw-screenshot-${Date.now()}.png`), png); dbg('screenshot salvo') } catch (e) { dbg('erro ao salvar screenshot: ' + e.message) }
+  }
 
-  // Acha a 1a e a ultima linha com pixel nao-branco (ignorando os ~8% da
-  // esquerda = barra lateral decorativa). NAO mexe no PNG — so serve pra
-  // recortar a PAGINA do PDF nessa faixa.
+  // Acha a 1a e a ultima linha com CONTEUDO REAL (nao so 1 pixel). Ignora:
+  // - a moldura de 1px que atravessa a folha (inset de 5px nas 4 bordas)
+  // - linhas com pouquissima tinta (exige >= ~1.5% da largura da faixa)
+  // Varre a faixa 2%..98% (barra lateral fica em ~2-5% e ainda conta, mas o
+  // que importa e onde a tinta comeca/termina verticalmente). NAO mexe no
+  // PNG — so recorta a PAGINA do PDF nessa faixa.
   let contentTop = null, contentBot = null
   if (sharp) {
     try {
       const g = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true })
       const buf = g.data, W = g.info.width, H = g.info.height
-      const skipLeft = Math.round(W * 0.08)
-      const THRESH = 240
+      const INSET = 5
+      // Faixa central: exclui a barra lateral decorativa laranja (~x 2-8%) e a
+      // moldura fina de 1px da folha nas bordas. Assim o scan enxerga so onde a
+      // TABELA comeca/termina — a barra laranja vai ate o rodape da folha e
+      // enganava a deteccao do fim.
+      const bx0 = Math.round(W * 0.12)
+      const bx1 = Math.round(W * 0.95)
+      const MIN_INK = Math.max(8, Math.round((bx1 - bx0) * 0.015))
+      const THRESH = 235
       const rowHasInk = (y) => {
         const base = y * W
-        for (let x = skipLeft; x < W; x++) if (buf[base + x] < THRESH) return true
+        let n = 0
+        for (let x = bx0; x < bx1; x++) if (buf[base + x] < THRESH) { if (++n >= MIN_INK) return true }
         return false
       }
-      let top = 0
-      while (top < H && !rowHasInk(top)) top++
-      let bot = H - 1
-      while (bot > top && !rowHasInk(bot)) bot--
-      dbg(`screenshot ${W}x${H} skipLeft=${skipLeft} -> top=${top} bot=${bot}`)
-      if (bot > top && (top > 4 || bot < H - 5)) {
+      let top = INSET
+      while (top < H - INSET && !rowHasInk(top)) top++
+      // Fim: varre pra baixo guardando a ultima linha com conteudo; para depois
+      // de um vao grande de branco. Ignora linhas/molduras soltas que aparecem
+      // bem abaixo do fim real da tabela.
+      const GAP = Math.max(200, Math.round(H * 0.03))
+      let bot = top, whiteRun = 0
+      for (let y = top; y < H - INSET; y++) {
+        if (rowHasInk(y)) { bot = y; whiteRun = 0 }
+        else if (++whiteRun > GAP) break
+      }
+      dbg(`screenshot ${W}x${H} MIN_INK=${MIN_INK} GAP=${GAP} -> top=${top} bot=${bot}`)
+      if (bot - top > 100 && (top > INSET + 4 || bot < H - INSET - 4)) {
         contentTop = top
         contentBot = bot
       }
