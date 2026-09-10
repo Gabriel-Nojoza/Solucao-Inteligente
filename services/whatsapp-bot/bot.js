@@ -21,6 +21,13 @@ import { fileURLToPath } from "url"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Daemon: uma promise rejeitada sem catch (socket baileys abortado, request
+// externo caindo) nao pode derrubar o processo inteiro e parar TODAS as
+// instancias. Loga e segue.
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection:", reason instanceof Error ? reason.stack || reason.message : reason)
+})
+
 const HTTP_PORT = Number(process.env.BOT_PORT || 3010)
 const BODY_LIMIT = process.env.BOT_BODY_LIMIT || "100mb"
 const AUTH_DIR = path.join(__dirname, "auth")
@@ -299,8 +306,23 @@ function clearDirectoryCache(instance) {
 async function readRuntimeState(instanceId) {
   const instance = getInstanceEntry(instanceId)
 
+  let raw
   try {
-    const raw = await fs.promises.readFile(instance.runtimePath, "utf-8")
+    raw = await fs.promises.readFile(instance.runtimePath, "utf-8")
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null
+    }
+    console.error(`Erro ao ler estado do QR (${instance.id}):`, error)
+    return null
+  }
+
+  // Arquivo vazio ou truncado (ex.: crash no meio de um write) = sem estado
+  // util. Trata como inexistente, sem stack trace assustador — o proximo
+  // writeRuntimeState reescreve do zero.
+  if (!raw || !raw.trim()) return null
+
+  try {
     const parsed = JSON.parse(raw)
     return {
       ...buildDefaultRuntimeState(instance.id),
@@ -308,12 +330,8 @@ async function readRuntimeState(instanceId) {
       instance_id: instance.id,
       instance_name: instance.label,
     }
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return null
-    }
-
-    console.error(`Erro ao ler estado do QR (${instance.id}):`, error)
+  } catch {
+    console.warn(`Estado do QR corrompido (${instance.id}), ignorando arquivo`)
     return null
   }
 }
