@@ -90,6 +90,13 @@ function normalizeDigits(value: string | null | undefined) {
   return (value ?? "").replace(/\D/g, "")
 }
 
+// Numero colado direto do WhatsApp vem com marcas invisiveis de
+// direcao de texto (U+202A/U+202C) em volta — sobrevivem a um trim()
+// normal e derrubavam a validacao sem o usuario perceber o motivo.
+function sanitizePhoneInput(value: string) {
+  return value.replace(/[^\d+]/g, "")
+}
+
 export default function ContactsPage() {
   const instancesKey = "/api/bot/instances"
   const { data: botInstances, isLoading: isLoadingBotInstances } = useSWR<
@@ -298,7 +305,7 @@ export default function ContactsPage() {
 
     if (formType === "individual" && formPhone) {
       const phoneRegex = /^\+?\d{10,15}$/
-      if (!phoneRegex.test(formPhone.replace(/[\s\-()]/g, ""))) {
+      if (!phoneRegex.test(sanitizePhoneInput(formPhone))) {
         errors.phone = "Formato invalido. Ex: +5511999999999"
       }
     }
@@ -322,7 +329,7 @@ export default function ContactsPage() {
     setSaving(true)
 
     try {
-      const normalizedPhone = formPhone ? formPhone.replace(/[\s\-()]/g, "") : null
+      const normalizedPhone = formPhone ? sanitizePhoneInput(formPhone) : null
       const payload = {
         ...(editContact ? { id: editContact.id } : {}),
         name: formName.trim(),
