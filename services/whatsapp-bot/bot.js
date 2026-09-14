@@ -86,6 +86,14 @@ async function resolveCompanyId(instanceId) {
   }
 }
 
+// Nome "lixo": string so de digitos (ID interno do WhatsApp — LID — que
+// vazou pro campo de nome quando o contato nao tinha nome/apelido resolvido
+// ainda). Usado pra nao deixar a sincronizacao automatica piorar um nome
+// que ja esta bom (manual ou resolvido de verdade pelo WhatsApp depois).
+function looksLikeGarbageName(name) {
+  return /^\d{6,}$/.test(String(name ?? "").trim())
+}
+
 function chunkArray(items, size) {
   const chunks = []
   for (let i = 0; i < items.length; i += size) {
@@ -136,21 +144,35 @@ async function syncContactsToDb(instance) {
         const formattedPhone = `+${normalizedPhone}`
         const existingContact = existingByPhone.get(normalizedPhone)
         if (!existingContact) {
+          // Sem nome/apelido resolvido ainda pelo WhatsApp (LID novo, contato
+          // que nunca mandou mensagem): usa o proprio telefone como nome em
+          // vez do ID numerico interno — pelo menos da pra reconhecer, e
+          // upgrada pro nome real sozinho quando o WhatsApp resolver.
+          const safeName = looksLikeGarbageName(item.name) ? formattedPhone : item.name
           const payload = {
             company_id: instance.companyId,
             bot_instance_id: botInstanceId,
-            name: item.name,
+            name: safeName,
             phone: formattedPhone,
             type: "individual",
             is_active: true,
           }
           if (supportsGroupId) payload.whatsapp_group_id = null
           inserts.push(payload)
-        } else if (existingContact.name !== item.name || !existingContact.is_active || existingContact.bot_instance_id !== botInstanceId) {
-          updates.push({
-            id: existingContact.id,
-            payload: { name: item.name, is_active: true, bot_instance_id: botInstanceId, updated_at: new Date().toISOString() },
-          })
+        } else {
+          // Nunca deixa a sincronizacao automatica piorar um nome que ja
+          // esta bom (editado a mao ou resolvido de verdade antes) trocando
+          // por um ID numerico lixo — so atualiza o nome se o existente
+          // tambem for lixo, ou se o novo vier melhor (nome de verdade).
+          const currentLooksReal = existingContact.name && !looksLikeGarbageName(existingContact.name)
+          const newLooksReal = item.name && !looksLikeGarbageName(item.name)
+          const shouldUpdateName = existingContact.name !== item.name && (!currentLooksReal || newLooksReal)
+          const needsUpdate = shouldUpdateName || !existingContact.is_active || existingContact.bot_instance_id !== botInstanceId
+          if (needsUpdate) {
+            const payload = { is_active: true, bot_instance_id: botInstanceId, updated_at: new Date().toISOString() }
+            if (shouldUpdateName) payload.name = item.name
+            updates.push({ id: existingContact.id, payload })
+          }
         }
       } else if (item.type === "group") {
         const groupId = item.whatsapp_group_id
