@@ -1,5 +1,15 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+// Raiz do projeto fixa nesta pasta. Sem isso, se houver outro package-lock.json
+// numa pasta acima (ex.: C:\Users\gabri), o Next trata a pasta do usuario
+// inteira como o projeto e o build falha.
+const raizDoProjeto = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  outputFileTracingRoot: raizDoProjeto,
+  turbopack: { root: raizDoProjeto },
   images: {
     unoptimized: true,
   },
