@@ -59,11 +59,11 @@ export function DispatchStatusPie({ data }: { data: StatusBreakdownItem[] }) {
                       backgroundColor: "var(--color-popover)",
                       border: "1px solid var(--color-border)",
                       borderRadius: "var(--radius-lg)",
-                      color: "#ffffff",
+                      color: "var(--color-popover-foreground)",
                       fontSize: 13,
                     }}
-                    itemStyle={{ color: "#ffffff" }}
-                    labelStyle={{ color: "#ffffff" }}
+                    itemStyle={{ color: "var(--color-popover-foreground)" }}
+                    labelStyle={{ color: "var(--color-popover-foreground)" }}
                   />
                   <Pie
                     data={pieData}
