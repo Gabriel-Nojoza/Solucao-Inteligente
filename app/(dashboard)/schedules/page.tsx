@@ -71,6 +71,13 @@ import {
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { CronBuilder } from "@/components/schedules/cron-builder"
+import { WeekdayAttachmentsGrid } from "@/components/schedules/weekday-attachments-grid"
+import {
+  countWeekdayAttachments,
+  getAttachmentFileName,
+  isPdfAttachmentUrl,
+  normalizeWeekdayAttachments,
+} from "@/lib/weekday-attachments"
 import type {
   Schedule,
   Report,
@@ -80,19 +87,6 @@ import type {
 } from "@/lib/types"
 import { describeCronValue, isValidCronValue } from "@/lib/schedule-cron"
 import { resolveScheduleReportConfigs } from "@/lib/schedule-report-configs"
-
-// Anexo da rotina: PDF (relatorio anexado) ou imagem
-function isPdfAttachmentUrl(url: string) {
-  return /\.pdf$/i.test(url.split("?")[0])
-}
-
-function getAttachmentFileName(url: string) {
-  try {
-    return decodeURIComponent(new URL(url).pathname.split("/").pop() || "arquivo.pdf")
-  } catch {
-    return "arquivo.pdf"
-  }
-}
 
 function stripHtmlTags(value: string) {
   return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
@@ -572,6 +566,11 @@ export default function SchedulesPage() {
     "Segue o relatorio {report_name} em anexo."
   )
   const [formImageUrls, setFormImageUrls] = useState<string[]>([])
+  // Anexos por dia da semana (chave "Por dia da semana" no campo Anexos)
+  const [formWeekdayEnabled, setFormWeekdayEnabled] = useState(false)
+  const [formWeekdayDays, setFormWeekdayDays] = useState<Record<string, string[]>>({})
+  const formWeekdayCount = countWeekdayAttachments({ enabled: true, days: formWeekdayDays })
+  const hasFormAttachments = formImageUrls.length > 0 || (formWeekdayEnabled && formWeekdayCount > 0)
   const [uploadingImage, setUploadingImage] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [formContactIds, setFormContactIds] = useState<string[]>([])
@@ -707,6 +706,8 @@ export default function SchedulesPage() {
     setFormSendMode("none")
     setFormMessage(DEFAULT_SCHEDULE_MESSAGE)
     setFormImageUrls([])
+    setFormWeekdayEnabled(false)
+    setFormWeekdayDays({})
     setFormContactIds([])
     setFormActive(true)
     setFormDisableAfterSend(false)
@@ -782,6 +783,9 @@ export default function SchedulesPage() {
         ? (schedule.image_urls as string[]).filter((u) => typeof u === "string" && u.trim())
         : schedule.image_url ? [schedule.image_url] : []
     )
+    const scheduleWeekday = normalizeWeekdayAttachments(schedule.weekday_attachments)
+    setFormWeekdayEnabled(scheduleWeekday?.enabled ?? false)
+    setFormWeekdayDays(scheduleWeekday?.days ?? {})
     setFormContactIds(schedule.contacts?.map((c) => c.id) ?? [])
     setFormActive(duplicating ? false : schedule.is_active)
     setFormDisableAfterSend(schedule.disable_after_send ?? false)
@@ -817,7 +821,7 @@ export default function SchedulesPage() {
     if (!formBotInstanceId) {
       errors.bot_instance_id = "Selecione qual WhatsApp vai enviar essa rotina"
     }
-    if (normalizedFormReportSelections.length === 0 && formImageUrls.length === 0) {
+    if (normalizedFormReportSelections.length === 0 && !hasFormAttachments) {
       errors.reportConfigs = "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)"
     } else if (hasDuplicateReports) {
       errors.reportConfigs = "Selecione cada relatorio apenas uma vez"
@@ -845,17 +849,23 @@ export default function SchedulesPage() {
     return Object.keys(errors).length === 0
   }
 
+  // Sobe um anexo (imagem ou PDF) e devolve o link. Usado no campo normal e na grade por dia.
+  async function uploadScheduleAttachment(file: File) {
+    const formData = new FormData()
+    formData.append("file", file)
+    const res = await fetch("/api/schedules/image", { method: "POST", body: formData })
+    const data = await res.json() as { url?: string; error?: string }
+    if (!res.ok || !data.url) throw new Error(data.error || "Erro no upload")
+    return data.url
+  }
+
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setUploadingImage(true)
     try {
-      const formData = new FormData()
-      formData.append("file", file)
-      const res = await fetch("/api/schedules/image", { method: "POST", body: formData })
-      const data = await res.json() as { url?: string; error?: string }
-      if (!res.ok) throw new Error(data.error || "Erro no upload")
-      if (data.url) setFormImageUrls((prev) => [...prev, data.url!])
+      const url = await uploadScheduleAttachment(file)
+      setFormImageUrls((prev) => [...prev, url])
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao fazer upload")
     } finally {
@@ -871,7 +881,7 @@ export default function SchedulesPage() {
     const isEditing = editingScheduleId !== null
     const primaryReportSelection = normalizedFormReportSelections[0] ?? null
 
-    if (!primaryReportSelection && formImageUrls.length === 0) {
+    if (!primaryReportSelection && !hasFormAttachments) {
       setFormErrors((prev) => ({
         ...prev,
         reportConfigs: "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)",
@@ -899,6 +909,10 @@ export default function SchedulesPage() {
         message_template: formMessage || null,
         image_url: formImageUrls[0] ?? null,
         image_urls: formImageUrls.length > 0 ? formImageUrls : null,
+        weekday_attachments:
+          formWeekdayEnabled || formWeekdayCount > 0
+            ? { enabled: formWeekdayEnabled, days: formWeekdayDays }
+            : null,
         disable_after_send: formDisableAfterSend,
         contact_ids: formContactIds,
         is_active: formActive,
@@ -2021,7 +2035,33 @@ export default function SchedulesPage() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label>Anexos (opcional)</Label>
+              <div className="flex items-center justify-between gap-3">
+                <Label>Anexos (opcional)</Label>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="anexos-por-dia"
+                    checked={formWeekdayEnabled}
+                    onCheckedChange={(checked) => {
+                      setFormWeekdayEnabled(checked)
+                      setFormErrors((prev) => (prev.reportConfigs ? { ...prev, reportConfigs: "" } : prev))
+                    }}
+                  />
+                  <Label htmlFor="anexos-por-dia" className="cursor-pointer text-xs font-normal">
+                    Por dia da semana
+                  </Label>
+                </div>
+              </div>
+              {formWeekdayEnabled ? (
+                <WeekdayAttachmentsGrid
+                  days={formWeekdayDays}
+                  onChange={(days) => {
+                    setFormWeekdayDays(days)
+                    setFormErrors((prev) => (prev.reportConfigs ? { ...prev, reportConfigs: "" } : prev))
+                  }}
+                  upload={uploadScheduleAttachment}
+                />
+              ) : (
+              <>
               {formImageUrls.map((url, index) => (
                 <div key={url} className="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
                   {isPdfAttachmentUrl(url) ? (
@@ -2071,6 +2111,8 @@ export default function SchedulesPage() {
                 onChange={handleImageUpload}
                 disabled={uploadingImage}
               />
+              </>
+              )}
             </div>
 
             <div className="flex flex-col gap-2">
@@ -2209,7 +2251,7 @@ export default function SchedulesPage() {
                 saving ||
                 !formName ||
                 !formBotInstanceId ||
-                (normalizedFormReportSelections.length === 0 && formImageUrls.length === 0) ||
+                (normalizedFormReportSelections.length === 0 && !hasFormAttachments) ||
                 !formCron ||
                 (!canShowContacts && formContactIds.length === 0)
               }

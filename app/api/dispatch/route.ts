@@ -39,6 +39,11 @@ import { runStoredAutomation } from "@/lib/automation-runner"
 import { retryAsync } from "@/lib/utils"
 import { getTimePartsInTimeZone } from "@/lib/schedule-cron"
 import { sendTelegramNotification } from "@/lib/telegram-notify"
+import {
+  getAttachmentsForWeekday,
+  getWeekdayLongName,
+  normalizeWeekdayAttachments,
+} from "@/lib/weekday-attachments"
 
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
 
@@ -514,7 +519,37 @@ async function handleDispatch(request: NextRequest) {
       : []
 
   if (!primaryScheduleReportConfig) {
-    if (scheduleImageUrls.length === 0) {
+    // Anexos por dia da semana: com a chave ligada, vao so os anexos do dia de hoje
+    // (no fuso da empresa), no lugar dos anexos normais.
+    const weekdayAttachments = normalizeWeekdayAttachments(
+      (schedule as Record<string, unknown>).weekday_attachments
+    )
+    let attachmentUrls = scheduleImageUrls
+
+    if (weekdayAttachments?.enabled) {
+      const { data: generalRow } = await supabase
+        .from("company_settings")
+        .select("value")
+        .eq("company_id", companyId)
+        .eq("key", "general")
+        .maybeSingle()
+      const configuredTimeZone = (generalRow?.value as Record<string, unknown> | null)?.timezone
+      const timeZone =
+        typeof configuredTimeZone === "string" && configuredTimeZone.trim()
+          ? configuredTimeZone.trim()
+          : "America/Sao_Paulo"
+      const todayWeekday = getTimePartsInTimeZone(new Date(), timeZone).weekday
+
+      attachmentUrls = getAttachmentsForWeekday(weekdayAttachments, todayWeekday)
+
+      if (attachmentUrls.length === 0) {
+        return NextResponse.json({
+          success: true,
+          skipped: true,
+          reason: `Nenhum anexo programado para ${getWeekdayLongName(todayWeekday)}`,
+        })
+      }
+    } else if (scheduleImageUrls.length === 0) {
       return NextResponse.json(
         { error: "Rotina sem relatorio configurado" },
         { status: 400 }
@@ -546,8 +581,8 @@ async function handleDispatch(request: NextRequest) {
     let sent = 0
 
     for (const contact of normalizedImageContacts) {
-      for (let imgIndex = 0; imgIndex < scheduleImageUrls.length; imgIndex++) {
-        const imageUrl = scheduleImageUrls[imgIndex]
+      for (let imgIndex = 0; imgIndex < attachmentUrls.length; imgIndex++) {
+        const imageUrl = attachmentUrls[imgIndex]
         const anexo = describeScheduleAttachment(imageUrl)
         try {
           await sendWithFallback({

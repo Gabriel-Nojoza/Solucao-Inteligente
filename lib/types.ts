@@ -1,3 +1,5 @@
+import type { WeekdayAttachments } from "@/lib/weekday-attachments"
+
 export interface Workspace {
   id: string
   pbi_workspace_id: string
@@ -84,6 +86,8 @@ export interface Schedule {
   message_template: string | null
   image_url?: string | null
   image_urls?: string[] | null
+  // Anexos por dia da semana (lib/weekday-attachments.ts)
+  weekday_attachments?: WeekdayAttachments | null
   disable_after_send?: boolean
   send_mode?: "none" | "audio" | "text" | null
   is_active: boolean

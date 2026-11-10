@@ -20,6 +20,17 @@ import {
   isMissingBotInstanceIdColumnError,
   isMissingWhatsAppBotInstancesTableError,
 } from "@/lib/whatsapp-bot-instances"
+import {
+  hasActiveWeekdayAttachments,
+  normalizeWeekdayAttachments,
+} from "@/lib/weekday-attachments"
+
+const WEEKDAY_ATTACHMENTS_MIGRATION_HINT =
+  "O banco ainda nao suporta anexos por dia da semana. Execute a migration 20261110_schedule_weekday_attachments.sql no Supabase."
+
+function isMissingWeekdayAttachmentsColumn(message?: string | null) {
+  return typeof message === "string" && message.includes("weekday_attachments")
+}
 
 function isMissingSchedulesUpdatedAtColumn(message?: string | null) {
   return (
@@ -104,13 +115,15 @@ function validateScheduleReports(
     pbi_page_names?: unknown
     image_url?: unknown
     image_urls?: unknown
+    weekday_attachments?: unknown
   },
   ctx: z.RefinementCtx
 ) {
   const reportConfigs = resolveScheduleReportConfigs(value)
   const hasImage =
     (Array.isArray(value.image_urls) && value.image_urls.length > 0) ||
-    (typeof value.image_url === "string" && value.image_url.trim().length > 0)
+    (typeof value.image_url === "string" && value.image_url.trim().length > 0) ||
+    hasActiveWeekdayAttachments(normalizeWeekdayAttachments(value.weekday_attachments))
 
   if (reportConfigs.length === 0 && !hasImage) {
     ctx.addIssue({
@@ -135,6 +148,14 @@ const baseScheduleSchema = z.object({
   message_template: z.string().nullable().optional(),
   image_url: z.string().url().nullable().optional(),
   image_urls: z.array(z.string().url()).nullable().optional(),
+  // Anexos por dia da semana (lib/weekday-attachments.ts)
+  weekday_attachments: z.preprocess(
+    (value) => (value === undefined || value === null ? value : normalizeWeekdayAttachments(value)),
+    z
+      .object({ enabled: z.boolean(), days: z.record(z.array(z.string().url())) })
+      .nullable()
+      .optional()
+  ),
   disable_after_send: z.boolean().optional(),
   send_mode: z.enum(["none", "audio", "text"]).default("none"),
   is_active: z.boolean().default(true),
@@ -150,6 +171,7 @@ const REPORT_SELECTION_FIELDS = [
   "pbi_page_names",
   "image_url",
   "image_urls",
+  "weekday_attachments",
 ] as const
 
 // Na edicao, so confere relatorio/anexo quando a chamada mexe neles. Um PUT so
@@ -313,7 +335,13 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { contact_ids, report_configs: _reportConfigs, ...scheduleData } = parsed.data
+  const {
+    contact_ids,
+    report_configs: _reportConfigs,
+    weekday_attachments: _weekdayAttachments,
+    ...scheduleData
+  } = parsed.data
+  const weekdayAttachments = normalizeWeekdayAttachments(parsed.data.weekday_attachments)
   const normalizedContactIds = [...new Set((contact_ids ?? []).map((id) => id.trim()).filter(Boolean))]
   const reportConfigs = resolveScheduleReportConfigs(parsed.data)
   const primaryReportConfig = getPrimaryScheduleReportConfig(reportConfigs)
@@ -323,7 +351,8 @@ export async function POST(request: NextRequest) {
     Array.isArray(parsed.data.image_urls) && parsed.data.image_urls.length > 0
       ? parsed.data.image_urls
       : parsed.data.image_url ? [parsed.data.image_url] : []
-  const hasImage = effectiveImageUrls.length > 0
+  const hasImage =
+    effectiveImageUrls.length > 0 || hasActiveWeekdayAttachments(weekdayAttachments)
 
   if (scheduleReportIds.length > 0 && !hasAccessToScheduleReports(scheduleReportIds, accessMaps.visibleTargetIds)) {
     return getScheduleAccessErrorResponse()
@@ -431,11 +460,18 @@ export async function POST(request: NextRequest) {
       report_configs: reportConfigs,
       image_url: effectiveImageUrls[0] ?? null,
       image_urls: effectiveImageUrls.length > 0 ? effectiveImageUrls : null,
+      // So manda a coluna nova quando usada, para as rotinas comuns seguirem
+      // funcionando antes de a migration 20261110_schedule_weekday_attachments.sql rodar.
+      ...(weekdayAttachments ? { weekday_attachments: weekdayAttachments } : {}),
     })
     .select()
     .single()
 
   if (error) {
+    if (isMissingWeekdayAttachmentsColumn(error.message)) {
+      return NextResponse.json({ error: WEEKDAY_ATTACHMENTS_MIGRATION_HINT }, { status: 500 })
+    }
+
     if (isMissingBotInstanceIdColumnError(error, "schedules")) {
       return NextResponse.json(
         {
@@ -516,7 +552,8 @@ export async function PUT(request: NextRequest) {
 
   const { data: existingSchedule, error: existingScheduleError } = await supabase
     .from("schedules")
-    .select("id, export_format, report_id, report_configs, pbi_page_name, pbi_page_names, bot_instance_id, image_url")
+    // "*" para ler tambem weekday_attachments sem quebrar antes de a coluna existir
+    .select("*")
     .eq("company_id", companyId)
     .eq("id", id)
     .maybeSingle()
@@ -596,7 +633,12 @@ export async function PUT(request: NextRequest) {
         : typeof existing.image_url === "string" && existing.image_url.trim()
           ? [existing.image_url.trim()]
           : []
-  const hasImage = effectivePutImageUrls.length > 0
+  const weekdayAttachmentsExplicit = Object.prototype.hasOwnProperty.call(parsed.data, "weekday_attachments")
+  const effectiveWeekdayAttachments = normalizeWeekdayAttachments(
+    weekdayAttachmentsExplicit ? parsed.data.weekday_attachments : existing.weekday_attachments
+  )
+  const hasImage =
+    effectivePutImageUrls.length > 0 || hasActiveWeekdayAttachments(effectiveWeekdayAttachments)
 
   if (reportConfigs.length === 0 && !hasImage) {
     return NextResponse.json(
@@ -683,6 +725,16 @@ export async function PUT(request: NextRequest) {
   scheduleUpdates.image_url = effectivePutImageUrls[0] ?? null
   scheduleUpdates.image_urls = effectivePutImageUrls.length > 0 ? effectivePutImageUrls : null
 
+  // Grava a coluna nova so quando ela ja existe no banco ou quando a rotina usa
+  // anexos por dia (ai a migration e obrigatoria e o erro explica).
+  delete scheduleUpdates.weekday_attachments
+  if (
+    weekdayAttachmentsExplicit &&
+    (effectiveWeekdayAttachments || Object.prototype.hasOwnProperty.call(existing, "weekday_attachments"))
+  ) {
+    scheduleUpdates.weekday_attachments = effectiveWeekdayAttachments
+  }
+
   if (isUpdatingReportSelection) {
     const primaryReportConfig = getPrimaryScheduleReportConfig(reportConfigs)
 
@@ -717,6 +769,10 @@ export async function PUT(request: NextRequest) {
   }
 
   if (result.error) {
+    if (isMissingWeekdayAttachmentsColumn(result.error.message)) {
+      return NextResponse.json({ error: WEEKDAY_ATTACHMENTS_MIGRATION_HINT }, { status: 500 })
+    }
+
     if (isMissingBotInstanceIdColumnError(result.error, "schedules")) {
       return NextResponse.json(
         {

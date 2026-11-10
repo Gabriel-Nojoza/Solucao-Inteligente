@@ -184,6 +184,8 @@ CREATE TABLE IF NOT EXISTS public.schedules (
   -- Imagem(ns) a enviar junto com a rotina
   image_url        text,
   image_urls       jsonb,
+  -- Anexos por dia da semana: { "enabled": true, "days": { "1": ["<link>"], ... } } (0 = domingo)
+  weekday_attachments jsonb,
   disable_after_send boolean NOT NULL DEFAULT false,
   -- Modo de envio de narração: 'none' = só relatório, 'audio' = voz, 'text' = texto
   send_mode        text        NOT NULL DEFAULT 'none'
