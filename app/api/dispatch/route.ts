@@ -164,6 +164,24 @@ function buildReportAttachmentFileName(reportName: string, extension = "pdf") {
   return `${sanitizeFileName(reportName || "relatorio") || "relatorio"}.${extension}`
 }
 
+// Anexo da rotina (campo "Anexos"): imagem, como sempre foi, ou PDF (relatorio
+// anexado). O PDF sai com o nome original e o tipo certo; sem isso ia como
+// "imagem.jpg" e nao abria no celular de quem recebe.
+function describeScheduleAttachment(url: string) {
+  let pathname = url
+  try {
+    pathname = decodeURIComponent(new URL(url).pathname)
+  } catch {
+    // URL invalida: trata como imagem, como antes
+  }
+
+  if (/\.pdf$/i.test(pathname)) {
+    return { file_name: pathname.split("/").pop() || "relatorio.pdf", mimetype: "application/pdf" }
+  }
+
+  return { file_name: "imagem.jpg", mimetype: "image/jpeg" }
+}
+
 function applyMessageTemplate(template: string | null | undefined, reportName: string) {
   const source = template?.trim() || "Segue o relatorio {report_name} em anexo."
   return source.replace(/\{(\w+)\}/g, (_, key: string) => {
@@ -530,6 +548,7 @@ async function handleDispatch(request: NextRequest) {
     for (const contact of normalizedImageContacts) {
       for (let imgIndex = 0; imgIndex < scheduleImageUrls.length; imgIndex++) {
         const imageUrl = scheduleImageUrls[imgIndex]
+        const anexo = describeScheduleAttachment(imageUrl)
         try {
           await sendWithFallback({
             instance_id: schedule.bot_instance_id ?? null,
@@ -537,8 +556,8 @@ async function handleDispatch(request: NextRequest) {
             whatsapp_group_id: contact.whatsapp_group_id,
             message: null,
             document_url: imageUrl,
-            file_name: "imagem.jpg",
-            mimetype: "image/jpeg",
+            file_name: anexo.file_name,
+            mimetype: anexo.mimetype,
           }, resolvedBotInstance?.id ?? null)
           if (imgIndex === 0) sent++
         } catch {

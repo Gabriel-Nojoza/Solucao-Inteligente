@@ -115,7 +115,7 @@ function validateScheduleReports(
   if (reportConfigs.length === 0 && !hasImage) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Selecione ao menos 1 relatorio ou adicione uma imagem.",
+      message: "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF).",
       path: ["report_configs"],
     })
   }
@@ -143,12 +143,33 @@ const baseScheduleSchema = z.object({
 
 const scheduleSchema = baseScheduleSchema.superRefine(validateScheduleReports)
 
+const REPORT_SELECTION_FIELDS = [
+  "report_configs",
+  "report_id",
+  "pbi_page_name",
+  "pbi_page_names",
+  "image_url",
+  "image_urls",
+] as const
+
+// Na edicao, so confere relatorio/anexo quando a chamada mexe neles. Um PUT so
+// com { id, is_active } (o botao de ligar/desligar da lista) era recusado com
+// "Selecione ao menos 1 relatorio". O PUT confere de novo mais abaixo, ja com
+// o que esta salvo na rotina.
 const scheduleUpdateSchema = baseScheduleSchema
   .partial()
   .extend({
     id: z.string().uuid(),
   })
-  .superRefine(validateScheduleReports)
+  .superRefine((value, ctx) => {
+    const touchesReportSelection = REPORT_SELECTION_FIELDS.some(
+      (field) => (value as Record<string, unknown>)[field] !== undefined
+    )
+
+    if (touchesReportSelection) {
+      validateScheduleReports(value, ctx)
+    }
+  })
 
 async function checkDispatchExpiry(supabase: ReturnType<typeof createClient>, companyId: string) {
   const { data } = await supabase
@@ -312,7 +333,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: {
-          report_configs: ["Selecione ao menos 1 relatorio ou adicione uma imagem."],
+          report_configs: ["Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)."],
         },
       },
       { status: 400 }
@@ -581,7 +602,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json(
       {
         error: {
-          report_configs: ["Selecione ao menos 1 relatorio ou adicione uma imagem."],
+          report_configs: ["Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)."],
         },
       },
       { status: 400 }

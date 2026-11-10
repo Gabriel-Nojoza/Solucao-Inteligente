@@ -16,6 +16,7 @@ import {
   X,
   Workflow,
   Image as ImageIcon,
+  FileText,
   User,
   Users,
 } from "lucide-react"
@@ -79,6 +80,19 @@ import type {
 } from "@/lib/types"
 import { describeCronValue, isValidCronValue } from "@/lib/schedule-cron"
 import { resolveScheduleReportConfigs } from "@/lib/schedule-report-configs"
+
+// Anexo da rotina: PDF (relatorio anexado) ou imagem
+function isPdfAttachmentUrl(url: string) {
+  return /\.pdf$/i.test(url.split("?")[0])
+}
+
+function getAttachmentFileName(url: string) {
+  try {
+    return decodeURIComponent(new URL(url).pathname.split("/").pop() || "arquivo.pdf")
+  } catch {
+    return "arquivo.pdf"
+  }
+}
 
 function stripHtmlTags(value: string) {
   return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
@@ -804,7 +818,7 @@ export default function SchedulesPage() {
       errors.bot_instance_id = "Selecione qual WhatsApp vai enviar essa rotina"
     }
     if (normalizedFormReportSelections.length === 0 && formImageUrls.length === 0) {
-      errors.reportConfigs = "Selecione ao menos 1 relatorio ou adicione uma imagem"
+      errors.reportConfigs = "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)"
     } else if (hasDuplicateReports) {
       errors.reportConfigs = "Selecione cada relatorio apenas uma vez"
     }
@@ -860,7 +874,7 @@ export default function SchedulesPage() {
     if (!primaryReportSelection && formImageUrls.length === 0) {
       setFormErrors((prev) => ({
         ...prev,
-        reportConfigs: "Selecione ao menos 1 relatorio ou adicione uma imagem",
+        reportConfigs: "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)",
       }))
       return
     }
@@ -2007,15 +2021,23 @@ export default function SchedulesPage() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label>Imagens (opcional)</Label>
+              <Label>Anexos (opcional)</Label>
               {formImageUrls.map((url, index) => (
                 <div key={url} className="flex items-center gap-3 rounded-xl border bg-muted/20 p-3">
-                  <img
-                    src={url}
-                    alt={`Imagem ${index + 1}`}
-                    className="h-16 w-16 shrink-0 rounded-lg object-cover"
-                  />
-                  <span className="flex-1 text-sm text-muted-foreground">Imagem {index + 1}</span>
+                  {isPdfAttachmentUrl(url) ? (
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-muted">
+                      <FileText className="size-7 text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <img
+                      src={url}
+                      alt={`Imagem ${index + 1}`}
+                      className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                    {isPdfAttachmentUrl(url) ? getAttachmentFileName(url) : `Imagem ${index + 1}`}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setFormImageUrls((prev) => prev.filter((_, i) => i !== index))}
@@ -2034,15 +2056,17 @@ export default function SchedulesPage() {
                   : <ImageIcon className="size-8 text-muted-foreground/50" />}
                 <div className="text-center">
                   <p className="text-sm font-medium">
-                    {uploadingImage ? "Enviando..." : formImageUrls.length > 0 ? "Adicionar outra imagem" : "Clique para fazer upload da imagem"}
+                    {uploadingImage ? "Enviando..." : formImageUrls.length > 0 ? "Adicionar outro anexo" : "Clique para anexar imagem ou PDF"}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">PNG, JPG ou GIF (max. 10MB)</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    PNG, JPG, GIF ou PDF (max. 10MB). Vai em todo horario da rotina, ate ser removido.
+                  </p>
                 </div>
               </div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
+                accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,application/pdf,.pdf"
                 className="hidden"
                 onChange={handleImageUpload}
                 disabled={uploadingImage}
