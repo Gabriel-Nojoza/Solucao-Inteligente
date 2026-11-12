@@ -21,6 +21,14 @@ export type AttachmentTarget = {
   whatsapp_group_id: string | null
 }
 
+const IMAGE_TYPES_BY_EXTENSION: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+}
+
 // Anexo da rotina (campo "Anexos"): imagem, como sempre foi, ou PDF (relatorio
 // anexado). O PDF sai com o nome original e o tipo certo; sem isso ia como
 // "imagem.jpg" e nao abria no celular de quem recebe.
@@ -34,6 +42,14 @@ export function describeScheduleAttachment(url: string) {
 
   if (/\.pdf$/i.test(pathname)) {
     return { file_name: pathname.split("/").pop() || "relatorio.pdf", mimetype: "application/pdf" }
+  }
+
+  // Imagem sai com a extensao real (PNG chega como "imagem.png"). O bot manda
+  // como documento, entao o celular de quem recebe abre pelo nome do arquivo.
+  const ext = pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? ""
+  const imageType = IMAGE_TYPES_BY_EXTENSION[ext]
+  if (imageType) {
+    return { file_name: `imagem.${ext === "jpeg" ? "jpg" : ext}`, mimetype: imageType }
   }
 
   return { file_name: "imagem.jpg", mimetype: "image/jpeg" }
