@@ -305,13 +305,18 @@ export async function GET() {
           }
         })
 
-        const reportNames = reportConfigs.map((reportConfig) => reportConfig.report_name)
+        const folderReportConfigs = normalizeFolderReportConfigs(schedule.folder_report_configs)
+        // Rotina so com a imagem do robo: mostra a pasta no lugar do relatorio.
+        const reportNames =
+          reportConfigs.length > 0
+            ? reportConfigs.map((reportConfig) => reportConfig.report_name)
+            : folderReportConfigs.map((config) => `Robo: ${config.folder_name}`)
         const primaryReportName = reportNames[0] ?? "Desconhecido"
 
         return {
           ...schedule,
           report_configs: reportConfigs,
-          folder_report_configs: normalizeFolderReportConfigs(schedule.folder_report_configs),
+          folder_report_configs: folderReportConfigs,
           report_names: reportNames,
           report_name:
             reportNames.length > 1

@@ -72,6 +72,12 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { CronBuilder } from "@/components/schedules/cron-builder"
 import { WeekdayAttachmentsGrid } from "@/components/schedules/weekday-attachments-grid"
+import { FolderReportsPicker } from "@/components/schedules/folder-reports-picker"
+import {
+  normalizeFolderReportConfigs,
+  type FolderReportConfig,
+  type FolderReportFolderSummary,
+} from "@/lib/folder-reports"
 import {
   countWeekdayAttachments,
   getAttachmentFileName,
@@ -570,7 +576,18 @@ export default function SchedulesPage() {
   const [formWeekdayEnabled, setFormWeekdayEnabled] = useState(false)
   const [formWeekdayDays, setFormWeekdayDays] = useState<Record<string, string[]>>({})
   const formWeekdayCount = countWeekdayAttachments({ enabled: true, days: formWeekdayDays })
-  const hasFormAttachments = formImageUrls.length > 0 || (formWeekdayEnabled && formWeekdayCount > 0)
+  // Imagem automatica do robo: pastas que o robo do computador do cliente envia
+  const [formFolderReports, setFormFolderReports] = useState<FolderReportConfig[]>([])
+  const {
+    data: robotFolders,
+    error: robotFoldersError,
+    isLoading: isLoadingRobotFolders,
+  } = useSWR<FolderReportFolderSummary[]>(dialogOpen ? "/api/folder-reports" : null, fetcher)
+  const showRobotPicker = (robotFolders?.length ?? 0) > 0 || formFolderReports.length > 0
+  const hasFormAttachments =
+    formImageUrls.length > 0 ||
+    (formWeekdayEnabled && formWeekdayCount > 0) ||
+    formFolderReports.length > 0
   const [uploadingImage, setUploadingImage] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [formContactIds, setFormContactIds] = useState<string[]>([])
@@ -708,6 +725,7 @@ export default function SchedulesPage() {
     setFormImageUrls([])
     setFormWeekdayEnabled(false)
     setFormWeekdayDays({})
+    setFormFolderReports([])
     setFormContactIds([])
     setFormActive(true)
     setFormDisableAfterSend(false)
@@ -786,6 +804,7 @@ export default function SchedulesPage() {
     const scheduleWeekday = normalizeWeekdayAttachments(schedule.weekday_attachments)
     setFormWeekdayEnabled(scheduleWeekday?.enabled ?? false)
     setFormWeekdayDays(scheduleWeekday?.days ?? {})
+    setFormFolderReports(normalizeFolderReportConfigs(schedule.folder_report_configs))
     setFormContactIds(schedule.contacts?.map((c) => c.id) ?? [])
     setFormActive(duplicating ? false : schedule.is_active)
     setFormDisableAfterSend(schedule.disable_after_send ?? false)
@@ -822,7 +841,7 @@ export default function SchedulesPage() {
       errors.bot_instance_id = "Selecione qual WhatsApp vai enviar essa rotina"
     }
     if (normalizedFormReportSelections.length === 0 && !hasFormAttachments) {
-      errors.reportConfigs = "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)"
+      errors.reportConfigs = "Selecione ao menos 1 relatorio, adicione um anexo (imagem ou PDF) ou escolha a imagem do robo"
     } else if (hasDuplicateReports) {
       errors.reportConfigs = "Selecione cada relatorio apenas uma vez"
     }
@@ -884,7 +903,7 @@ export default function SchedulesPage() {
     if (!primaryReportSelection && !hasFormAttachments) {
       setFormErrors((prev) => ({
         ...prev,
-        reportConfigs: "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)",
+        reportConfigs: "Selecione ao menos 1 relatorio, adicione um anexo (imagem ou PDF) ou escolha a imagem do robo",
       }))
       return
     }
@@ -913,6 +932,7 @@ export default function SchedulesPage() {
           formWeekdayEnabled || formWeekdayCount > 0
             ? { enabled: formWeekdayEnabled, days: formWeekdayDays }
             : null,
+        folder_report_configs: formFolderReports.length > 0 ? formFolderReports : null,
         disable_after_send: formDisableAfterSend,
         contact_ids: formContactIds,
         is_active: formActive,
@@ -2119,6 +2139,21 @@ export default function SchedulesPage() {
               </>
               )}
             </div>
+
+            {showRobotPicker && (
+              <FolderReportsPicker
+                value={formFolderReports}
+                onChange={(value) => {
+                  setFormFolderReports(value)
+                  setFormErrors((prev) => (prev.reportConfigs ? { ...prev, reportConfigs: "" } : prev))
+                }}
+                folders={robotFolders}
+                isLoading={isLoadingRobotFolders}
+                loadError={robotFoldersError ? "Nao foi possivel carregar as pastas do robo." : null}
+                hasError={false}
+                withPowerBi={normalizedFormReportSelections.length > 0}
+              />
+            )}
 
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">

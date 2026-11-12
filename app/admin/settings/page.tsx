@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { BRAND_NAME } from "@/lib/branding"
+import { RobotKeyCard } from "@/components/admin/robot-key-card"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
@@ -479,6 +480,7 @@ export default function SettingsPage() {
                 )}
               </CardContent>
             </Card>
+            <RobotKeyCard className="mt-6" />
           </TabsContent>
 
           {/* General Tab */}
