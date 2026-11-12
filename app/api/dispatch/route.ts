@@ -40,10 +40,9 @@ import { retryAsync } from "@/lib/utils"
 import { getTimePartsInTimeZone } from "@/lib/schedule-cron"
 import { sendTelegramNotification } from "@/lib/telegram-notify"
 import {
-  getAttachmentsForWeekday,
-  getWeekdayLongName,
-  normalizeWeekdayAttachments,
-} from "@/lib/weekday-attachments"
+  resolveScheduleAttachmentsForNow,
+  sendScheduleAttachments,
+} from "@/lib/schedule-attachments"
 
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
 
@@ -167,24 +166,6 @@ function buildPageAttachmentFileName(
 
 function buildReportAttachmentFileName(reportName: string, extension = "pdf") {
   return `${sanitizeFileName(reportName || "relatorio") || "relatorio"}.${extension}`
-}
-
-// Anexo da rotina (campo "Anexos"): imagem, como sempre foi, ou PDF (relatorio
-// anexado). O PDF sai com o nome original e o tipo certo; sem isso ia como
-// "imagem.jpg" e nao abria no celular de quem recebe.
-function describeScheduleAttachment(url: string) {
-  let pathname = url
-  try {
-    pathname = decodeURIComponent(new URL(url).pathname)
-  } catch {
-    // URL invalida: trata como imagem, como antes
-  }
-
-  if (/\.pdf$/i.test(pathname)) {
-    return { file_name: pathname.split("/").pop() || "relatorio.pdf", mimetype: "application/pdf" }
-  }
-
-  return { file_name: "imagem.jpg", mimetype: "image/jpeg" }
 }
 
 function applyMessageTemplate(template: string | null | undefined, reportName: string) {
@@ -512,44 +493,26 @@ async function handleDispatch(request: NextRequest) {
 
   const scheduleReportConfigs = resolveScheduleReportConfigs(schedule)
   const primaryScheduleReportConfig = getPrimaryScheduleReportConfig(scheduleReportConfigs)
-  const scheduleImageUrls: string[] = Array.isArray((schedule as Record<string, unknown>).image_urls)
-    ? ((schedule as Record<string, unknown>).image_urls as string[]).filter((u) => typeof u === "string" && u.trim())
-    : typeof schedule.image_url === "string" && schedule.image_url.trim()
-      ? [schedule.image_url.trim()]
-      : []
+  // Anexos da rotina (campo "Anexos"). Com "Por dia da semana" ligado, so os do
+  // dia de hoje (no fuso da empresa). Com relatorio do Power BI, vao logo depois
+  // dele, para os mesmos contatos.
+  const scheduleAttachments = await resolveScheduleAttachmentsForNow(
+    supabase,
+    companyId,
+    schedule as Record<string, unknown>
+  )
 
   if (!primaryScheduleReportConfig) {
-    // Anexos por dia da semana: com a chave ligada, vao so os anexos do dia de hoje
-    // (no fuso da empresa), no lugar dos anexos normais.
-    const weekdayAttachments = normalizeWeekdayAttachments(
-      (schedule as Record<string, unknown>).weekday_attachments
-    )
-    let attachmentUrls = scheduleImageUrls
+    const attachmentUrls = scheduleAttachments.urls
 
-    if (weekdayAttachments?.enabled) {
-      const { data: generalRow } = await supabase
-        .from("company_settings")
-        .select("value")
-        .eq("company_id", companyId)
-        .eq("key", "general")
-        .maybeSingle()
-      const configuredTimeZone = (generalRow?.value as Record<string, unknown> | null)?.timezone
-      const timeZone =
-        typeof configuredTimeZone === "string" && configuredTimeZone.trim()
-          ? configuredTimeZone.trim()
-          : "America/Sao_Paulo"
-      const todayWeekday = getTimePartsInTimeZone(new Date(), timeZone).weekday
-
-      attachmentUrls = getAttachmentsForWeekday(weekdayAttachments, todayWeekday)
-
-      if (attachmentUrls.length === 0) {
+    if (attachmentUrls.length === 0) {
+      if (scheduleAttachments.byWeekday) {
         return NextResponse.json({
           success: true,
           skipped: true,
-          reason: `Nenhum anexo programado para ${getWeekdayLongName(todayWeekday)}`,
+          reason: `Nenhum anexo programado para ${scheduleAttachments.weekdayName}`,
         })
       }
-    } else if (scheduleImageUrls.length === 0) {
       return NextResponse.json(
         { error: "Rotina sem relatorio configurado" },
         { status: 400 }
@@ -581,24 +544,17 @@ async function handleDispatch(request: NextRequest) {
     let sent = 0
 
     for (const contact of normalizedImageContacts) {
-      for (let imgIndex = 0; imgIndex < attachmentUrls.length; imgIndex++) {
-        const imageUrl = attachmentUrls[imgIndex]
-        const anexo = describeScheduleAttachment(imageUrl)
-        try {
-          await sendWithFallback({
-            instance_id: schedule.bot_instance_id ?? null,
-            jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
-            whatsapp_group_id: contact.whatsapp_group_id,
-            message: null,
-            document_url: imageUrl,
-            file_name: anexo.file_name,
-            mimetype: anexo.mimetype,
-          }, resolvedBotInstance?.id ?? null)
-          if (imgIndex === 0) sent++
-        } catch {
-          // falha silenciosa por contato/imagem
-        }
-      }
+      const result = await sendScheduleAttachments(
+        attachmentUrls,
+        {
+          instance_id: schedule.bot_instance_id ?? null,
+          jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
+          whatsapp_group_id: contact.whatsapp_group_id,
+        },
+        (payload) => sendWithFallback(payload, resolvedBotInstance?.id ?? null)
+      )
+      // falha silenciosa por contato/anexo, como antes
+      if (result.sent > 0) sent++
     }
 
     await supabase
@@ -904,6 +860,8 @@ async function handleDispatch(request: NextRequest) {
       const failureDetails: string[] = []
 
       for (const [contactIndex, contact] of normalizedContacts.entries()) {
+        let reportDeliveredToContact = false
+
         for (const [reportIndex, target] of directPdfTargets.entries()) {
           const currentLog =
             insertedLogs?.[contactIndex * directPdfTargets.length + reportIndex]
@@ -1107,6 +1065,7 @@ async function handleDispatch(request: NextRequest) {
             }, 2, 7000)
 
             deliveredCount++
+            reportDeliveredToContact = true
 
             if (currentLog) {
               await supabase
@@ -1141,6 +1100,25 @@ async function handleDispatch(request: NextRequest) {
                 .eq("company_id", companyId)
                 .eq("id", currentLog.id)
             }
+          }
+        }
+
+        // Anexos da rotina vao logo depois do relatorio, so para quem recebeu o
+        // relatorio. Falha no anexo nao muda o status do relatorio (ja entregue).
+        if (reportDeliveredToContact && scheduleAttachments.urls.length > 0) {
+          const attachmentResult = await sendScheduleAttachments(
+            scheduleAttachments.urls,
+            {
+              instance_id: schedule.bot_instance_id ?? null,
+              jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
+              whatsapp_group_id: contact.whatsapp_group_id,
+            },
+            (payload) => sendWithFallback(payload, resolvedBotInstance?.id ?? null)
+          )
+          for (const attachmentError of attachmentResult.errors) {
+            failureDetails.push(
+              `- Anexo -> ${getDispatchLogTarget(contact)}: ${attachmentError.slice(0, 140)}`
+            )
           }
         }
 

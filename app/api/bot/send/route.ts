@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+import { after, NextRequest, NextResponse } from "next/server"
 import {
   sendWhatsAppBotMessage,
   type WhatsAppBotSendPayload,
 } from "@/lib/whatsapp-bot"
+import { sendScheduleAttachmentsAfterReport } from "@/lib/schedule-attachments"
 import { resolveRequestCompanyContext } from "@/lib/n8n-auth"
 import { createServiceClient as createClient } from "@/lib/supabase/server"
 import { listCompanyWhatsAppBotInstances } from "@/lib/whatsapp-bot-instances"
@@ -124,16 +125,53 @@ export async function POST(request: NextRequest) {
     const result = await sendWhatsAppBotMessage(payload)
 
     if (companyId && dispatchLogId) {
-      await supabase
+      const deliveredUpdate = {
+        status: "delivered",
+        error_message: null,
+        n8n_execution_id: n8nExecutionId,
+        completed_at: new Date().toISOString(),
+      }
+
+      // So a primeira entrega do log devolve a linha. E nela que os anexos da
+      // rotina saem, uma vez so, mesmo que o n8n mande audio/texto depois com o
+      // mesmo log.
+      const { data: firstDelivery } = await supabase
         .from("dispatch_logs")
-        .update({
-          status: "delivered",
-          error_message: null,
-          n8n_execution_id: n8nExecutionId,
-          completed_at: new Date().toISOString(),
-        })
+        .update(deliveredUpdate)
         .eq("company_id", companyId)
         .eq("id", dispatchLogId)
+        .neq("status", "delivered")
+        .select("schedule_id")
+
+      const deliveredScheduleId = firstDelivery?.[0]?.schedule_id
+
+      if (!firstDelivery || firstDelivery.length === 0) {
+        await supabase
+          .from("dispatch_logs")
+          .update(deliveredUpdate)
+          .eq("company_id", companyId)
+          .eq("id", dispatchLogId)
+      } else if (typeof deliveredScheduleId === "string" && deliveredScheduleId) {
+        const attachmentCompanyId = companyId
+        const target = {
+          instance_id: payload.instance_id ?? null,
+          jid: payload.jid ?? null,
+          whatsapp_group_id: payload.whatsapp_group_id ?? null,
+        }
+        // Depois de responder ao n8n, para nao segurar a resposta dele.
+        after(() =>
+          sendScheduleAttachmentsAfterReport({
+            companyId: attachmentCompanyId,
+            scheduleId: deliveredScheduleId,
+            target,
+          }).catch((error) => {
+            console.error("[bot/send] falha ao enviar anexos da rotina", {
+              dispatchLogId,
+              error: error instanceof Error ? error.message : error,
+            })
+          })
+        )
+      }
     }
 
     return NextResponse.json(result)

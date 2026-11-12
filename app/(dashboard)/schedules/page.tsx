@@ -2051,6 +2051,11 @@ export default function SchedulesPage() {
                   </Label>
                 </div>
               </div>
+              {normalizedFormReportSelections.length > 0 && (
+                <p className="text-xs text-muted-foreground" data-testid="anexos-depois-do-relatorio">
+                  Os anexos vao logo depois do relatorio do Power BI, para os mesmos contatos.
+                </p>
+              )}
               {formWeekdayEnabled ? (
                 <WeekdayAttachmentsGrid
                   days={formWeekdayDays}
