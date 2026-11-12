@@ -4,7 +4,7 @@
 // n8n, que permite mandar mensagens pelo WhatsApp.
 //
 // No banco fica so o hash (company_settings, key "robot"). A chave aparece uma
-// vez, quando e gerada em Admin > Configuracoes.
+// vez, quando e gerada no painel admin (Relatorios por Empresa > Robo).
 import crypto from "node:crypto"
 import { createServiceClient } from "@/lib/supabase/server"
 

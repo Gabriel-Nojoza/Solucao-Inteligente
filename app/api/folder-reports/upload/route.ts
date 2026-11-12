@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!companyId) {
-    return jsonError("Chave do robo invalida. Gere uma nova em Admin > Configuracoes > Robo de relatorios.", 401)
+    return jsonError("Chave do robo invalida. Peca uma nova ao administrador da plataforma.", 401)
   }
 
   const contentLength = Number(request.headers.get("content-length") || 0)

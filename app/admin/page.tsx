@@ -10,7 +10,7 @@ import { UpcomingDispatches } from "@/components/dashboard/upcoming-dispatches"
 import {
   Users, Settings, Activity, Shield, UserPlus, ChevronRight,
   BarChart3, Zap, FileText, MessageSquare, CheckCircle2, XCircle,
-  Clock, ArrowRightLeft, Loader2, Pencil, Save, X, Plus,
+  Clock, ArrowRightLeft, Loader2, Pencil, Save, X, Plus, Bot,
 } from "lucide-react"
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
@@ -33,6 +33,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Switch } from "@/components/ui/switch"
+import { RobotKeyDialog } from "@/components/admin/robot-key-dialog"
 import type { CompanyStatItem, CompanyStatsResponse } from "@/app/api/admin/company-stats/route"
 import type { AdminOperationalSummaryResponse } from "@/app/api/admin/operational-summary/route"
 
@@ -323,6 +324,8 @@ export default function AdminDashboardPage() {
     blockedWindows: TimeWindow[]
   }
   const [sendingHoursDialog, setSendingHoursDialog] = useState<SendingHoursDialog | null>(null)
+  // Chave do robo de relatorios (WinThor) da empresa escolhida
+  const [robotKeyCompany, setRobotKeyCompany] = useState<{ companyId: string; companyName: string } | null>(null)
   const [sendingHoursSaving, setSendingHoursSaving] = useState(false)
 
   function openSendingHoursDialog(c: CompanyStatItem) {
@@ -785,6 +788,7 @@ export default function AdminDashboardPage() {
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Ocultar Zeros</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">PNG</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Horário</th>
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Robô</th>
                         <th className="px-4 py-2.5 text-center text-xs font-medium text-muted-foreground">Taxa</th>
                       </tr>
                     </thead>
@@ -959,6 +963,16 @@ export default function AdminDashboardPage() {
                               </button>
                             </td>
                             <td className="px-4 py-3 text-center">
+                              <button
+                                onClick={() => setRobotKeyCompany({ companyId: c.companyId, companyName: c.companyName })}
+                                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted/50 transition-colors"
+                                title="Chave do robo de relatorios (WinThor)"
+                              >
+                                <Bot className="size-3 shrink-0" />
+                                Chave
+                              </button>
+                            </td>
+                            <td className="px-4 py-3 text-center">
                               <Badge
                                 variant={c.successRate >= 80 ? "default" : c.successRate >= 50 ? "secondary" : "destructive"}
                                 className="text-xs"
@@ -984,7 +998,7 @@ export default function AdminDashboardPage() {
                             </div>
                           </div>
                         </td>
-                        <td colSpan={11} />
+                        <td colSpan={12} />
                       </tr>
                     </tfoot>
                   </table>
@@ -1168,6 +1182,8 @@ export default function AdminDashboardPage() {
 
       {/* Chat flutuante admin */}
       <AdminFloatingChat />
+
+      <RobotKeyDialog company={robotKeyCompany} onClose={() => setRobotKeyCompany(null)} />
 
       {/* Modal de horário de envio */}
       <Dialog open={sendingHoursDialog !== null} onOpenChange={(open) => { if (!open) setSendingHoursDialog(null) }}>

@@ -1,16 +1,24 @@
 "use client"
 
-// Chave do robo de relatorios (Admin > Configuracoes). O robo instalado no
-// computador do cliente usa essa chave para enviar o relatorio baixado (ex.:
-// do WinThor). A chave aparece uma vez so, quando e gerada. Ver lib/robot-key.ts.
+// Chave do robo de relatorios de uma empresa (painel admin > Relatorios por
+// Empresa > Robo). O robo instalado no computador do cliente usa essa chave
+// para enviar o relatorio baixado (ex.: do WinThor). A chave aparece uma vez
+// so, quando e gerada. Ver lib/robot-key.ts.
 import { useState } from "react"
 import useSWR from "swr"
-import { Bot, Copy, Loader2 } from "lucide-react"
+import { Copy, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 type RobotKeyInfo = { exists: boolean; created_at: string | null; hint: string | null }
 
@@ -29,24 +37,41 @@ function formatDate(value: string | null) {
     : date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
-export function RobotKeyCard({ className }: { className?: string }) {
-  const { data, error, isLoading, mutate } = useSWR("/api/robot-key", fetcher)
+export function RobotKeyDialog({
+  company,
+  onClose,
+}: {
+  company: { companyId: string; companyName: string } | null
+  onClose: () => void
+}) {
+  const { data, error, isLoading, mutate } = useSWR(
+    company ? `/api/admin/robot-key?companyId=${encodeURIComponent(company.companyId)}` : null,
+    fetcher
+  )
   const [newKey, setNewKey] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
 
+  function close() {
+    setNewKey(null)
+    onClose()
+  }
+
   async function generate() {
+    if (!company) return
     if (
       data?.exists &&
-      !window.confirm(
-        "Gerar uma chave nova? O robo que usa a chave atual para de enviar ate receber a nova."
-      )
+      !window.confirm("Gerar uma chave nova? O robo que usa a chave atual para de enviar ate receber a nova.")
     ) {
       return
     }
 
     setGenerating(true)
     try {
-      const res = await fetch("/api/robot-key", { method: "POST" })
+      const res = await fetch("/api/admin/robot-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId: company.companyId }),
+      })
       const body = (await res.json()) as { key?: string; error?: string }
       if (!res.ok || !body.key) throw new Error(body.error || "Nao foi possivel gerar a chave")
       setNewKey(body.key)
@@ -70,19 +95,17 @@ export function RobotKeyCard({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Bot className="size-5 text-muted-foreground" />
-          Robo de relatorios (WinThor)
-        </CardTitle>
-        <CardDescription>
-          Chave que o robo instalado no computador do cliente usa para enviar o relatorio baixado
-          (ex.: do WinThor). Ela so permite guardar arquivos desta empresa; nao envia mensagens.
-          Depois, escolha a pasta na rotina, em &quot;Imagem automatica do robo&quot;.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <Dialog open={company !== null} onOpenChange={(open) => (!open ? close() : undefined)}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Robo de relatorios — {company?.companyName}</DialogTitle>
+          <DialogDescription>
+            Chave que o robo instalado no computador do cliente usa para enviar o relatorio baixado
+            (ex.: do WinThor). Ela so permite guardar arquivos desta empresa; nao envia mensagens.
+            Depois, na rotina, marque a pasta em &quot;Imagem automatica do robo&quot;.
+          </DialogDescription>
+        </DialogHeader>
+
         <p className="text-sm text-muted-foreground" data-testid="robot-key-status">
           {isLoading
             ? "Carregando..."
@@ -114,13 +137,16 @@ export function RobotKeyCard({ className }: { className?: string }) {
           </div>
         ) : null}
 
-        <div>
-          <Button type="button" onClick={() => void generate()} disabled={generating || isLoading}>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={close}>
+            Fechar
+          </Button>
+          <Button type="button" onClick={() => void generate()} disabled={generating || isLoading || !!error}>
             {generating ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
             {data?.exists ? "Gerar nova chave" : "Gerar chave do robo"}
           </Button>
-        </div>
-      </CardContent>
-    </Card>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
