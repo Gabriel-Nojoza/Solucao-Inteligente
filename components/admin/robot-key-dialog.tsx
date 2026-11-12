@@ -132,7 +132,8 @@ export function RobotKeyDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              No computador do cliente, rode <code>npm run configurar</code> no robo e cole essa chave.
+              Mande para o cliente numa mensagem separada do link do instalador: ao abrir o instalador,
+              ele cola essa chave.
             </p>
           </div>
         ) : null}
