@@ -1,4 +1,5 @@
 import type { WeekdayAttachments } from "@/lib/weekday-attachments"
+import type { FolderReportConfig } from "@/lib/folder-reports"
 
 export interface Workspace {
   id: string
@@ -88,6 +89,8 @@ export interface Schedule {
   image_urls?: string[] | null
   // Anexos por dia da semana (lib/weekday-attachments.ts)
   weekday_attachments?: WeekdayAttachments | null
+  // Imagem automatica do robo: pastas escolhidas (lib/robot-attachments.ts)
+  folder_report_configs?: FolderReportConfig[] | null
   disable_after_send?: boolean
   send_mode?: "none" | "audio" | "text" | null
   is_active: boolean

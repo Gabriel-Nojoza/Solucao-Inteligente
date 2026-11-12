@@ -190,11 +190,42 @@ CREATE TABLE IF NOT EXISTS public.schedules (
   -- Modo de envio de narração: 'none' = só relatório, 'audio' = voz, 'text' = texto
   send_mode        text        NOT NULL DEFAULT 'none'
                                CHECK (send_mode IN ('none', 'audio', 'text')),
+  -- Relatorios da pasta (robo no computador do cliente). Ver tabela folder_reports.
+  -- Formato: [{ "folder_key": "vendas", "folder_name": "Vendas", "formats": ["PDF", "PNG"] }]
+  folder_report_configs jsonb,
+  -- Arquivo ja enviado por pasta/formato. Formato: { "vendas|PDF": "<folder_reports.id>" }
+  folder_last_sent jsonb,
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz
 );
 
 CREATE INDEX IF NOT EXISTS idx_schedules_company_id ON public.schedules(company_id);
+
+-- =============================================================================
+-- TABELA: folder_reports
+-- Arquivos (PDF/PNG) que o robo do computador do cliente sobe para a
+-- plataforma. Os arquivos ficam no bucket privado "folder-reports".
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS public.folder_reports (
+  id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id     uuid        NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  folder_key     text        NOT NULL,
+  folder_name    text        NOT NULL,
+  format         text        NOT NULL CHECK (format IN ('PDF', 'PNG')),
+  file_name      text        NOT NULL,
+  mimetype       text        NOT NULL,
+  size_bytes     integer     NOT NULL,
+  sha256         text        NOT NULL,
+  storage_path   text        NOT NULL,
+  file_saved_at  timestamptz NOT NULL,
+  received_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_folder_reports_latest
+  ON public.folder_reports (company_id, folder_key, format, file_saved_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_folder_reports_unique_content
+  ON public.folder_reports (company_id, folder_key, format, sha256);
+ALTER TABLE public.folder_reports ENABLE ROW LEVEL SECURITY;
 
 -- =============================================================================
 -- TABELA: schedule_contacts

@@ -45,6 +45,12 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    // A chave do robo so muda pela rota propria (/api/robot-key), que gera a
+    // chave e guarda o hash. Aqui daria para gravar qualquer coisa no lugar.
+    if (key === "robot") {
+      return NextResponse.json({ error: "Use o botao Gerar chave do robo" }, { status: 400 })
+    }
+
     if (key === "n8n") {
       const webhookUrl = String((value as Record<string, unknown>).webhook_url ?? "").trim()
       const callbackSecret = String(

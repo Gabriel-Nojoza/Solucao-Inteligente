@@ -42,7 +42,13 @@ import { sendTelegramNotification } from "@/lib/telegram-notify"
 import {
   resolveScheduleAttachmentsForNow,
   sendScheduleAttachments,
+  type ScheduleAttachment,
 } from "@/lib/schedule-attachments"
+import {
+  claimRobotAttachmentsForRun,
+  recordMissingRobotFiles,
+  scheduleHasRobotAttachments,
+} from "@/lib/robot-attachments"
 
 const EXPORT_DELAY_MS = Number(process.env.EXPORT_DELAY_MS || "8000")
 
@@ -504,8 +510,9 @@ async function handleDispatch(request: NextRequest) {
 
   if (!primaryScheduleReportConfig) {
     const attachmentUrls = scheduleAttachments.urls
+    const hasRobotAttachments = scheduleHasRobotAttachments(schedule as Record<string, unknown>)
 
-    if (attachmentUrls.length === 0) {
+    if (attachmentUrls.length === 0 && !hasRobotAttachments) {
       if (scheduleAttachments.byWeekday) {
         return NextResponse.json({
           success: true,
@@ -541,11 +548,44 @@ async function handleDispatch(request: NextRequest) {
       return NextResponse.json({ error: "Nenhum contato ativo vinculado" }, { status: 400 })
     }
 
+    // Imagem automatica do robo: o arquivo de hoje ainda nao enviado vai
+    // primeiro; se nao chegou, fica a falha no historico (nao manda o de ontem).
+    const robotClaim = await claimRobotAttachmentsForRun({
+      supabase,
+      companyId,
+      schedule: schedule as Record<string, unknown> & { id: string },
+      logIds: [],
+    })
+    await recordMissingRobotFiles({
+      supabase,
+      companyId,
+      companyName,
+      schedule,
+      contacts: normalizedImageContacts.map((contact) => ({
+        name: String(contact.name ?? ""),
+        target: getDispatchLogTarget(contact),
+      })),
+      missing: robotClaim.missing,
+    })
+
+    const imageOnlyAttachments: Array<string | ScheduleAttachment> = [
+      ...robotClaim.attachments,
+      ...attachmentUrls,
+    ]
+
+    if (imageOnlyAttachments.length === 0) {
+      return NextResponse.json({
+        success: false,
+        skipped: true,
+        reason: robotClaim.missing.map((item) => item.reason).join(" ") || "Nenhum anexo para enviar",
+      })
+    }
+
     let sent = 0
 
     for (const contact of normalizedImageContacts) {
       const result = await sendScheduleAttachments(
-        attachmentUrls,
+        imageOnlyAttachments,
         {
           instance_id: schedule.bot_instance_id ?? null,
           jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
@@ -556,6 +596,9 @@ async function handleDispatch(request: NextRequest) {
       // falha silenciosa por contato/anexo, como antes
       if (result.sent > 0) sent++
     }
+
+    // Nada saiu (ex.: WhatsApp fora): o arquivo do robo nao conta como enviado.
+    if (sent === 0) await robotClaim.rollback()
 
     await supabase
       .from("schedules")
@@ -778,6 +821,31 @@ async function handleDispatch(request: NextRequest) {
       logs_created: insertedLogs?.length ?? 0,
     })
   }
+
+  // Imagem automatica do robo (ex.: PNG do WinThor): escolhida uma vez por
+  // envio e mandada logo depois do relatorio, antes dos anexos. No envio pelo
+  // n8n, /api/bot/send acha os arquivos pelo id do log (por isso os logIds).
+  const robotClaim = await claimRobotAttachmentsForRun({
+    supabase,
+    companyId,
+    schedule: schedule as Record<string, unknown> & { id: string },
+    logIds: directPdfTargets.length > 0 ? [] : (insertedLogs ?? []).map((log) => log.id),
+  })
+  await recordMissingRobotFiles({
+    supabase,
+    companyId,
+    companyName,
+    schedule,
+    contacts: normalizedContacts.map((contact) => ({
+      name: String(contact.name ?? ""),
+      target: getDispatchLogTarget(contact),
+    })),
+    missing: robotClaim.missing,
+  })
+  const attachmentsAfterReport: Array<string | ScheduleAttachment> = [
+    ...robotClaim.attachments,
+    ...scheduleAttachments.urls,
+  ]
 
   const message = applyMessageTemplate(
     schedule.message_template,
@@ -1105,9 +1173,9 @@ async function handleDispatch(request: NextRequest) {
 
         // Anexos da rotina vao logo depois do relatorio, so para quem recebeu o
         // relatorio. Falha no anexo nao muda o status do relatorio (ja entregue).
-        if (reportDeliveredToContact && scheduleAttachments.urls.length > 0) {
+        if (reportDeliveredToContact && attachmentsAfterReport.length > 0) {
           const attachmentResult = await sendScheduleAttachments(
-            scheduleAttachments.urls,
+            attachmentsAfterReport,
             {
               instance_id: schedule.bot_instance_id ?? null,
               jid: contact.phone ? `${contact.phone}@s.whatsapp.net` : null,
@@ -1129,6 +1197,9 @@ async function handleDispatch(request: NextRequest) {
           await sleep(EXPORT_DELAY_MS)
         }
       }
+
+      // Nenhum relatorio saiu: o arquivo do robo tambem nao saiu.
+      if (deliveredCount === 0) await robotClaim.rollback()
 
       await supabase
         .from("schedules")
@@ -1183,6 +1254,7 @@ async function handleDispatch(request: NextRequest) {
 
     if (!webhookUrl) {
       const errMsg = "URL do webhook N8N nao configurada"
+      await robotClaim.rollback()
       for (const log of insertedLogs ?? []) {
         await supabase
           .from("dispatch_logs")
@@ -1195,6 +1267,7 @@ async function handleDispatch(request: NextRequest) {
 
     if (!callbackSecret) {
       const errMsg = "Callback secret do N8N nao configurado"
+      await robotClaim.rollback()
       for (const log of insertedLogs ?? []) {
         await supabase
           .from("dispatch_logs")
@@ -1278,6 +1351,7 @@ async function handleDispatch(request: NextRequest) {
   } catch (error) {
     dispatchErrorMessage =
       error instanceof Error ? error.message : "Erro ao enviar para o webhook N8N"
+    await robotClaim.rollback()
 
     for (const log of insertedLogs ?? []) {
       await supabase

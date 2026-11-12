@@ -6,6 +6,8 @@ import {
   getWeekdayLongName,
   normalizeWeekdayAttachments,
 } from "@/lib/weekday-attachments"
+import { getRobotAttachmentsForLog } from "@/lib/robot-attachments"
+import { getCompanyTimeZone } from "@/lib/company-timezone"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
@@ -14,6 +16,14 @@ type ServiceClient = ReturnType<typeof createServiceClient>
 const ATTACHMENTS_AFTER_REPORT_DELAY_MS = Number(
   process.env.ATTACHMENTS_AFTER_REPORT_DELAY_MS || "15000"
 )
+
+// Anexo pronto para enviar. Os do campo "Anexos" sao so o link (nome e tipo
+// vem do link); os do robo ja trazem o nome e o tipo do arquivo.
+export type ScheduleAttachment = {
+  url: string
+  file_name?: string
+  mimetype?: string
+}
 
 export type AttachmentTarget = {
   instance_id: string | null
@@ -85,17 +95,7 @@ export async function resolveScheduleAttachmentsForNow(
     return { byWeekday: false, urls: getScheduleAttachmentList(schedule) }
   }
 
-  const { data: generalRow } = await supabase
-    .from("company_settings")
-    .select("value")
-    .eq("company_id", companyId)
-    .eq("key", "general")
-    .maybeSingle()
-  const configuredTimeZone = (generalRow?.value as Record<string, unknown> | null)?.timezone
-  const timeZone =
-    typeof configuredTimeZone === "string" && configuredTimeZone.trim()
-      ? configuredTimeZone.trim()
-      : "America/Sao_Paulo"
+  const timeZone = await getCompanyTimeZone(supabase, companyId)
   const todayWeekday = getTimePartsInTimeZone(new Date(), timeZone).weekday
 
   return {
@@ -108,15 +108,20 @@ export async function resolveScheduleAttachmentsForNow(
 // Manda os anexos, um de cada vez, para um contato ou grupo. Uma falha nao
 // impede os proximos; volta quantos foram e o motivo de cada falha.
 export async function sendScheduleAttachments(
-  urls: string[],
+  items: Array<string | ScheduleAttachment>,
   target: AttachmentTarget,
   send: (payload: WhatsAppBotSendPayload) => Promise<unknown> = sendWhatsAppBotMessage
 ) {
   let sent = 0
   const errors: string[] = []
 
-  for (const url of urls) {
-    const anexo = describeScheduleAttachment(url)
+  for (const item of items) {
+    const url = typeof item === "string" ? item : item.url
+    const described = describeScheduleAttachment(url)
+    const anexo = {
+      file_name: (typeof item !== "string" && item.file_name) || described.file_name,
+      mimetype: (typeof item !== "string" && item.mimetype) || described.mimetype,
+    }
     try {
       await send({
         instance_id: target.instance_id,
@@ -137,12 +142,19 @@ export async function sendScheduleAttachments(
 }
 
 // Relatorio do Power BI entregue pelo n8n (via /api/bot/send): manda os anexos
-// da rotina logo depois, para o mesmo contato ou grupo.
+// da rotina logo depois, para o mesmo contato ou grupo. Primeiro a imagem do
+// robo escolhida neste envio (se houver), depois os do campo "Anexos".
 export async function sendScheduleAttachmentsAfterReport(input: {
   companyId: string
   scheduleId: string
+  dispatchLogId?: string | null
   target: AttachmentTarget
 }) {
+  // Espera antes de ler a rotina: a narracao chega primeiro e o anexo por ultimo.
+  if (ATTACHMENTS_AFTER_REPORT_DELAY_MS > 0) {
+    await new Promise((resolve) => setTimeout(resolve, ATTACHMENTS_AFTER_REPORT_DELAY_MS))
+  }
+
   const supabase = createServiceClient()
   const { data: schedule } = await supabase
     .from("schedules")
@@ -153,16 +165,20 @@ export async function sendScheduleAttachmentsAfterReport(input: {
 
   if (!schedule) return
 
-  const { urls } = await resolveScheduleAttachmentsForNow(
-    supabase,
-    input.companyId,
-    schedule as Record<string, unknown>
-  )
-  if (urls.length === 0) return
+  const scheduleRecord = schedule as Record<string, unknown>
+  const [robotAttachments, { urls: manualUrls }] = await Promise.all([
+    getRobotAttachmentsForLog(supabase, input.companyId, scheduleRecord, input.dispatchLogId).catch((error) => {
+      console.error("[schedule-attachments] falha ao ler a imagem do robo", {
+        scheduleId: input.scheduleId,
+        error: error instanceof Error ? error.message : error,
+      })
+      return [] as ScheduleAttachment[]
+    }),
+    resolveScheduleAttachmentsForNow(supabase, input.companyId, scheduleRecord),
+  ])
 
-  if (ATTACHMENTS_AFTER_REPORT_DELAY_MS > 0) {
-    await new Promise((resolve) => setTimeout(resolve, ATTACHMENTS_AFTER_REPORT_DELAY_MS))
-  }
+  const urls: Array<string | ScheduleAttachment> = [...robotAttachments, ...manualUrls]
+  if (urls.length === 0) return
 
   const result = await sendScheduleAttachments(urls, input.target)
   console.log("[schedule-attachments] anexos enviados depois do relatorio", {

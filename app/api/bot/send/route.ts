@@ -163,6 +163,7 @@ export async function POST(request: NextRequest) {
           sendScheduleAttachmentsAfterReport({
             companyId: attachmentCompanyId,
             scheduleId: deliveredScheduleId,
+            dispatchLogId,
             target,
           }).catch((error) => {
             console.error("[bot/send] falha ao enviar anexos da rotina", {

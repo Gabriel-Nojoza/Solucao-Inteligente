@@ -24,6 +24,15 @@ import {
   hasActiveWeekdayAttachments,
   normalizeWeekdayAttachments,
 } from "@/lib/weekday-attachments"
+import { FOLDER_REPORT_FORMATS, normalizeFolderReportConfigs } from "@/lib/folder-reports"
+import {
+  FOLDER_REPORTS_MIGRATION_HINT,
+  isMissingFolderReportColumnsError,
+} from "@/lib/folder-reports-server"
+
+// Texto quando a rotina nao tem nada para enviar.
+const MISSING_REPORT_MESSAGE =
+  "Selecione ao menos 1 relatorio, adicione um anexo (imagem ou PDF) ou escolha a imagem automatica do robo."
 
 const WEEKDAY_ATTACHMENTS_MIGRATION_HINT =
   "O banco ainda nao suporta anexos por dia da semana. Execute a migration 20261110_schedule_weekday_attachments.sql no Supabase."
@@ -116,6 +125,7 @@ function validateScheduleReports(
     image_url?: unknown
     image_urls?: unknown
     weekday_attachments?: unknown
+    folder_report_configs?: unknown
   },
   ctx: z.RefinementCtx
 ) {
@@ -123,12 +133,13 @@ function validateScheduleReports(
   const hasImage =
     (Array.isArray(value.image_urls) && value.image_urls.length > 0) ||
     (typeof value.image_url === "string" && value.image_url.trim().length > 0) ||
-    hasActiveWeekdayAttachments(normalizeWeekdayAttachments(value.weekday_attachments))
+    hasActiveWeekdayAttachments(normalizeWeekdayAttachments(value.weekday_attachments)) ||
+    normalizeFolderReportConfigs(value.folder_report_configs).length > 0
 
   if (reportConfigs.length === 0 && !hasImage) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF).",
+      message: MISSING_REPORT_MESSAGE,
       path: ["report_configs"],
     })
   }
@@ -156,6 +167,21 @@ const baseScheduleSchema = z.object({
       .nullable()
       .optional()
   ),
+  // Imagem automatica do robo: pastas que o robo do computador do cliente envia
+  // (lib/robot-attachments.ts). Pode ir junto com o relatorio do Power BI.
+  folder_report_configs: z.preprocess(
+    (value) => (value === undefined || value === null ? value : normalizeFolderReportConfigs(value)),
+    z
+      .array(
+        z.object({
+          folder_key: z.string().min(1),
+          folder_name: z.string().min(1),
+          formats: z.array(z.enum(FOLDER_REPORT_FORMATS)).min(1),
+        })
+      )
+      .nullable()
+      .optional()
+  ),
   disable_after_send: z.boolean().optional(),
   send_mode: z.enum(["none", "audio", "text"]).default("none"),
   is_active: z.boolean().default(true),
@@ -172,6 +198,7 @@ const REPORT_SELECTION_FIELDS = [
   "image_url",
   "image_urls",
   "weekday_attachments",
+  "folder_report_configs",
 ] as const
 
 // Na edicao, so confere relatorio/anexo quando a chamada mexe neles. Um PUT so
@@ -284,6 +311,7 @@ export async function GET() {
         return {
           ...schedule,
           report_configs: reportConfigs,
+          folder_report_configs: normalizeFolderReportConfigs(schedule.folder_report_configs),
           report_names: reportNames,
           report_name:
             reportNames.length > 1
@@ -339,9 +367,11 @@ export async function POST(request: NextRequest) {
     contact_ids,
     report_configs: _reportConfigs,
     weekday_attachments: _weekdayAttachments,
+    folder_report_configs: _folderReportConfigs,
     ...scheduleData
   } = parsed.data
   const weekdayAttachments = normalizeWeekdayAttachments(parsed.data.weekday_attachments)
+  const folderReportConfigs = normalizeFolderReportConfigs(parsed.data.folder_report_configs)
   const normalizedContactIds = [...new Set((contact_ids ?? []).map((id) => id.trim()).filter(Boolean))]
   const reportConfigs = resolveScheduleReportConfigs(parsed.data)
   const primaryReportConfig = getPrimaryScheduleReportConfig(reportConfigs)
@@ -352,7 +382,9 @@ export async function POST(request: NextRequest) {
       ? parsed.data.image_urls
       : parsed.data.image_url ? [parsed.data.image_url] : []
   const hasImage =
-    effectiveImageUrls.length > 0 || hasActiveWeekdayAttachments(weekdayAttachments)
+    effectiveImageUrls.length > 0 ||
+    hasActiveWeekdayAttachments(weekdayAttachments) ||
+    folderReportConfigs.length > 0
 
   if (scheduleReportIds.length > 0 && !hasAccessToScheduleReports(scheduleReportIds, accessMaps.visibleTargetIds)) {
     return getScheduleAccessErrorResponse()
@@ -362,7 +394,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: {
-          report_configs: ["Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)."],
+          report_configs: [MISSING_REPORT_MESSAGE],
         },
       },
       { status: 400 }
@@ -463,6 +495,8 @@ export async function POST(request: NextRequest) {
       // So manda a coluna nova quando usada, para as rotinas comuns seguirem
       // funcionando antes de a migration 20261110_schedule_weekday_attachments.sql rodar.
       ...(weekdayAttachments ? { weekday_attachments: weekdayAttachments } : {}),
+      // Idem para a imagem do robo (migration 20261109_folder_reports.sql).
+      ...(folderReportConfigs.length > 0 ? { folder_report_configs: folderReportConfigs } : {}),
     })
     .select()
     .single()
@@ -470,6 +504,10 @@ export async function POST(request: NextRequest) {
   if (error) {
     if (isMissingWeekdayAttachmentsColumn(error.message)) {
       return NextResponse.json({ error: WEEKDAY_ATTACHMENTS_MIGRATION_HINT }, { status: 500 })
+    }
+
+    if (isMissingFolderReportColumnsError(error)) {
+      return NextResponse.json({ error: FOLDER_REPORTS_MIGRATION_HINT }, { status: 500 })
     }
 
     if (isMissingBotInstanceIdColumnError(error, "schedules")) {
@@ -637,14 +675,20 @@ export async function PUT(request: NextRequest) {
   const effectiveWeekdayAttachments = normalizeWeekdayAttachments(
     weekdayAttachmentsExplicit ? parsed.data.weekday_attachments : existing.weekday_attachments
   )
+  const folderReportConfigsExplicit = Object.prototype.hasOwnProperty.call(parsed.data, "folder_report_configs")
+  const effectiveFolderReportConfigs = normalizeFolderReportConfigs(
+    folderReportConfigsExplicit ? parsed.data.folder_report_configs : existing.folder_report_configs
+  )
   const hasImage =
-    effectivePutImageUrls.length > 0 || hasActiveWeekdayAttachments(effectiveWeekdayAttachments)
+    effectivePutImageUrls.length > 0 ||
+    hasActiveWeekdayAttachments(effectiveWeekdayAttachments) ||
+    effectiveFolderReportConfigs.length > 0
 
   if (reportConfigs.length === 0 && !hasImage) {
     return NextResponse.json(
       {
         error: {
-          report_configs: ["Selecione ao menos 1 relatorio ou adicione um anexo (imagem ou PDF)."],
+          report_configs: [MISSING_REPORT_MESSAGE],
         },
       },
       { status: 400 }
@@ -735,6 +779,17 @@ export async function PUT(request: NextRequest) {
     scheduleUpdates.weekday_attachments = effectiveWeekdayAttachments
   }
 
+  // Imagem do robo: mesma ideia (migration 20261109_folder_reports.sql).
+  delete scheduleUpdates.folder_report_configs
+  if (
+    folderReportConfigsExplicit &&
+    (effectiveFolderReportConfigs.length > 0 ||
+      Object.prototype.hasOwnProperty.call(existing, "folder_report_configs"))
+  ) {
+    scheduleUpdates.folder_report_configs =
+      effectiveFolderReportConfigs.length > 0 ? effectiveFolderReportConfigs : null
+  }
+
   if (isUpdatingReportSelection) {
     const primaryReportConfig = getPrimaryScheduleReportConfig(reportConfigs)
 
@@ -771,6 +826,10 @@ export async function PUT(request: NextRequest) {
   if (result.error) {
     if (isMissingWeekdayAttachmentsColumn(result.error.message)) {
       return NextResponse.json({ error: WEEKDAY_ATTACHMENTS_MIGRATION_HINT }, { status: 500 })
+    }
+
+    if (isMissingFolderReportColumnsError(result.error)) {
+      return NextResponse.json({ error: FOLDER_REPORTS_MIGRATION_HINT }, { status: 500 })
     }
 
     if (isMissingBotInstanceIdColumnError(result.error, "schedules")) {
