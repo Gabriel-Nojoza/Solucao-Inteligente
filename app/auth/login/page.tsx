@@ -79,8 +79,8 @@ export default function LoginPage() {
       </div>
 
       <div className="relative z-10 flex w-full items-center justify-center px-4 sm:justify-start sm:px-8 md:px-16 lg:px-24">
-        <div className="w-full max-w-md">
-          <div className="mb-10">
+        <div className="w-full max-w-sm">
+          <div className="mb-7">
             <BrandMark
               imageSize={44}
               textClassName="text-2xl text-foreground"
@@ -88,7 +88,7 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-card/80 p-8 shadow-2xl backdrop-blur-xl">
+          <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-card/80 p-6 shadow-2xl backdrop-blur-xl">
             {/* Fio colorido no topo do cartao */}
             <div
               aria-hidden
@@ -97,7 +97,7 @@ export default function LoginPage() {
 
             {/* Seletor Cliente | Administrador */}
             <div
-              className="mb-7 grid grid-cols-2 gap-1 rounded-xl border border-border/60 bg-background/60 p-1"
+              className="mb-5 grid grid-cols-2 gap-1 rounded-xl border border-border/60 bg-background/60 p-1"
               role="tablist"
               aria-label="Tipo de acesso"
             >
@@ -129,9 +129,9 @@ export default function LoginPage() {
               ))}
             </div>
 
-            <div className="mb-7">
+            <div className="mb-5">
               <div>
-                <h2 className="text-xl font-semibold leading-tight text-foreground">
+                <h2 className="text-lg font-semibold leading-tight text-foreground">
                   {loginType === "admin" ? "Acesso administrativo" : "Entrar na sua conta"}
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -142,7 +142,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <form onSubmit={handleLogin} className="flex flex-col gap-5">
+            <form onSubmit={handleLogin} className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="email" className="text-sm font-medium">
                   E-mail
@@ -156,7 +156,7 @@ export default function LoginPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="h-11 bg-background/50 pl-10"
+                    className="h-10 bg-background/50 pl-10"
                     autoComplete="email"
                   />
                 </div>
@@ -175,7 +175,7 @@ export default function LoginPage() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-11 bg-background/50 pl-10 pr-10"
+                    className="h-10 bg-background/50 pl-10 pr-10"
                     autoComplete="current-password"
                   />
                   <button
@@ -201,7 +201,7 @@ export default function LoginPage() {
 
               <Button
                 type="submit"
-                className="mt-1 h-11 w-full text-sm font-medium shadow-lg shadow-primary/20"
+                className="mt-1 h-10 w-full text-sm font-medium shadow-lg shadow-primary/20"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -220,7 +220,7 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
               <Lock className="size-3" />
               Conexão segura
             </p>
