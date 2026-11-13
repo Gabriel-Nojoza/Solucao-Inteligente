@@ -764,6 +764,17 @@ export default function SchedulesPage() {
     }
   }
 
+  // Atalho "Nova rotina" da barra lateral: /schedules?nova=1 ja abre o formulario.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("nova") === "1") {
+      window.history.replaceState(null, "", window.location.pathname)
+      openCreate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function openCreate() {
     resetScheduleForm()
     setDialogOpen(true)
