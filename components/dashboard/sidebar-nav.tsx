@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import useSWR from "swr"
 import {
   LayoutDashboard,
   FolderKanban,
@@ -17,7 +16,6 @@ import {
   Sun,
   LogOut,
   ChevronsUpDown,
-  Radio,
   type LucideIcon,
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
@@ -97,84 +95,6 @@ function getInitials(displayName: string) {
   return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase()
 }
 
-// ── Cartao "Ao vivo": WhatsApp, proximo envio e numeros do dia ──
-// Usa o mesmo /api/stats do Painel (cache de 30 s), atualizando a cada minuto.
-type LiveStats = {
-  whatsappConnected?: boolean
-  whatsappBotStatus?: string
-  dispatchesToday?: number
-  successRate?: number | null
-  nextDispatches?: Array<{ scheduleName: string; nextRunLabel: string }>
-}
-
-const statsFetcher = async (url: string) => {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error("stats")
-  return res.json() as Promise<LiveStats>
-}
-
-function whatsappState(stats: LiveStats | undefined) {
-  if (!stats) return { label: "Verificando...", tone: "muted" as const }
-  if (stats.whatsappConnected) return { label: "WhatsApp conectado", tone: "ok" as const }
-  if (stats.whatsappBotStatus === "reconnecting" || stats.whatsappBotStatus === "starting") {
-    return { label: "WhatsApp reconectando", tone: "warn" as const }
-  }
-  return { label: "WhatsApp desconectado", tone: "bad" as const }
-}
-
-const TONE_DOT = {
-  ok: "bg-emerald-400",
-  warn: "bg-amber-400",
-  bad: "bg-red-500",
-  muted: "bg-sidebar-foreground/30",
-} as const
-
-function LiveStatusCard() {
-  const { data } = useSWR("/api/stats", statsFetcher, { refreshInterval: 60_000, revalidateOnFocus: false })
-  const state = whatsappState(data)
-  const next = data?.nextDispatches?.[0]
-
-  return (
-    <div
-      className="relative overflow-hidden rounded-xl border border-sidebar-border/70 bg-gradient-to-br from-primary/10 via-sidebar-accent/40 to-emerald-500/10 p-3 group-data-[collapsible=icon]:hidden"
-      data-testid="cartao-ao-vivo"
-    >
-      <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-        <Radio className="size-3" />
-        Ao vivo
-      </div>
-
-      <div className="flex items-center gap-2 text-xs font-medium text-sidebar-foreground">
-        <span className="relative flex size-2.5">
-          {state.tone === "ok" ? (
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-          ) : null}
-          <span className={`relative inline-flex size-2.5 rounded-full ${TONE_DOT[state.tone]}`} />
-        </span>
-        {state.label}
-      </div>
-
-      <div className="mt-2.5 space-y-1 text-[11px] text-sidebar-foreground/65">
-        <p className="truncate" title={next ? `${next.nextRunLabel} · ${next.scheduleName}` : undefined}>
-          <span className="text-sidebar-foreground/45">Próximo envio: </span>
-          {next ? (
-            <>
-              <span className="font-medium text-sidebar-foreground">{next.nextRunLabel}</span> · {next.scheduleName}
-            </>
-          ) : (
-            "nenhum agendado"
-          )}
-        </p>
-        <p>
-          <span className="text-sidebar-foreground/45">Hoje: </span>
-          <span className="font-medium text-sidebar-foreground">{data?.dispatchesToday ?? 0}</span> envio(s)
-          {typeof data?.successRate === "number" ? <> · {data.successRate}% de sucesso</> : null}
-        </p>
-      </div>
-    </div>
-  )
-}
-
 type AppSidebarProps = {
   currentUser: CurrentUserSummaryData | null
   reportBuilderEnabled?: boolean
@@ -232,23 +152,28 @@ export function AppSidebar({ currentUser, reportBuilderEnabled = false, campaign
                         {active ? (
                           <span
                             aria-hidden
-                            className="absolute -left-2 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-gradient-to-b from-primary to-emerald-400 shadow-[0_0_10px] shadow-primary/60 group-data-[collapsible=icon]:hidden"
+                            className="absolute -left-2 top-2 bottom-2 w-[3px] rounded-r-full bg-primary group-data-[collapsible=icon]:hidden"
                           />
                         ) : null}
                         <SidebarMenuButton
                           asChild
                           isActive={active}
                           tooltip={item.title}
-                          className="group/item h-9 text-sidebar-foreground/75 transition-all hover:translate-x-0.5 hover:text-sidebar-foreground data-[active=true]:bg-gradient-to-r data-[active=true]:from-primary/15 data-[active=true]:to-transparent data-[active=true]:font-medium data-[active=true]:text-sidebar-foreground"
+                          className="group/item h-10 gap-3 text-sidebar-foreground/75 hover:text-sidebar-foreground data-[active=true]:bg-primary/10 data-[active=true]:font-medium data-[active=true]:text-sidebar-foreground"
                         >
                           <Link href={item.href}>
-                            <item.icon
+                            {/* Icone num quadradinho: no item aberto, degrade azul -> verde. Com a barra
+                                recolhida, fica so o icone (o quadradinho nao cabe). */}
+                            <span
+                              data-testid="icone-do-menu"
                               className={
                                 active
-                                  ? "size-4 text-primary drop-shadow-[0_0_5px_var(--primary)]"
-                                  : "size-4 transition-transform group-hover/item:scale-110"
+                                  ? "flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-emerald-500 text-white shadow-md shadow-primary/30 group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:bg-none group-data-[collapsible=icon]:text-primary group-data-[collapsible=icon]:shadow-none"
+                                  : "flex size-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent/60 ring-1 ring-sidebar-border/70 transition-all group-hover/item:-rotate-6 group-hover/item:scale-105 group-hover/item:bg-primary/15 group-hover/item:text-primary group-hover/item:ring-primary/30 group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:ring-0"
                               }
-                            />
+                            >
+                              <item.icon className="size-4" />
+                            </span>
                             <span>{item.title}</span>
                           </Link>
                         </SidebarMenuButton>
@@ -263,8 +188,7 @@ export function AppSidebar({ currentUser, reportBuilderEnabled = false, campaign
       </SidebarContent>
 
       {/* Rodape: o usuario vira um menu (tema e sair) */}
-      <SidebarFooter className="gap-2 border-t border-sidebar-border">
-        <LiveStatusCard />
+      <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
