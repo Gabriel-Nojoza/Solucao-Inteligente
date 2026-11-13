@@ -1715,9 +1715,12 @@ export default function SchedulesPage() {
       <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent
           key={`${formMode}-${editSchedule?.id ?? duplicateSourceId ?? "new-schedule"}`}
-          className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
+          // Altura fixa em 3 partes: topo (titulo + abas), meio que rola (campos) e rodape
+          // (resumo + Salvar). Assim o rodape nunca cobre os campos e a janela nao muda de
+          // tamanho ao trocar de aba.
+          className="flex h-[min(760px,90vh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
         >
-          <DialogHeader>
+          <DialogHeader className="shrink-0 px-6 pt-6">
             <DialogTitle>
               {formMode === "edit"
                 ? "Editar Rotina"
@@ -1735,9 +1738,10 @@ export default function SchedulesPage() {
           <Tabs
             value={formTab}
             onValueChange={(value) => setFormTab(value as ScheduleFormTab)}
-            className="flex flex-col gap-4 pt-1"
+            className="flex min-h-0 flex-1 flex-col gap-0"
           >
-            <TabsList className="sticky top-0 z-10 grid h-auto w-full grid-cols-4" data-testid="abas-da-rotina">
+            <div className="shrink-0 px-6 pb-3 pt-4">
+            <TabsList className="grid h-auto w-full grid-cols-4" data-testid="abas-da-rotina">
               {SCHEDULE_FORM_TABS.map((tab) => {
                 const label =
                   tab === "relatorio" ? "Relatório" : tab === "quando" ? "Quando" : tab === "anexos" ? "Anexos" : "Contatos"
@@ -1759,9 +1763,12 @@ export default function SchedulesPage() {
                 )
               })}
             </TabsList>
+            </div>
 
+            {/* So esta parte rola */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-1" data-testid="campos-da-rotina">
             {/* ── Aba 1: Relatório ── */}
-            <TabsContent value="relatorio" className="mt-0 flex min-h-[360px] flex-col gap-4">
+            <TabsContent value="relatorio" className="mt-0 flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label>Nome da Rotina</Label>
               <Input
@@ -2097,7 +2104,7 @@ export default function SchedulesPage() {
             </TabsContent>
 
             {/* ── Aba 2: Quando ── */}
-            <TabsContent value="quando" className="mt-0 flex min-h-[360px] flex-col gap-4">
+            <TabsContent value="quando" className="mt-0 flex flex-col gap-4">
             <CronBuilder
               key={`${formMode}-${editSchedule?.id ?? duplicateSourceId ?? "new-schedule"}-cron`}
               value={formCron}
@@ -2132,7 +2139,7 @@ export default function SchedulesPage() {
             </TabsContent>
 
             {/* ── Aba 3: Mensagem e anexos ── */}
-            <TabsContent value="anexos" className="mt-0 flex min-h-[360px] flex-col gap-4">
+            <TabsContent value="anexos" className="mt-0 flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label>Mensagem Template</Label>
               <Textarea
@@ -2246,7 +2253,7 @@ export default function SchedulesPage() {
             </TabsContent>
 
             {/* ── Aba 4: Contatos ── */}
-            <TabsContent value="contatos" className="mt-0 flex min-h-[360px] flex-col gap-4">
+            <TabsContent value="contatos" className="mt-0 flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <Label>Contatos ({formContactIds.length} selecionado(s))</Label>
@@ -2357,10 +2364,11 @@ export default function SchedulesPage() {
               )}
             </div>
             </TabsContent>
+            </div>
           </Tabs>
 
           {/* Rodape fixo: resumo da rotina e o botao de salvar, visivel em qualquer aba */}
-          <div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex shrink-0 flex-col gap-2 border-t bg-background px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="min-w-0 truncate text-xs text-muted-foreground" data-testid="resumo-da-rotina">
               {[
                 formCron.trim() && isValidCronValue(formCron) ? describeCronValue(formCron) : "Sem horário",
