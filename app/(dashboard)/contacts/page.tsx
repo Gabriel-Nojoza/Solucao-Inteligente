@@ -1000,7 +1000,7 @@ export default function ContactsPage() {
                       value={String(contactsPerPage)}
                       onValueChange={(value) => setContactsPerPage(Number(value))}
                     >
-                      <SelectTrigger className="h-8 w-[120px]" aria-label="Contatos por pagina">
+                      <SelectTrigger className="h-8 w-[150px]" aria-label="Contatos por pagina">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
