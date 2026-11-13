@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   FOLDER_REPORT_FORMATS,
+  folderReportFormatLabel,
   type FolderReportConfig,
   type FolderReportFolderSummary,
   type FolderReportFormat,
@@ -98,7 +99,7 @@ export function FolderReportsPicker({
           loadError ? null : (
             <p className="text-sm text-muted-foreground">
               Nenhum arquivo recebido do robo ainda. Instale o robo no computador do cliente e salve
-              um arquivo PNG ou PDF na pasta dele.
+              um arquivo PNG, JPG ou PDF na pasta dele.
             </p>
           )
         ) : (
@@ -115,7 +116,7 @@ export function FolderReportsPicker({
                   <p className="text-xs text-muted-foreground">
                     {FOLDER_REPORT_FORMATS.map((format) => {
                       const latest = folder.latest[format]
-                      return latest ? `${format}: ${formatReceivedAt(latest.file_saved_at)}` : null
+                      return latest ? `${folderReportFormatLabel(format)}: ${formatReceivedAt(latest.file_saved_at)}` : null
                     })
                       .filter(Boolean)
                       .join(" · ") || "Nenhum arquivo guardado no momento"}
@@ -132,7 +133,7 @@ export function FolderReportsPicker({
                           onCheckedChange={(checked) => toggleFormat(folder, format, checked === true)}
                         />
                         <Label htmlFor={id} className="cursor-pointer text-sm">
-                          {format}
+                          {folderReportFormatLabel(format)}
                         </Label>
                       </div>
                     )

@@ -103,8 +103,37 @@ function bytesInclude(bytes: Uint8Array, text: string) {
   return false
 }
 
+// "PNG" no banco e na tela quer dizer "imagem": PNG ou JPG (desde 2026-11-13). O arquivo
+// guarda o tipo real (mimetype e extensao); so o grupo e "PNG", para nao mexer no banco.
+export function folderReportFormatLabel(format: FolderReportFormat) {
+  return format === "PNG" ? "Imagem" : "PDF"
+}
+
+export type FolderReportFileType = { format: FolderReportFormat; mimetype: string; extension: string }
+
+function isJpeg(buffer: Uint8Array) {
+  return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+}
+
+// Tipo real do arquivo pelo conteudo: PDF, PNG ou JPEG.
+export function detectFolderReportFile(buffer: Uint8Array): FolderReportFileType | null {
+  const format = detectFolderReportFormat(buffer)
+  if (format === "PDF") return { format, mimetype: "application/pdf", extension: ".pdf" }
+  if (format === "PNG") {
+    return isJpeg(buffer)
+      ? { format, mimetype: "image/jpeg", extension: ".jpg" }
+      : { format, mimetype: "image/png", extension: ".png" }
+  }
+  return null
+}
+
 // O formato vem do conteudo, nao do nome: um .pdf renomeado nao engana.
+// JPEG entra no grupo "PNG" (= imagem).
 export function detectFolderReportFormat(buffer: Uint8Array): FolderReportFormat | null {
+  if (isJpeg(buffer)) {
+    return "PNG"
+  }
+
   if (bytesInclude(buffer.subarray(0, 1024), "%PDF-")) {
     return "PDF"
   }
@@ -122,14 +151,17 @@ export function isCompletePdf(buffer: Uint8Array) {
   return bytesInclude(buffer.subarray(Math.max(0, buffer.length - 1024)), "%%EOF")
 }
 
-export function sanitizeFolderReportFileName(value: unknown, format: FolderReportFormat) {
-  const extension = format === "PDF" ? ".pdf" : ".png"
+export function sanitizeFolderReportFileName(
+  value: unknown,
+  format: FolderReportFormat,
+  extension: string = format === "PDF" ? ".pdf" : ".png"
+) {
   const raw = typeof value === "string" ? value : ""
   const base = raw
     .split(/[\\/]/)
     .pop()!
     .replace(/[\u0000-\u001f\u007f]/g, "")
-    .replace(/\.(pdf|png)$/i, "")
+    .replace(/\.(pdf|png|jpe?g)$/i, "")
     .trim()
     .slice(0, 120)
     .trim()
@@ -213,7 +245,7 @@ export function decideFolderReport(input: {
   now: Date
   timeZone: string
 }): FolderReportDecision {
-  const label = `"${input.config.folder_name}" (${input.format})`
+  const label = `"${input.config.folder_name}" (${folderReportFormatLabel(input.format)})`
 
   if (!input.newest) {
     return {

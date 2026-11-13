@@ -12,8 +12,7 @@ import { createServiceClient } from "@/lib/supabase/server"
 import { getCompanyIdFromRobotKey } from "@/lib/robot-key"
 import {
   FOLDER_REPORT_MAX_BYTES,
-  FOLDER_REPORT_MIMETYPES,
-  detectFolderReportFormat,
+  detectFolderReportFile,
   folderKeyToPathSegment,
   isCompletePdf,
   normalizeFolderKey,
@@ -113,11 +112,13 @@ export async function POST(request: NextRequest) {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const format = detectFolderReportFormat(bytes)
+  // Tipo real pelo conteudo: PDF, PNG ou JPG (JPG entra no grupo "PNG" = imagem)
+  const fileType = detectFolderReportFile(bytes)
 
-  if (!format) {
-    return jsonError("Formato nao suportado. Envie um relatorio em PDF ou PNG.", 415)
+  if (!fileType) {
+    return jsonError("Formato nao suportado. Envie um relatorio em PDF, PNG ou JPG.", 415)
   }
+  const format = fileType.format
 
   if (format === "PDF" && !isCompletePdf(bytes)) {
     return jsonError("O PDF esta incompleto. Envie de novo depois que o arquivo terminar de salvar.", 422)
@@ -126,8 +127,8 @@ export async function POST(request: NextRequest) {
   const now = new Date()
   const fileSavedAt = resolveSavedAt(form.get("saved_at"), now)
   const sha256 = crypto.createHash("sha256").update(bytes).digest("hex")
-  const fileName = sanitizeFolderReportFileName(file.name, format)
-  const mimetype = FOLDER_REPORT_MIMETYPES[format]
+  const fileName = sanitizeFolderReportFileName(file.name, format, fileType.extension)
+  const mimetype = fileType.mimetype
   const supabase = createServiceClient()
 
   // O robo pode mandar de novo o mesmo arquivo (ex.: a resposta anterior se
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest) {
   const storagePath = [
     companyId,
     folderKeyToPathSegment(folderKey),
-    `${now.getTime()}-${crypto.randomBytes(6).toString("hex")}.${format.toLowerCase()}`,
+    `${now.getTime()}-${crypto.randomBytes(6).toString("hex")}${fileType.extension}`,
   ].join("/")
 
   const { error: uploadError } = await supabase.storage
