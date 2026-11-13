@@ -7,6 +7,7 @@ import {
   BRAND_APPLE_ICON_PATH,
   BRAND_APP_ICON_192_PATH,
   BRAND_APP_ICON_512_PATH,
+  BRAND_FAVICON_32_PATH,
   BRAND_NAME,
   BRAND_SUBTITLE,
 } from "@/lib/branding"
@@ -21,6 +22,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   icons: {
     icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: BRAND_FAVICON_32_PATH, sizes: "32x32", type: "image/png" },
       { url: BRAND_APP_ICON_192_PATH, sizes: "192x192", type: "image/png" },
       { url: BRAND_APP_ICON_512_PATH, sizes: "512x512", type: "image/png" },
     ],
