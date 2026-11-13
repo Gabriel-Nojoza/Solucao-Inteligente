@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -177,6 +178,20 @@ type FormReportSelection = {
 }
 
 type ScheduleDialogMode = "create" | "edit" | "duplicate"
+
+// O formulario da rotina e dividido em abas, para nao virar uma rolagem enorme.
+type ScheduleFormTab = "relatorio" | "quando" | "anexos" | "contatos"
+const SCHEDULE_FORM_TABS: ScheduleFormTab[] = ["relatorio", "quando", "anexos", "contatos"]
+
+// Qual aba mostra cada erro do formulario (para marcar a aba e abrir a primeira com problema).
+function scheduleFormTabHasError(tab: ScheduleFormTab, errors: Record<string, string>) {
+  if (tab === "relatorio") {
+    return Boolean(errors.name || errors.bot_instance_id || errors.report || errors.reportConfigs || errors.pageNames)
+  }
+  if (tab === "quando") return Boolean(errors.cron)
+  if (tab === "contatos") return Boolean(errors.contacts)
+  return false
+}
 
 const POWERBI_FORMATS: ScheduleExportFormat[] = ["PDF", "PNG", "HTML", "PPTX"]
 const AUTOMATION_FORMATS: ScheduleExportFormat[] = ["csv", "xlsx", "pdf", "table"]
@@ -588,11 +603,15 @@ export default function SchedulesPage() {
     formImageUrls.length > 0 ||
     (formWeekdayEnabled && formWeekdayCount > 0) ||
     formFolderReports.length > 0
+  // Numero que aparece na aba "Anexos": anexos (ou os da grade por dia) + pastas do robo marcadas.
+  const formAttachmentCount =
+    (formWeekdayEnabled ? formWeekdayCount : formImageUrls.length) + formFolderReports.length
   const [uploadingImage, setUploadingImage] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [formContactIds, setFormContactIds] = useState<string[]>([])
   const [formActive, setFormActive] = useState(true)
   const [formDisableAfterSend, setFormDisableAfterSend] = useState(false)
+  const [formTab, setFormTab] = useState<ScheduleFormTab>("relatorio")
   const [saving, setSaving] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [contactSearch, setContactSearch] = useState("")
@@ -729,6 +748,7 @@ export default function SchedulesPage() {
     setFormContactIds([])
     setFormActive(true)
     setFormDisableAfterSend(false)
+    setFormTab("relatorio")
     setFormErrors({})
     setContactSearch("")
     setReportPagesBySelection({})
@@ -808,6 +828,7 @@ export default function SchedulesPage() {
     setFormContactIds(schedule.contacts?.map((c) => c.id) ?? [])
     setFormActive(duplicating ? false : schedule.is_active)
     setFormDisableAfterSend(schedule.disable_after_send ?? false)
+    setFormTab("relatorio")
     setFormErrors({})
     setContactSearch("")
     setReportPagesBySelection({})
@@ -865,6 +886,9 @@ export default function SchedulesPage() {
     }
 
     setFormErrors(errors)
+    // Abre a primeira aba que tem problema, para o usuario ver o que falta.
+    const tabWithError = SCHEDULE_FORM_TABS.find((tab) => scheduleFormTabHasError(tab, errors))
+    if (tabWithError) setFormTab(tabWithError)
     return Object.keys(errors).length === 0
   }
 
@@ -952,6 +976,10 @@ export default function SchedulesPage() {
         )
         if (Object.keys(apiFieldErrors).length > 0) {
           setFormErrors((prev) => ({ ...prev, ...apiFieldErrors }))
+          const tabWithError = SCHEDULE_FORM_TABS.find((tab) =>
+            scheduleFormTabHasError(tab, apiFieldErrors as Record<string, string>)
+          )
+          if (tabWithError) setFormTab(tabWithError)
         }
 
         throw new Error(
@@ -1704,7 +1732,36 @@ export default function SchedulesPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col gap-4 pt-2">
+          <Tabs
+            value={formTab}
+            onValueChange={(value) => setFormTab(value as ScheduleFormTab)}
+            className="flex flex-col gap-4 pt-1"
+          >
+            <TabsList className="sticky top-0 z-10 grid h-auto w-full grid-cols-4" data-testid="abas-da-rotina">
+              {SCHEDULE_FORM_TABS.map((tab) => {
+                const label =
+                  tab === "relatorio" ? "Relatório" : tab === "quando" ? "Quando" : tab === "anexos" ? "Anexos" : "Contatos"
+                const count =
+                  tab === "anexos" ? formAttachmentCount : tab === "contatos" ? formContactIds.length : 0
+                const hasError = scheduleFormTabHasError(tab, formErrors)
+                return (
+                  <TabsTrigger key={tab} value={tab} className="relative gap-1.5 px-1.5 text-xs sm:text-sm">
+                    {label}
+                    {count > 0 ? (
+                      <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">
+                        {count}
+                      </span>
+                    ) : null}
+                    {hasError ? (
+                      <span className="absolute right-1 top-1 size-1.5 rounded-full bg-destructive" aria-label="tem erro" />
+                    ) : null}
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
+
+            {/* ── Aba 1: Relatório ── */}
+            <TabsContent value="relatorio" className="mt-0 flex min-h-[360px] flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label>Nome da Rotina</Label>
               <Input
@@ -2037,13 +2094,45 @@ export default function SchedulesPage() {
                 </p>
               )}
             </div>
+            </TabsContent>
 
+            {/* ── Aba 2: Quando ── */}
+            <TabsContent value="quando" className="mt-0 flex min-h-[360px] flex-col gap-4">
             <CronBuilder
               key={`${formMode}-${editSchedule?.id ?? duplicateSourceId ?? "new-schedule"}-cron`}
               value={formCron}
               onChange={handleCronValueChange}
             />
+            {formErrors.cron ? <p className="text-xs text-destructive">{formErrors.cron}</p> : null}
 
+            <div className="flex flex-col gap-3 rounded-lg border p-3">
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={formActive}
+                  onCheckedChange={setFormActive}
+                  id="schedule-active"
+                />
+                <Label htmlFor="schedule-active">Ativa</Label>
+                <span className="text-xs text-muted-foreground">
+                  {formActive ? "dispara sozinha nos horários acima" : "não dispara sozinha (só pelo ▶)"}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="disable-after-send"
+                  checked={formDisableAfterSend}
+                  onCheckedChange={(v) => setFormDisableAfterSend(!!v)}
+                />
+                <Label htmlFor="disable-after-send" className="cursor-pointer">
+                  Desativar após primeiro envio
+                </Label>
+              </div>
+            </div>
+            </TabsContent>
+
+            {/* ── Aba 3: Mensagem e anexos ── */}
+            <TabsContent value="anexos" className="mt-0 flex min-h-[360px] flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label>Mensagem Template</Label>
               <Textarea
@@ -2154,7 +2243,10 @@ export default function SchedulesPage() {
                 withPowerBi={normalizedFormReportSelections.length > 0}
               />
             )}
+            </TabsContent>
 
+            {/* ── Aba 4: Contatos ── */}
+            <TabsContent value="contatos" className="mt-0 flex min-h-[360px] flex-col gap-4">
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <Label>Contatos ({formContactIds.length} selecionado(s))</Label>
@@ -2264,29 +2356,21 @@ export default function SchedulesPage() {
                 <p className="text-xs text-destructive">{formErrors.contacts}</p>
               )}
             </div>
+            </TabsContent>
+          </Tabs>
 
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={formActive}
-                onCheckedChange={setFormActive}
-                id="schedule-active"
-              />
-              <Label htmlFor="schedule-active">Ativa</Label>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Checkbox
-                id="disable-after-send"
-                checked={formDisableAfterSend}
-                onCheckedChange={(v) => setFormDisableAfterSend(!!v)}
-              />
-              <Label htmlFor="disable-after-send" className="cursor-pointer">
-                Desativar após primeiro envio
-              </Label>
-            </div>
-
+          {/* Rodape fixo: resumo da rotina e o botao de salvar, visivel em qualquer aba */}
+          <div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 border-t bg-background px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 truncate text-xs text-muted-foreground" data-testid="resumo-da-rotina">
+              {[
+                formCron.trim() && isValidCronValue(formCron) ? describeCronValue(formCron) : "Sem horário",
+                `${formContactIds.length} contato(s)`,
+                formActive ? "ativa" : "desativada",
+              ].join(" · ")}
+            </p>
             <Button
               onClick={handleSave}
+              className="shrink-0"
               disabled={
                 saving ||
                 !formName ||
