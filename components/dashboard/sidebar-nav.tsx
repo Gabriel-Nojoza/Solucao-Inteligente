@@ -17,7 +17,6 @@ import {
   Sun,
   LogOut,
   ChevronsUpDown,
-  Plus,
   Radio,
   type LucideIcon,
 } from "lucide-react"
@@ -215,24 +214,6 @@ export function AppSidebar({ currentUser, reportBuilderEnabled = false, campaign
       </SidebarHeader>
 
       <SidebarContent className="gap-0 py-2">
-        {/* Acao rapida: abre o formulario de nova rotina */}
-        <SidebarGroup className="pb-1 pt-1">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                tooltip="Nova rotina"
-                className="h-9 justify-center bg-gradient-to-r from-primary to-emerald-500 font-medium text-white shadow-md shadow-primary/25 transition-all hover:from-primary/90 hover:to-emerald-500/90 hover:text-white hover:shadow-lg hover:shadow-primary/30 active:scale-[0.98] group-data-[collapsible=icon]:justify-center"
-              >
-                <Link href="/schedules?nova=1" data-testid="atalho-nova-rotina">
-                  <Plus className="size-4" />
-                  <span>Nova rotina</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
-
         {navGroups.map((group) => {
           const items = group.items.filter(isEnabled)
           if (items.length === 0) return null
