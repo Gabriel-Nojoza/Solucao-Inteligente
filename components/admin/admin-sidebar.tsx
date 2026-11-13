@@ -2,24 +2,16 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { Suspense } from "react"
 import {
   LayoutDashboard,
   Activity,
   Users,
   Settings,
-  Moon,
-  Sun,
-  LogOut,
   MessageSquare,
-  Clock,
+  CalendarClock,
 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
-import { useTheme } from "next-themes"
-import { markThemeManualOverride } from "@/components/theme/theme-scheduler"
-import {
-  CurrentUserSummary,
-  type CurrentUserSummaryData,
-} from "@/components/auth/current-user-summary"
+import type { CurrentUserSummaryData } from "@/components/auth/current-user-summary"
 import { BrandMark } from "@/components/branding/brand-mark"
 import { BRAND_ADMIN_SUBTITLE } from "@/lib/branding"
 import {
@@ -34,17 +26,27 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { Suspense } from "react"
-import { clearTabSessionMarker } from "@/lib/supabase/tab-session"
 import { CompanyFilter } from "@/components/admin/company-filter"
+import { SidebarNavGroup, SidebarUserMenu, type SidebarNavItem } from "@/components/dashboard/sidebar-parts"
 
-const adminNav = [
-  { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { title: "Resumo operacional", href: "/admin/operational-summary", icon: Activity },
-  { title: "Uso do Chat", href: "/admin/chat-usage", icon: MessageSquare },
-  { title: "Rotinas", href: "/admin/schedules", icon: Clock },
-  { title: "Usuarios", href: "/admin/users", icon: Users },
-  { title: "Configuracoes", href: "/admin/settings", icon: Settings },
+// Mesmo padrao da barra do cliente (components/dashboard/sidebar-parts.tsx). Enderecos iguais.
+const adminGroups: Array<{ label: string; items: SidebarNavItem[] }> = [
+  {
+    label: "Visão geral",
+    items: [
+      { title: "Painel", href: "/admin", icon: LayoutDashboard },
+      { title: "Resumo operacional", href: "/admin/operational-summary", icon: Activity },
+      { title: "Uso do Chat", href: "/admin/chat-usage", icon: MessageSquare },
+    ],
+  },
+  {
+    label: "Gestão",
+    items: [
+      { title: "Rotinas", href: "/admin/schedules", icon: CalendarClock },
+      { title: "Usuários", href: "/admin/users", icon: Users },
+      { title: "Configurações", href: "/admin/settings", icon: Settings },
+    ],
+  },
 ]
 
 type AdminSidebarProps = {
@@ -53,13 +55,7 @@ type AdminSidebarProps = {
 
 export function AdminSidebar({ currentUser }: AdminSidebarProps) {
   const pathname = usePathname()
-  const { theme, setTheme } = useTheme()
-  const handleLogout = () => {
-    const supabase = createClient()
-    clearTabSessionMarker()
-    supabase.auth.signOut({ scope: "local" })
-    window.location.href = "/auth/login"
-  }
+  const isActive = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname.startsWith(href))
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
@@ -75,34 +71,15 @@ export function AdminSidebar({ currentUser }: AdminSidebarProps) {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Administracao</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {adminNav.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={
-                      item.href === "/admin"
-                        ? pathname === "/admin"
-                        : pathname.startsWith(item.href)
-                    }
-                    tooltip={item.title}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="size-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Filtros</SidebarGroupLabel>
+      <SidebarContent className="gap-0 py-2">
+        {adminGroups.map((group) => (
+          <SidebarNavGroup key={group.label} label={group.label} items={group.items} isActive={isActive} />
+        ))}
+
+        <SidebarGroup className="py-1.5 group-data-[collapsible=icon]:hidden">
+          <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/45">
+            Filtros
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <Suspense>
               <CompanyFilter />
@@ -112,25 +89,7 @@ export function AdminSidebar({ currentUser }: AdminSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
-        <CurrentUserSummary user={currentUser} />
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => { markThemeManualOverride(); setTheme(theme === "dark" ? "light" : "dark") }}
-              tooltip="Alternar tema"
-            >
-              <Sun className="size-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-              <Moon className="absolute size-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-              <span>Alternar tema</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton onClick={handleLogout} tooltip="Sair">
-              <LogOut className="size-4" />
-              <span>Sair</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <SidebarUserMenu currentUser={currentUser} />
       </SidebarFooter>
     </Sidebar>
   )
