@@ -51,10 +51,6 @@ const PERIOD_LABELS: Record<keyof FailedSummary["by_period"], string> = {
   noite: "Noite",
 }
 
-interface CompanyNarration {
-  send_mode: "none" | "audio" | "text"
-}
-
 interface NarrationLimit {
   daily_limit: number
   used_today: number
@@ -70,10 +66,6 @@ export default function AdminSchedulesPage() {
   const schedulesUrl = companyId
     ? `/api/admin/schedules?company_id=${companyId}`
     : "/api/admin/schedules"
-
-  const narrationUrl = companyId
-    ? `/api/admin/company-narration?company_id=${companyId}`
-    : null
 
   const narrationLimitUrl = companyId
     ? `/api/admin/narration-limit?company_id=${companyId}`
@@ -91,11 +83,6 @@ export default function AdminSchedulesPage() {
     fetcher
   )
 
-  const { data: narration, isLoading: narrationLoading } = useSWR<CompanyNarration>(
-    narrationUrl,
-    fetcher
-  )
-
   const { data: failedSummary, isLoading: failedLoading } = useSWR<FailedSummary>(
     failedUrl,
     fetcher
@@ -108,22 +95,6 @@ export default function AdminSchedulesPage() {
       onSuccess: (data) => setLimitInput(String(data.daily_limit)),
     }
   )
-
-  async function handleNarrationChange(send_mode: string) {
-    if (!companyId) return
-    try {
-      const res = await fetch("/api/admin/company-narration", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ company_id: companyId, send_mode }),
-      })
-      if (!res.ok) throw new Error("Erro ao salvar")
-      toast.success("Narração da empresa atualizada")
-      mutate(narrationUrl)
-    } catch {
-      toast.error("Erro ao atualizar narração")
-    }
-  }
 
   async function handleSaveLimit() {
     if (!companyId) return
@@ -193,7 +164,7 @@ export default function AdminSchedulesPage() {
     <div className="flex flex-col gap-6 p-6">
       <PageHeader
         title="Rotinas"
-        description="Gerencie narração em áudio ou texto por empresa"
+        description="Limite de narração e rotinas de cada empresa. A narração (áudio, texto ou nenhuma) é escolhida em cada rotina."
       />
 
       {!companyId && (
@@ -204,27 +175,6 @@ export default function AdminSchedulesPage() {
 
       {companyId && (
         <>
-          <div className="flex items-center gap-4 rounded-md border p-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">Narração habilitada</span>
-              <span className="text-xs text-muted-foreground">
-                Liga ou desliga narração para esta empresa. O cliente escolhe áudio ou texto no painel dele.
-              </span>
-            </div>
-            <div className="ml-auto">
-              {narrationLoading ? (
-                <Skeleton className="h-6 w-11" />
-              ) : (
-                <Switch
-                  checked={narration?.send_mode !== "none"}
-                  onCheckedChange={(checked) =>
-                    handleNarrationChange(checked ? "text" : "none")
-                  }
-                />
-              )}
-            </div>
-          </div>
-
           <div className="flex items-center gap-4 rounded-md border p-4">
             <div className="flex flex-col gap-1">
               <span className="text-sm font-medium">Limite diario de narracao (Gemini)</span>

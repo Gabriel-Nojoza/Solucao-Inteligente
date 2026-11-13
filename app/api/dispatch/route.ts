@@ -404,29 +404,13 @@ async function handleDispatch(request: NextRequest) {
     schedule.bot_instance_id = resolvedBotInstance.id
   }
 
-  // ── Narração: rotina tem prioridade, empresa é fallback ──
-  const scheduleSendMode: "audio" | "text" | "none" =
+  // ── Narração: vale o que está marcado na rotina ──
+  // "Não enviar narração" na rotina = nada de narração, mesmo que a empresa tenha um padrão
+  // ligado (antes o padrão da empresa entrava no lugar e a narração chegava sem ter sido pedida).
+  let effectiveSendMode: "audio" | "text" | "none" =
     schedule.send_mode === "audio" ? "audio"
     : schedule.send_mode === "text" ? "text"
     : "none"
-
-  let companySendMode: "audio" | "text" | "none" = "none"
-  if (scheduleSendMode === "none") {
-    const { data: narrationRow } = await supabase
-      .from("company_settings")
-      .select("value")
-      .eq("company_id", companyId)
-      .eq("key", "narration_mode")
-      .maybeSingle()
-
-    const narrationValue = narrationRow?.value as Record<string, unknown> | null
-    companySendMode =
-      narrationValue?.send_mode === "audio" ? "audio"
-      : narrationValue?.send_mode === "text" ? "text"
-      : "none"
-  }
-
-  let effectiveSendMode: "audio" | "text" | "none" = scheduleSendMode !== "none" ? scheduleSendMode : companySendMode
 
   if (effectiveSendMode !== "none") {
     const { data: limitRow } = await supabase
