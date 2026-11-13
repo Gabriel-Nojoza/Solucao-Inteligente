@@ -136,7 +136,7 @@ export default function ContactsPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   // Lista em paginas, para nao virar uma rolagem enorme com centenas de contatos
   const [contactsPage, setContactsPage] = useState(1)
-  const [contactsPerPage, setContactsPerPage] = useState(20)
+  const [contactsPerPage, setContactsPerPage] = useState(10)
 
   useEffect(() => {
     setMounted(true)
@@ -936,7 +936,7 @@ export default function ContactsPage() {
 
                   <TableBody>
                     {pageContacts.map((contact) => (
-                      <TableRow key={contact.id}>
+                      <TableRow key={contact.id} className="h-10 [&>td]:py-1">
                         <TableCell className="font-medium">{contact.name}</TableCell>
 
                         <TableCell className="hidden text-muted-foreground sm:table-cell">
@@ -965,6 +965,7 @@ export default function ContactsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="size-7"
                               onClick={() => openEdit(contact)}
                             >
                               <Pencil className="size-4" />
@@ -974,6 +975,7 @@ export default function ContactsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="size-7"
                               onClick={() => setDeleteId(contact.id)}
                             >
                               <Trash2 className="size-4 text-destructive" />
@@ -1004,7 +1006,7 @@ export default function ContactsPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {[20, 50, 100].map((quantidade) => (
+                        {[10, 20, 50].map((quantidade) => (
                           <SelectItem key={quantidade} value={String(quantidade)}>
                             {quantidade} por página
                           </SelectItem>
