@@ -369,12 +369,16 @@ export default function SchedulesPage() {
   >("/api/schedules", fetcher)
   const { data: reports } = useSWR<Report[]>("/api/reports", fetcher)
   const { data: botInstances } = useSWR<WhatsAppBotInstance[]>("/api/bot/instances", fetcher)
-  const { data: companyFeatures } = useSWR<{ pngExport?: boolean }>("/api/features", fetcher)
+  const { data: companyFeatures } = useSWR<{ pngExport?: boolean; reportBuilder?: boolean }>("/api/features", fetcher)
   const pngExportEnabled = companyFeatures?.pngExport === true
+  const reportBuilderEnabled = companyFeatures?.reportBuilder === true
   const { data: automations, isLoading: isLoadingAutomations } = useSWR<AutomationItem[]>(
     "/api/automations",
     fetcher
   )
+  // Secao "Automacoes DAX": com o Construtor liberado ou se ja existir alguma automacao
+  const showDaxSection =
+    reportBuilderEnabled || (Array.isArray(automations) && automations.length > 0)
 
   const scheduleList = Array.isArray(schedules) ? schedules : []
   const reportList = Array.isArray(reports) ? reports : []
@@ -1569,6 +1573,10 @@ export default function SchedulesPage() {
           </CardContent>
         </Card>
 
+        {/* Automacoes DAX: so aparece com o Construtor de Relatorios liberado
+            ou se a empresa ja tiver alguma automacao criada */}
+        {showDaxSection && (
+        <>
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">Automações DAX</h2>
         </div>
@@ -1709,6 +1717,8 @@ export default function SchedulesPage() {
             )}
           </CardContent>
         </Card>
+        </>
+        )}
 
       </div>
 
