@@ -13,7 +13,7 @@ const AVISO = {
   // Horario de Brasilia (-03:00)
   inicio: "2026-11-13T00:00:00-03:00",
   fim: "2026-11-13T18:30:00-03:00",
-  titulo: "O sistema foi atualizado",
+  titulo: "Atualizamos o sistema para a versão 2.0",
   texto:
     "Deixamos a plataforma mais simples de usar: o cadastro de rotinas agora é dividido em abas, a lista de contatos ficou organizada em páginas e o menu e o login ganharam um visual novo.",
 }
@@ -24,7 +24,8 @@ function dentroDoHorario(agora = Date.now()) {
   return agora >= new Date(AVISO.inicio).getTime() && agora < new Date(AVISO.fim).getTime()
 }
 
-export function SystemAnnouncement() {
+// variante "login": mesmo aviso, sem margens, para ficar acima do formulario de login
+export function SystemAnnouncement({ variante = "painel" }: { variante?: "painel" | "login" } = {}) {
   const [visivel, setVisivel] = useState(false)
 
   useEffect(() => {
@@ -58,7 +59,11 @@ export function SystemAnnouncement() {
     <div
       role="status"
       data-testid="aviso-do-sistema"
-      className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 sm:mx-6 sm:flex-row sm:items-center"
+      className={
+        variante === "login"
+          ? "mb-4 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 backdrop-blur-xl"
+          : "mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 sm:mx-6 sm:flex-row sm:items-center"
+      }
     >
       <Sparkles className="hidden size-5 shrink-0 text-primary sm:block" />
       <div className="min-w-0 flex-1">

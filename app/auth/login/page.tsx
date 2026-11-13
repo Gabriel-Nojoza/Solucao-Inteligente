@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2, Eye, EyeOff, User, Shield, Mail, Lock, AlertCircle } from "lucide-react"
 import { BrandMark } from "@/components/branding/brand-mark"
+import { SystemAnnouncement } from "@/components/dashboard/system-announcement"
 import { BRAND_NAME, BRAND_SUBTITLE } from "@/lib/branding"
 import { cn } from "@/lib/utils"
 import { markTabSessionActive } from "@/lib/supabase/tab-session"
@@ -80,6 +81,8 @@ export default function LoginPage() {
 
       <div className="relative z-10 flex w-full items-center justify-center px-4 sm:justify-start sm:px-8 md:px-16 lg:px-24">
         <div className="w-full max-w-sm">
+          <SystemAnnouncement variante="login" />
+
           <div className="mb-7">
             <BrandMark
               imageSize={44}

@@ -1955,10 +1955,13 @@ export default function SchedulesPage() {
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent
-                          className="w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden p-0"
+                          // Cabe no espaco que sobra na tela (abre para cima se embaixo nao couber);
+                          // a lista de paginas rola por dentro.
+                          className="flex max-h-[min(26rem,var(--radix-popover-content-available-height))] w-[360px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
                           align="start"
+                          collisionPadding={16}
                         >
-                          <div className="border-b px-3 py-3">
+                          <div className="shrink-0 border-b px-3 py-3">
                             <p className="text-sm font-medium">Paginas do relatorio</p>
                             <p className="text-xs text-muted-foreground">
                               Selecione uma ou mais paginas. Sem selecao, o envio usa a pagina
@@ -1966,7 +1969,7 @@ export default function SchedulesPage() {
                             </p>
                           </div>
 
-                          <div className="border-b px-3 py-2">
+                          <div className="shrink-0 border-b px-3 py-2">
                             <Button
                               type="button"
                               variant="ghost"
@@ -1993,7 +1996,7 @@ export default function SchedulesPage() {
                           </div>
 
                           <div
-                            className="max-h-64 overflow-y-auto overscroll-contain p-2 pr-2"
+                            className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pr-2"
                             onWheelCapture={(event) => {
                               const container = event.currentTarget
                               container.scrollTop += event.deltaY
