@@ -1,5 +1,6 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/dashboard/sidebar-nav"
+import { SystemAnnouncement } from "@/components/dashboard/system-announcement"
 import { TabSessionGuard } from "@/components/auth/tab-session-guard"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/server"
@@ -89,6 +90,7 @@ export default async function DashboardLayout({
       <SidebarProvider>
         <AppSidebar currentUser={currentUser} reportBuilderEnabled={reportBuilderEnabled} campaignsEnabled={campaignsEnabled} />
         <SidebarInset className="min-w-0 overflow-x-hidden">
+          <SystemAnnouncement />
           {children}
           <FloatingChatLauncher />
         </SidebarInset>
