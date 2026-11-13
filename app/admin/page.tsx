@@ -40,8 +40,9 @@ import type { AdminOperationalSummaryResponse } from "@/app/api/admin/operationa
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 const CHART_COLORS = [
-  "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6",
-  "#ef4444", "#06b6d4", "#f97316", "#84cc16",
+  // Primeiras cores = cores da logo (verde, azul-petroleo)
+  "#81AE47", "#00809A", "#f59e0b", "#8b5cf6",
+  "#ef4444", "#06b6d4", "#f97316", "#94C80C",
 ]
 
 const STAT_CARDS = [

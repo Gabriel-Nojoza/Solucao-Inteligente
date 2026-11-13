@@ -70,13 +70,13 @@ export function SidebarNavGroup({
                   className="group/item h-10 gap-3 text-sidebar-foreground/75 hover:text-sidebar-foreground data-[active=true]:bg-primary/10 data-[active=true]:font-medium data-[active=true]:text-sidebar-foreground"
                 >
                   <Link href={item.href}>
-                    {/* Icone num quadradinho: no item aberto, degrade azul -> verde. Com a barra
+                    {/* Icone num quadradinho: no item aberto, degrade verde -> azul-petroleo (as barras da logo). Com a barra
                         recolhida, fica so o icone (o quadradinho nao cabe). */}
                     <span
                       data-testid="icone-do-menu"
                       className={
                         active
-                          ? "flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-emerald-500 text-white shadow-md shadow-primary/30 group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:bg-none group-data-[collapsible=icon]:text-primary group-data-[collapsible=icon]:shadow-none"
+                          ? "flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-brand-teal text-primary-foreground shadow-md shadow-primary/30 group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:bg-none group-data-[collapsible=icon]:text-primary group-data-[collapsible=icon]:shadow-none"
                           : "flex size-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent/60 ring-1 ring-sidebar-border/70 transition-all group-hover/item:-rotate-6 group-hover/item:scale-105 group-hover/item:bg-primary/15 group-hover/item:text-primary group-hover/item:ring-primary/30 group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:ring-0"
                       }
                     >

@@ -77,7 +77,7 @@ export function AppSidebar({ currentUser, reportBuilderEnabled = false, campaign
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/" className="flex items-center gap-3">
-                <BrandMark imageSize={36} />
+                <BrandMark imageSize={36} subtitleClassName="text-sidebar-foreground/60" />
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

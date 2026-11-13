@@ -12,7 +12,7 @@ import {
   LabelList,
 } from "recharts"
 
-const BAR_COLOR = "#2563eb"
+const BAR_COLOR = "#00809A" // azul-petroleo da logo
 const PIE_COLORS = ["#2563eb", "#f97316", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16"]
 const MAX_ITEMS = 12
 

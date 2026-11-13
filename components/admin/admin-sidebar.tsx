@@ -64,7 +64,7 @@ export function AdminSidebar({ currentUser }: AdminSidebarProps) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/admin" className="flex items-center gap-3">
-                <BrandMark imageSize={36} subtitle={BRAND_ADMIN_SUBTITLE} />
+                <BrandMark imageSize={36} subtitle={BRAND_ADMIN_SUBTITLE} subtitleClassName="text-sidebar-foreground/60" />
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

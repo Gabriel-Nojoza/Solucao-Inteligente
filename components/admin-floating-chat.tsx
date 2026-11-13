@@ -313,15 +313,15 @@ export function AdminFloatingChat(_props: { companies?: CompanyStatItem[] }) {
       >
         <div className="relative flex h-16 w-16 items-center justify-center">
           <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-14 w-14 drop-shadow-lg">
-            <rect x="4" y="14" width="10" height="28" rx="3" fill="#FACC15">
+            <rect x="4" y="14" width="10" height="28" rx="3" fill="#00809A">
               <animate attributeName="height" values="28;20;28" dur="1.6s" repeatCount="indefinite" />
               <animate attributeName="y" values="14;22;14" dur="1.6s" repeatCount="indefinite" />
             </rect>
-            <rect x="19" y="24" width="10" height="18" rx="3" fill="#F97316">
+            <rect x="19" y="24" width="10" height="18" rx="3" fill="#81AE47">
               <animate attributeName="height" values="18;28;18" dur="1.4s" repeatCount="indefinite" />
               <animate attributeName="y" values="24;14;24" dur="1.4s" repeatCount="indefinite" />
             </rect>
-            <rect x="34" y="8" width="10" height="34" rx="3" fill="#38BDF8">
+            <rect x="34" y="8" width="10" height="34" rx="3" fill="#94C80C">
               <animate attributeName="height" values="34;22;34" dur="1.8s" repeatCount="indefinite" />
               <animate attributeName="y" values="8;20;8" dur="1.8s" repeatCount="indefinite" />
             </rect>
