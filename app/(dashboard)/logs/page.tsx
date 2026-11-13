@@ -264,9 +264,7 @@ export default function LogsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="pending">Em andamento</SelectItem>
-              <SelectItem value="exporting">Em andamento</SelectItem>
-              <SelectItem value="sending">Em andamento</SelectItem>
+              <SelectItem value="ongoing">Em andamento</SelectItem>
               <SelectItem value="delivered">Enviado</SelectItem>
               <SelectItem value="failed">Erro</SelectItem>
             </SelectContent>

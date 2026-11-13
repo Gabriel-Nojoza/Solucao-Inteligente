@@ -43,7 +43,10 @@ export async function GET(request: NextRequest) {
         .eq("company_id", companyId)
         .order(orderColumn, { ascending: false })
 
-      if (status && status !== "all") {
+      if (status === "ongoing") {
+        // "Em andamento" no filtro: aguardando, gerando o relatorio ou enviando
+        query = query.in("status", ["pending", "exporting", "sending"])
+      } else if (status && status !== "all") {
         query = query.eq("status", status)
       }
 
