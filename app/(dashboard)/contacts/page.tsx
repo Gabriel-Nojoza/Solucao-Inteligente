@@ -14,6 +14,8 @@ import {
   RotateCcw,
   PlugZap,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { toast } from "sonner"
 import { PageHeader } from "@/components/dashboard/page-header"
@@ -132,6 +134,9 @@ export default function ContactsPage() {
   const [formActive, setFormActive] = useState(true)
   const [saving, setSaving] = useState(false)
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  // Lista em paginas, para nao virar uma rolagem enorme com centenas de contatos
+  const [contactsPage, setContactsPage] = useState(1)
+  const [contactsPerPage, setContactsPerPage] = useState(20)
 
   useEffect(() => {
     setMounted(true)
@@ -168,6 +173,11 @@ export default function ContactsPage() {
   useEffect(() => {
     setManualBotQrUrl(botQrConfig?.manual_qr_code_url ?? "")
   }, [botQrConfig?.manual_qr_code_url])
+
+  // Buscou, trocou o tipo, o numero ou a quantidade por pagina: volta para a pagina 1
+  useEffect(() => {
+    setContactsPage(1)
+  }, [search, typeFilter, resolvedBotInstanceId, contactsPerPage])
 
   const canSyncContacts = botQrConfig?.status === "connected"
 
@@ -218,6 +228,10 @@ export default function ContactsPage() {
 
   const canViewContacts = Boolean(resolvedBotInstanceId)
   const visibleContacts = canViewContacts ? filtered : []
+  const contactsTotalPages = Math.max(1, Math.ceil(visibleContacts.length / contactsPerPage))
+  const currentContactsPage = Math.min(contactsPage, contactsTotalPages)
+  const firstContactIndex = (currentContactsPage - 1) * contactsPerPage
+  const pageContacts = visibleContacts.slice(firstContactIndex, firstContactIndex + contactsPerPage)
 
   const savedManualBotQrUrl = (botQrConfig?.manual_qr_code_url ?? "").trim()
   const currentManualBotQrUrl = manualBotQrUrl.trim()
@@ -921,7 +935,7 @@ export default function ContactsPage() {
                   </TableHeader>
 
                   <TableBody>
-                    {visibleContacts.map((contact) => (
+                    {pageContacts.map((contact) => (
                       <TableRow key={contact.id}>
                         <TableCell className="font-medium">{contact.name}</TableCell>
 
@@ -971,6 +985,57 @@ export default function ContactsPage() {
                     ))}
                   </TableBody>
                 </Table>
+
+                {/* Paginas: quantos aparecem e botoes para andar */}
+                <div
+                  className="flex flex-col gap-3 border-t px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  data-testid="paginacao-contatos"
+                >
+                  <p className="text-muted-foreground">
+                    Mostrando {firstContactIndex + 1}–{firstContactIndex + pageContacts.length} de{" "}
+                    {visibleContacts.length} contato(s)
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={String(contactsPerPage)}
+                      onValueChange={(value) => setContactsPerPage(Number(value))}
+                    >
+                      <SelectTrigger className="h-8 w-[120px]" aria-label="Contatos por pagina">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[20, 50, 100].map((quantidade) => (
+                          <SelectItem key={quantidade} value={String(quantidade)}>
+                            {quantidade} por página
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1"
+                      onClick={() => setContactsPage(currentContactsPage - 1)}
+                      disabled={currentContactsPage <= 1}
+                    >
+                      <ChevronLeft className="size-4" />
+                      Anterior
+                    </Button>
+                    <span className="min-w-[90px] text-center text-muted-foreground">
+                      Página {currentContactsPage} de {contactsTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1"
+                      onClick={() => setContactsPage(currentContactsPage + 1)}
+                      disabled={currentContactsPage >= contactsTotalPages}
+                    >
+                      Próxima
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>
